@@ -434,6 +434,7 @@ ehthumbs.db
 # Local environment overrides
 ############################################
 appsettings.Development.json
+appsettings.Production.json
 appsettings.Local.json
 appsettings.*.local.json
 

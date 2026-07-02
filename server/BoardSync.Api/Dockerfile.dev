@@ -1,1 +1,12 @@
-FROM baseImage
+FROM mcr.microsoft.com/dotnet/sdk:10.0
+WORKDIR /src
+
+COPY BoardSync.Api.csproj ./
+RUN dotnet restore BoardSync.Api.csproj
+
+COPY . ./
+
+ENV ASPNETCORE_URLS=http://+:8080
+EXPOSE 8080
+
+CMD ["dotnet", "watch", "run", "--project", "BoardSync.Api.csproj", "--urls", "http://0.0.0.0:8080"]
