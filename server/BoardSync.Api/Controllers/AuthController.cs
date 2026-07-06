@@ -10,9 +10,13 @@ using System.Security.Claims;
 
 namespace BoardSync.Api.Controllers;
 
+/// <summary>
+/// Authentication and user management endpoints
+/// </summary>
 [ApiController]
 [Route("api/[controller]")]
 [EnableRateLimiting("auth")]
+[Produces("application/json")]
 public class AuthController : ControllerBase
 {
     private readonly IAuthenticationService _authService;
@@ -35,8 +39,19 @@ public class AuthController : ControllerBase
         _logger = logger;
     }
 
+    /// <summary>
+    /// Authenticate user and return JWT tokens
+    /// </summary>
+    /// <param name="request">User login credentials</param>
+    /// <returns>Authentication response with access token and user profile</returns>
+    /// <response code="200">User authenticated successfully</response>
+    /// <response code="400">Invalid credentials or validation errors</response>
+    /// <response code="429">Too many authentication attempts</response>
     [HttpPost("login")]
     [AllowAnonymous]
+    [ProducesResponseType(typeof(ApiResponse<AuthResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
     public async Task<IActionResult> Login([FromBody] LoginRequest request)
     {
         var ipAddress = GetIpAddress();
@@ -61,8 +76,19 @@ public class AuthController : ControllerBase
         return BadRequest(new ApiResponse(false, "Login failed"));
     }
 
+    /// <summary>
+    /// Register a new user account
+    /// </summary>
+    /// <param name="request">User registration information</param>
+    /// <returns>User creation result and optional email confirmation requirement</returns>
+    /// <response code="200">User registered successfully</response>
+    /// <response code="400">Registration failed due to validation errors</response>
+    /// <response code="500">Failed to send confirmation email</response>
     [HttpPost("register")]
     [AllowAnonymous]
+    [ProducesResponseType(typeof(ApiResponse<UserProfile>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> Register([FromBody] RegisterRequest request)
     {
         var result = await _userService.CreateAsync(request);
@@ -102,8 +128,16 @@ public class AuthController : ControllerBase
         return Ok(result);
     }
 
+    /// <summary>
+    /// Log out the current user and invalidate refresh token
+    /// </summary>
+    /// <returns>Logout confirmation</returns>
+    /// <response code="200">User logged out successfully</response>
+    /// <response code="401">User not authenticated</response>
     [HttpPost("logout")]
     [Authorize]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> Logout()
     {
         var userId = GetCurrentUserId();
@@ -119,8 +153,17 @@ public class AuthController : ControllerBase
         return Ok(result);
     }
 
+    /// <summary>
+    /// Refresh JWT access token using refresh token
+    /// </summary>
+    /// <param name="request">Optional refresh token in request body (will use cookie if not provided)</param>
+    /// <returns>New access token</returns>
+    /// <response code="200">Token refreshed successfully</response>
+    /// <response code="400">Invalid or expired refresh token</response>
     [HttpPost("refresh-token")]
     [AllowAnonymous]
+    [ProducesResponseType(typeof(ApiResponse<TokenResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> RefreshToken([FromBody] RefreshTokenRequest? request = null)
     {
         var token = request?.RefreshToken ?? Request.Cookies["refreshToken"];
@@ -154,8 +197,19 @@ public class AuthController : ControllerBase
         return BadRequest(new ApiResponse(false, "Failed to refresh token"));
     }
 
+    /// <summary>
+    /// Revoke a refresh token to prevent future use
+    /// </summary>
+    /// <param name="request">Optional token to revoke (will use cookie if not provided)</param>
+    /// <returns>Token revocation confirmation</returns>
+    /// <response code="200">Token revoked successfully</response>
+    /// <response code="400">Token not provided</response>
+    /// <response code="401">User not authenticated</response>
     [HttpPost("revoke-token")]
     [Authorize]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> RevokeToken([FromBody] RevokeTokenRequest? request = null)
     {
         var token = request?.Token ?? Request.Cookies["refreshToken"];
@@ -172,18 +226,38 @@ public class AuthController : ControllerBase
         return Ok(result);
     }
 
+    /// <summary>
+    /// Request password reset email for forgot password
+    /// </summary>
+    /// <param name="request">Email address for password reset</param>
+    /// <returns>Password reset email confirmation</returns>
+    /// <response code="200">Password reset email sent (or user not found message for security)</response>
+    /// <response code="429">Too many password reset attempts</response>
     [HttpPost("forgot-password")]
     [AllowAnonymous]
     [EnableRateLimiting("password")]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
     public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordRequest request)
     {
         var result = await _authService.ForgotPasswordAsync(request);
         return Ok(result);
     }
 
+    /// <summary>
+    /// Reset user password using reset token
+    /// </summary>
+    /// <param name="request">Password reset information including token</param>
+    /// <returns>Password reset confirmation</returns>
+    /// <response code="200">Password reset successfully</response>
+    /// <response code="400">Invalid token or validation errors</response>
+    /// <response code="429">Too many password reset attempts</response>
     [HttpPost("reset-password")]
     [AllowAnonymous]
     [EnableRateLimiting("password")]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
     public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordRequest request)
     {
         var result = await _authService.ResetPasswordAsync(request);
@@ -196,8 +270,17 @@ public class AuthController : ControllerBase
         return Ok(result);
     }
 
+    /// <summary>
+    /// Confirm user email address using confirmation token
+    /// </summary>
+    /// <param name="request">Email confirmation information</param>
+    /// <returns>Email confirmation result</returns>
+    /// <response code="200">Email confirmed successfully</response>
+    /// <response code="400">Invalid token or email already confirmed</response>
     [HttpPost("confirm-email")]
     [AllowAnonymous]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> ConfirmEmail([FromBody] ConfirmEmailRequest request)
     {
         var result = await _userService.ConfirmEmailAsync(request);
@@ -217,8 +300,17 @@ public class AuthController : ControllerBase
         return Ok(result);
     }
 
+    /// <summary>
+    /// Resend email confirmation for unconfirmed accounts
+    /// </summary>
+    /// <param name="request">Email address to resend confirmation</param>
+    /// <returns>Resend confirmation result</returns>
+    /// <response code="200">Confirmation email sent successfully</response>
+    /// <response code="400">Email not found or already confirmed</response>
     [HttpPost("resend-confirmation")]
     [AllowAnonymous]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> ResendConfirmation([FromBody] ResendConfirmationRequest request)
     {
         var baseUrl = Request.Headers.Origin.FirstOrDefault() ?? $"{Request.Scheme}://{Request.Host}";
@@ -232,8 +324,19 @@ public class AuthController : ControllerBase
         return Ok(new ApiResponse(true, "Confirmation email sent successfully"));
     }
 
+    /// <summary>
+    /// Change current user's password
+    /// </summary>
+    /// <param name="request">Current and new password information</param>
+    /// <returns>Password change confirmation</returns>
+    /// <response code="200">Password changed successfully</response>
+    /// <response code="400">Invalid current password or validation errors</response>
+    /// <response code="401">User not authenticated</response>
     [HttpPost("change-password")]
     [Authorize]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequest request)
     {
         var userId = GetCurrentUserId();
@@ -247,8 +350,18 @@ public class AuthController : ControllerBase
         return Ok(result);
     }
 
+    /// <summary>
+    /// Get current user's profile information
+    /// </summary>
+    /// <returns>User profile data</returns>
+    /// <response code="200">Profile retrieved successfully</response>
+    /// <response code="401">User not authenticated</response>
+    /// <response code="404">User profile not found</response>
     [HttpGet("profile")]
     [Authorize]
+    [ProducesResponseType(typeof(ApiResponse<UserProfile>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetProfile()
     {
         var userId = GetCurrentUserId();
@@ -262,8 +375,19 @@ public class AuthController : ControllerBase
         return Ok(result);
     }
 
+    /// <summary>
+    /// Update current user's profile information
+    /// </summary>
+    /// <param name="request">Updated profile information</param>
+    /// <returns>Profile update confirmation</returns>
+    /// <response code="200">Profile updated successfully</response>
+    /// <response code="400">Validation errors</response>
+    /// <response code="401">User not authenticated</response>
     [HttpPut("profile")]
     [Authorize]
+    [ProducesResponseType(typeof(ApiResponse<UserProfile>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> UpdateProfile([FromBody] UpdateProfileRequest request)
     {
         var userId = GetCurrentUserId();
@@ -309,5 +433,14 @@ public class AuthController : ControllerBase
     }
 }
 
+/// <summary>
+/// Request to revoke a specific refresh token
+/// </summary>
+/// <param name="Token">Refresh token to revoke (optional, will use cookie if not provided)</param>
 public record RevokeTokenRequest(string? Token = null);
+
+/// <summary>
+/// Request to resend email confirmation
+/// </summary>
+/// <param name="Email">Email address to resend confirmation to</param>
 public record ResendConfirmationRequest([System.ComponentModel.DataAnnotations.Required] string Email);

@@ -35,24 +35,10 @@ if (builder.Environment.IsProduction() && configuredOrigins.Length == 0)
 builder.Services.AddControllers();
 builder.Services.AddProblemDetails();
 builder.Services.AddHealthChecks();
-builder.Services.AddRateLimiter(options =>
-{
-    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-    options.AddPolicy("auth", context =>
-    {
-        var clientIp = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
 
-        return RateLimitPartition.GetFixedWindowLimiter(
-            partitionKey: clientIp,
-            factory: _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = 10,
-                Window = TimeSpan.FromMinutes(1),
-                QueueLimit = 0,
-                AutoReplenishment = true
-            });
-    });
-});
+// Add OpenAPI/Swagger services
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
 
 // Authentication Configuration
 builder.Services.Configure<JwtSettings>(builder.Configuration.GetSection("JwtSettings"));
@@ -82,7 +68,7 @@ builder.Services.AddRateLimiter(options =>
         limiterOptions.QueueLimit = 10;
     });
 
-    // Strict rate limiting for auth endpoints  
+    // Strict rate limiting for auth endpoints
     options.AddFixedWindowLimiter("auth", limiterOptions =>
     {
         limiterOptions.Window = TimeSpan.FromMinutes(1);
@@ -196,7 +182,7 @@ dataSourceBuilder.ConnectionStringBuilder.ConnectionIdleLifetime = 300; // 5 min
 var dataSource = dataSourceBuilder.Build();
 builder.Services.AddSingleton(dataSource);
 
-// ef core setup
+// EF core setup
 builder.Services.AddDbContext<BoardSyncDbContext>((serviceProvider, options) =>
 {
     options.UseNpgsql(dataSource, npgsqlOptions =>
@@ -227,6 +213,19 @@ var app = builder.Build();
 await app.MigrateDatabaseAsync();
 
 // Configure the HTTP request pipeline.
+
+// Add Swagger UI middleware (before authentication for public access)
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI(c =>
+    {
+        c.SwaggerEndpoint("/swagger/v1/swagger.json", "BoardSync API v1");
+        c.RoutePrefix = "swagger";
+        c.DocumentTitle = "BoardSync API Documentation";
+        c.DisplayRequestDuration();
+    });
+}
 
 // Exception handling (should be first in pipeline)
 app.UseGlobalExceptionHandler();

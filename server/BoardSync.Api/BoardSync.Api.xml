@@ -1,0 +1,242 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>BoardSync.Api</name>
+    </assembly>
+    <members>
+        <member name="T:BoardSync.Api.Controllers.AuthController">
+            <summary>
+            Authentication and user management endpoints
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Controllers.AuthController.Login(BoardSync.Api.Shared.Auth.DTOs.LoginRequest)">
+            <summary>
+            Authenticate user and return JWT tokens
+            </summary>
+            <param name="request">User login credentials</param>
+            <returns>Authentication response with access token and user profile</returns>
+            <response code="200">User authenticated successfully</response>
+            <response code="400">Invalid credentials or validation errors</response>
+            <response code="429">Too many authentication attempts</response>
+        </member>
+        <member name="M:BoardSync.Api.Controllers.AuthController.Register(BoardSync.Api.Shared.Auth.DTOs.RegisterRequest)">
+            <summary>
+            Register a new user account
+            </summary>
+            <param name="request">User registration information</param>
+            <returns>User creation result and optional email confirmation requirement</returns>
+            <response code="200">User registered successfully</response>
+            <response code="400">Registration failed due to validation errors</response>
+            <response code="500">Failed to send confirmation email</response>
+        </member>
+        <member name="M:BoardSync.Api.Controllers.AuthController.Logout">
+            <summary>
+            Log out the current user and invalidate refresh token
+            </summary>
+            <returns>Logout confirmation</returns>
+            <response code="200">User logged out successfully</response>
+            <response code="401">User not authenticated</response>
+        </member>
+        <member name="M:BoardSync.Api.Controllers.AuthController.RefreshToken(BoardSync.Api.Shared.Auth.DTOs.RefreshTokenRequest)">
+            <summary>
+            Refresh JWT access token using refresh token
+            </summary>
+            <param name="request">Optional refresh token in request body (will use cookie if not provided)</param>
+            <returns>New access token</returns>
+            <response code="200">Token refreshed successfully</response>
+            <response code="400">Invalid or expired refresh token</response>
+        </member>
+        <member name="M:BoardSync.Api.Controllers.AuthController.RevokeToken(BoardSync.Api.Controllers.RevokeTokenRequest)">
+            <summary>
+            Revoke a refresh token to prevent future use
+            </summary>
+            <param name="request">Optional token to revoke (will use cookie if not provided)</param>
+            <returns>Token revocation confirmation</returns>
+            <response code="200">Token revoked successfully</response>
+            <response code="400">Token not provided</response>
+            <response code="401">User not authenticated</response>
+        </member>
+        <member name="M:BoardSync.Api.Controllers.AuthController.ForgotPassword(BoardSync.Api.Shared.Auth.DTOs.ForgotPasswordRequest)">
+            <summary>
+            Request password reset email for forgot password
+            </summary>
+            <param name="request">Email address for password reset</param>
+            <returns>Password reset email confirmation</returns>
+            <response code="200">Password reset email sent (or user not found message for security)</response>
+            <response code="429">Too many password reset attempts</response>
+        </member>
+        <member name="M:BoardSync.Api.Controllers.AuthController.ResetPassword(BoardSync.Api.Shared.Auth.DTOs.ResetPasswordRequest)">
+            <summary>
+            Reset user password using reset token
+            </summary>
+            <param name="request">Password reset information including token</param>
+            <returns>Password reset confirmation</returns>
+            <response code="200">Password reset successfully</response>
+            <response code="400">Invalid token or validation errors</response>
+            <response code="429">Too many password reset attempts</response>
+        </member>
+        <member name="M:BoardSync.Api.Controllers.AuthController.ConfirmEmail(BoardSync.Api.Shared.Auth.DTOs.ConfirmEmailRequest)">
+            <summary>
+            Confirm user email address using confirmation token
+            </summary>
+            <param name="request">Email confirmation information</param>
+            <returns>Email confirmation result</returns>
+            <response code="200">Email confirmed successfully</response>
+            <response code="400">Invalid token or email already confirmed</response>
+        </member>
+        <member name="M:BoardSync.Api.Controllers.AuthController.ResendConfirmation(BoardSync.Api.Controllers.ResendConfirmationRequest)">
+            <summary>
+            Resend email confirmation for unconfirmed accounts
+            </summary>
+            <param name="request">Email address to resend confirmation</param>
+            <returns>Resend confirmation result</returns>
+            <response code="200">Confirmation email sent successfully</response>
+            <response code="400">Email not found or already confirmed</response>
+        </member>
+        <member name="M:BoardSync.Api.Controllers.AuthController.ChangePassword(BoardSync.Api.Shared.Auth.DTOs.ChangePasswordRequest)">
+            <summary>
+            Change current user's password
+            </summary>
+            <param name="request">Current and new password information</param>
+            <returns>Password change confirmation</returns>
+            <response code="200">Password changed successfully</response>
+            <response code="400">Invalid current password or validation errors</response>
+            <response code="401">User not authenticated</response>
+        </member>
+        <member name="M:BoardSync.Api.Controllers.AuthController.GetProfile">
+            <summary>
+            Get current user's profile information
+            </summary>
+            <returns>User profile data</returns>
+            <response code="200">Profile retrieved successfully</response>
+            <response code="401">User not authenticated</response>
+            <response code="404">User profile not found</response>
+        </member>
+        <member name="M:BoardSync.Api.Controllers.AuthController.UpdateProfile(BoardSync.Api.Shared.Auth.DTOs.UpdateProfileRequest)">
+            <summary>
+            Update current user's profile information
+            </summary>
+            <param name="request">Updated profile information</param>
+            <returns>Profile update confirmation</returns>
+            <response code="200">Profile updated successfully</response>
+            <response code="400">Validation errors</response>
+            <response code="401">User not authenticated</response>
+        </member>
+        <member name="T:BoardSync.Api.Controllers.RevokeTokenRequest">
+            <summary>
+            Request to revoke a specific refresh token
+            </summary>
+            <param name="Token">Refresh token to revoke (optional, will use cookie if not provided)</param>
+        </member>
+        <member name="M:BoardSync.Api.Controllers.RevokeTokenRequest.#ctor(System.String)">
+            <summary>
+            Request to revoke a specific refresh token
+            </summary>
+            <param name="Token">Refresh token to revoke (optional, will use cookie if not provided)</param>
+        </member>
+        <member name="P:BoardSync.Api.Controllers.RevokeTokenRequest.Token">
+            <summary>Refresh token to revoke (optional, will use cookie if not provided)</summary>
+        </member>
+        <member name="T:BoardSync.Api.Controllers.ResendConfirmationRequest">
+            <summary>
+            Request to resend email confirmation
+            </summary>
+            <param name="Email">Email address to resend confirmation to</param>
+        </member>
+        <member name="M:BoardSync.Api.Controllers.ResendConfirmationRequest.#ctor(System.String)">
+            <summary>
+            Request to resend email confirmation
+            </summary>
+            <param name="Email">Email address to resend confirmation to</param>
+        </member>
+        <member name="P:BoardSync.Api.Controllers.ResendConfirmationRequest.Email">
+            <summary>Email address to resend confirmation to</summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Auth.Attributes.RequireAuthenticationAttribute">
+            <summary>
+            Requires the user to be authenticated
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Auth.Attributes.RequireEmailConfirmedAttribute">
+            <summary>
+            Requires the user to have a confirmed email address
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Auth.Attributes.RequireActiveUserAttribute">
+            <summary>
+            Requires the user to be active (not locked or deactivated)
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Auth.Attributes.RequireOwnershipAttribute">
+            <summary>
+            Allows only users who own the resource or are administrators
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Auth.Attributes.RateLimitAttribute">
+            <summary>
+            Rate limiting attribute for sensitive operations
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Data.Migrations.InitialAuthenticationMigration">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.InitialAuthenticationMigration.Up(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.InitialAuthenticationMigration.Down(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.InitialAuthenticationMigration.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="T:Program">
+            <summary>
+            Auto-generated public partial Program class for top-level statement apps.
+            </summary>
+        </member>
+        <member name="M:Microsoft.AspNetCore.OpenApi.Generated.DocumentationCommentIdHelper.CreateDocumentationId(System.Type)">
+            <summary>
+            Generates a documentation comment ID for a type.
+            Example: T:Namespace.Outer+Inner`1 becomes T:Namespace.Outer.Inner`1
+            </summary>
+        </member>
+        <member name="M:Microsoft.AspNetCore.OpenApi.Generated.DocumentationCommentIdHelper.CreateDocumentationId(System.Reflection.PropertyInfo)">
+            <summary>
+            Generates a documentation comment ID for a property.
+            Example: P:Namespace.ContainingType.PropertyName or for an indexer P:Namespace.ContainingType.Item(System.Int32)
+            </summary>
+        </member>
+        <member name="M:Microsoft.AspNetCore.OpenApi.Generated.DocumentationCommentIdHelper.CreateDocumentationId(System.Type,System.String)">
+            <summary>
+            Generates a documentation comment ID for a property given its container type and property name.
+            Example: P:Namespace.ContainingType.PropertyName
+            </summary>
+        </member>
+        <member name="M:Microsoft.AspNetCore.OpenApi.Generated.DocumentationCommentIdHelper.CreateDocumentationId(System.Reflection.MethodInfo)">
+            <summary>
+            Generates a documentation comment ID for a method (or constructor).
+            For example:
+              M:Namespace.ContainingType.MethodName(ParamType1,ParamType2)~ReturnType
+              M:Namespace.ContainingType.#ctor(ParamType)
+            </summary>
+        </member>
+        <member name="M:Microsoft.AspNetCore.OpenApi.Generated.DocumentationCommentIdHelper.GetTypeDocId(System.Type,System.Boolean,System.Boolean)">
+            <summary>
+            Generates a documentation ID string for a type.
+            This method handles nested types (replacing '+' with '.'),
+            generic types, arrays, pointers, by-ref types, and generic parameters.
+            The <paramref name="includeGenericArguments"/> flag controls whether
+            constructed generic type arguments are emitted, while <paramref name="omitGenericArity"/>
+            controls whether the generic arity marker (e.g. "`1") is appended.
+            </summary>
+        </member>
+        <member name="M:Microsoft.AspNetCore.OpenApi.Generated.DocumentationCommentIdHelper.NormalizeDocId(System.String)">
+            <summary>
+            Normalizes a documentation comment ID to match the compiler-style format.
+            Strips the return type suffix for ordinary methods but retains it for conversion operators.
+            </summary>
+            <param name="docId">The documentation comment ID to normalize.</param>
+            <returns>The normalized documentation comment ID.</returns>
+        </member>
+    </members>
+</doc>
