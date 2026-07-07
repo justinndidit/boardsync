@@ -152,6 +152,23 @@
         <member name="P:BoardSync.Api.Controllers.ResendConfirmationRequest.Email">
             <summary>Email address to resend confirmation to</summary>
         </member>
+        <member name="T:BoardSync.Api.Controllers.UsersController">
+            <summary>
+            User lookup endpoints — used primarily when inviting members to orgs/teams.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Controllers.UsersController.GetById(System.Guid,System.Threading.CancellationToken)">
+            <summary>Get a user's public profile by their ID.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Controllers.UsersController.GetByEmail(System.String,System.Threading.CancellationToken)">
+            <summary>
+            Search users by email address (exact match).
+            Used by OrgAdmins when inviting users to an organization.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Controllers.UsersController.GetMe(System.Threading.CancellationToken)">
+            <summary>Get the currently authenticated user's own profile.</summary>
+        </member>
         <member name="T:BoardSync.Api.Modules.OrgProject.Controllers.OrganizationsController">
             <summary>
             Manage organizations (top-level tenant containers).
@@ -178,6 +195,18 @@
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.OrganizationsController.RemoveMember(System.Guid,System.Guid,System.Threading.CancellationToken)">
             <summary>Remove a user from the organization. Requires OrgAdmin.</summary>
         </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.OrganizationsController.UpdateMemberRole(System.Guid,System.Guid,BoardSync.Api.Modules.OrgProject.Controllers.UpdateMemberRoleRequest,System.Threading.CancellationToken)">
+            <summary>
+            Update a member's role within this organization. Requires OrgAdmin.
+            Valid roles: OrgAdmin, ProjectAdmin, TeamMember, Reader.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.OrgProject.Controllers.UpdateMemberRoleRequest">
+            <summary>Request body for updating a member's org-level role.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.UpdateMemberRoleRequest.#ctor(BoardSync.Api.Modules.Rbac.Models.RoleType)">
+            <summary>Request body for updating a member's org-level role.</summary>
+        </member>
         <member name="T:BoardSync.Api.Modules.OrgProject.Controllers.ProjectsController">
             <summary>
             Manage projects within an organization.
@@ -187,7 +216,7 @@
             <summary>List all projects in an organization.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.ProjectsController.Create(System.Guid,BoardSync.Api.Modules.OrgProject.DTOs.CreateProjectRequest,System.Threading.CancellationToken)">
-            <summary>Create a new project within an organization. Requires OrgAdmin or ProjectAdmin.</summary>
+            <summary>Create a new project within an organization. Requires OrgAdmin.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.ProjectsController.GetById(System.Guid,System.Threading.CancellationToken)">
             <summary>Get a project by ID.</summary>
