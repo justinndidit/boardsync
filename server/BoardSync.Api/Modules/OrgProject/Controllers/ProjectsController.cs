@@ -44,14 +44,14 @@ public class ProjectsController : ControllerBase
         return Ok(new ApiResponse<PagedResult<ProjectSummaryResponse>>(true, "Projects retrieved.", result));
     }
 
-    /// <summary>Create a new project within an organization. Requires OrgAdmin or ProjectAdmin.</summary>
+    /// <summary>Create a new project within an organization. Requires OrgAdmin.</summary>
     [HttpPost("api/orgs/{orgId:guid}/projects")]
     [ProducesResponseType(typeof(ApiResponse<ProjectResponse>), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Create(Guid orgId, [FromBody] CreateProjectRequest request, CancellationToken ct)
     {
-        await RequireOrgRoleAsync(orgId, RoleType.ProjectAdmin, ct);
+        await RequireOrgRoleAsync(orgId, RoleType.OrgAdmin, ct);
         var project = await _projectService.CreateAsync(orgId, request, _currentUser.UserId, ct);
         return CreatedAtAction(nameof(GetById), new { projectId = project.Id },
             new ApiResponse<ProjectResponse>(true, "Project created.", project));

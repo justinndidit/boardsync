@@ -12,6 +12,7 @@ public interface IOrganizationService
     Task<OrganizationResponse> UpdateAsync(Guid orgId, UpdateOrganizationRequest request, Guid updatedBy, CancellationToken ct = default);
     Task AddMemberAsync(Guid orgId, Guid userId, Guid addedBy, CancellationToken ct = default);
     Task RemoveMemberAsync(Guid orgId, Guid userId, CancellationToken ct = default);
+    Task<bool> IsMemberAsync(Guid orgId, Guid userId, CancellationToken ct = default);
 }
 
 public interface IProjectService

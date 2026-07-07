@@ -8,6 +8,7 @@ using BoardSync.Api.Shared.Kernel;
 using BoardSync.Api.Shared.Kernel.Exceptions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.ComponentModel.DataAnnotations;
 
 namespace BoardSync.Api.Modules.OrgProject.Controllers;
 
@@ -111,6 +112,40 @@ public class OrganizationsController : ControllerBase
         return Ok(new ApiResponse(true, "Member removed from organization."));
     }
 
+    /// <summary>
+    /// Update a member's role within this organization. Requires OrgAdmin.
+    /// Valid roles: OrgAdmin, ProjectAdmin, TeamMember, Reader.
+    /// </summary>
+    [HttpPut("{orgId:guid}/members/{userId:guid}/role")]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> UpdateMemberRole(
+        Guid orgId,
+        Guid userId,
+        [FromBody] UpdateMemberRoleRequest request,
+        CancellationToken ct)
+    {
+        await RequireOrgRoleAsync(orgId, RoleType.OrgAdmin, ct);
+
+        // Validate the target user is actually a member
+        var isMember = await _orgService.IsMemberAsync(orgId, userId, ct);
+        if (!isMember)
+            throw new NotFoundException($"User {userId} is not a member of this organization.");
+
+        // Remove any existing org-scope role for this user and reassign
+        var existingRoles = await _rbac.GetScopeRolesAsync(RoleScope.Organization, orgId, ct);
+        var currentOrgRole = existingRoles.FirstOrDefault(r => r.UserId == userId);
+
+        if (currentOrgRole != null)
+            await _rbac.RemoveRoleAsync(userId, currentOrgRole.Role, RoleScope.Organization, orgId, ct);
+
+        await _rbac.AssignRoleAsync(userId, request.Role, RoleScope.Organization, orgId, _currentUser.UserId, ct);
+
+        return Ok(new ApiResponse(true, $"Role updated to {request.Role}."));
+    }
+
     // -------------------------------------------------------------------------
     private async Task RequireOrgRoleAsync(Guid orgId, RoleType minimum, CancellationToken ct)
     {
@@ -119,3 +154,8 @@ public class OrganizationsController : ControllerBase
             throw new ForbiddenException();
     }
 }
+
+/// <summary>Request body for updating a member's org-level role.</summary>
+public record UpdateMemberRoleRequest(
+    [Required] RoleType Role
+);

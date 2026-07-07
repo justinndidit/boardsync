@@ -175,6 +175,12 @@ public class OrganizationService : IOrganizationService
         }
     }
 
+    public async Task<bool> IsMemberAsync(Guid orgId, Guid userId, CancellationToken ct = default)
+    {
+        return await _context.OrganizationMemberships
+            .AnyAsync(m => m.OrganizationId == orgId && m.UserId == userId, ct);
+    }
+
     // -------------------------------------------------------------------------
     private static string NormalizeSlug(string input)
     {
