@@ -365,6 +365,18 @@
         <member name="M:BoardSync.Api.Shared.Data.Migrations.InitialAuthenticationMigration.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
             <inheritdoc />
         </member>
+        <member name="T:BoardSync.Api.Shared.Data.Migrations.Phase1_OrgProjectRbac">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase1_OrgProjectRbac.Up(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase1_OrgProjectRbac.Down(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase1_OrgProjectRbac.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
+            <inheritdoc />
+        </member>
         <member name="T:BoardSync.Api.Shared.Kernel.BaseEntity">
             <summary>
             Base class for all domain entities. Provides common audit fields.
