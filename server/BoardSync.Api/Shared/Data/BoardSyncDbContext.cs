@@ -1,3 +1,5 @@
+using BoardSync.Api.Modules.OrgProject.Models;
+using BoardSync.Api.Modules.Rbac.Models;
 using BoardSync.Api.Shared.Auth.Models;
 using Microsoft.EntityFrameworkCore;
 
@@ -9,15 +11,117 @@ public class BoardSyncDbContext : DbContext
     {
     }
 
-    // Authentication entities
+    // ---- IAM module ----
     public DbSet<User> Users { get; set; } = null!;
     public DbSet<RefreshToken> RefreshTokens { get; set; } = null!;
+
+    // ---- RBAC module ----
+    public DbSet<RoleAssignment> RoleAssignments { get; set; } = null!;
+
+    // ---- OrgProject module ----
+    public DbSet<Organization> Organizations { get; set; } = null!;
+    public DbSet<OrganizationMembership> OrganizationMemberships { get; set; } = null!;
+    public DbSet<Project> Projects { get; set; } = null!;
+    public DbSet<Team> Teams { get; set; } = null!;
+    public DbSet<TeamMembership> TeamMemberships { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
 
-        // Configure User entity
+        // ----------------------------------------------------------------
+        // RBAC Module — schema: iam
+        // ----------------------------------------------------------------
+        modelBuilder.Entity<RoleAssignment>(entity =>
+        {
+            entity.ToTable("RoleAssignments", "iam");
+            entity.HasKey(r => r.Id);
+            entity.HasIndex(r => new { r.UserId, r.Role, r.Scope, r.ScopeId }).IsUnique();
+            entity.HasIndex(r => new { r.Scope, r.ScopeId });
+            entity.HasIndex(r => r.UserId);
+
+            entity.Property(r => r.Role).HasConversion<string>().HasMaxLength(30);
+            entity.Property(r => r.Scope).HasConversion<string>().HasMaxLength(20);
+        });
+
+        // ----------------------------------------------------------------
+        // OrgProject Module — schema: org
+        // ----------------------------------------------------------------
+        modelBuilder.Entity<Organization>(entity =>
+        {
+            entity.ToTable("Organizations", "org");
+            entity.HasKey(o => o.Id);
+            entity.HasIndex(o => o.Slug).IsUnique();
+            entity.HasIndex(o => o.IsActive);
+
+            entity.Property(o => o.Slug).IsRequired().HasMaxLength(60);
+            entity.Property(o => o.Name).IsRequired().HasMaxLength(100);
+            entity.Property(o => o.Description).HasMaxLength(500);
+            entity.Property(o => o.AvatarUrl).HasMaxLength(2048);
+
+            entity.HasMany(o => o.Projects)
+                .WithOne(p => p.Organization)
+                .HasForeignKey(p => p.OrganizationId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(o => o.Members)
+                .WithOne(m => m.Organization)
+                .HasForeignKey(m => m.OrganizationId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<OrganizationMembership>(entity =>
+        {
+            entity.ToTable("OrganizationMemberships", "org");
+            entity.HasKey(m => m.Id);
+            entity.HasIndex(m => new { m.OrganizationId, m.UserId }).IsUnique();
+            entity.HasIndex(m => m.UserId);
+        });
+
+        modelBuilder.Entity<Project>(entity =>
+        {
+            entity.ToTable("Projects", "org");
+            entity.HasKey(p => p.Id);
+            entity.HasIndex(p => new { p.OrganizationId, p.Slug }).IsUnique();
+            entity.HasIndex(p => p.IsActive);
+
+            entity.Property(p => p.Slug).IsRequired().HasMaxLength(60);
+            entity.Property(p => p.Name).IsRequired().HasMaxLength(100);
+            entity.Property(p => p.Description).HasMaxLength(500);
+
+            entity.HasMany(p => p.Teams)
+                .WithOne(t => t.Project)
+                .HasForeignKey(t => t.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<Team>(entity =>
+        {
+            entity.ToTable("Teams", "org");
+            entity.HasKey(t => t.Id);
+            entity.HasIndex(t => new { t.ProjectId, t.Name }).IsUnique();
+            entity.HasIndex(t => t.IsActive);
+
+            entity.Property(t => t.Name).IsRequired().HasMaxLength(100);
+            entity.Property(t => t.Description).HasMaxLength(500);
+
+            entity.HasMany(t => t.Members)
+                .WithOne(m => m.Team)
+                .HasForeignKey(m => m.TeamId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<TeamMembership>(entity =>
+        {
+            entity.ToTable("TeamMemberships", "org");
+            entity.HasKey(m => m.Id);
+            entity.HasIndex(m => new { m.TeamId, m.UserId }).IsUnique();
+            entity.HasIndex(m => m.UserId);
+        });
+
+        // ----------------------------------------------------------------
+        // IAM Module — User entity
+        // ----------------------------------------------------------------
         modelBuilder.Entity<User>(entity =>
         {
             entity.HasKey(u => u.Id);

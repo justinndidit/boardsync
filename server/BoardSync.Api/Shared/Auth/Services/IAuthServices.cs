@@ -30,7 +30,7 @@ public interface IAuthenticationService
 
 public interface ITokenService
 {
-    string GenerateAccessToken(User user);
+    string GenerateAccessToken(User user, Guid? currentWorkspaceId = null);
     string GenerateRefreshToken();
     string GeneratePasswordResetToken();
     string GenerateEmailConfirmationToken();

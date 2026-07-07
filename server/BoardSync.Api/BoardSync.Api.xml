@@ -152,6 +152,182 @@
         <member name="P:BoardSync.Api.Controllers.ResendConfirmationRequest.Email">
             <summary>Email address to resend confirmation to</summary>
         </member>
+        <member name="T:BoardSync.Api.Modules.OrgProject.Controllers.OrganizationsController">
+            <summary>
+            Manage organizations (top-level tenant containers).
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.OrganizationsController.GetMyOrgs(BoardSync.Api.Shared.Kernel.PaginationQuery,System.Threading.CancellationToken)">
+            <summary>Get all organizations the current user belongs to.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.OrganizationsController.Create(BoardSync.Api.Modules.OrgProject.DTOs.CreateOrganizationRequest,System.Threading.CancellationToken)">
+            <summary>Create a new organization. The caller automatically becomes OrgAdmin.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.OrganizationsController.GetById(System.Guid,System.Threading.CancellationToken)">
+            <summary>Get organization by ID.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.OrganizationsController.GetBySlug(System.String,System.Threading.CancellationToken)">
+            <summary>Get organization by slug.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.OrganizationsController.Update(System.Guid,BoardSync.Api.Modules.OrgProject.DTOs.UpdateOrganizationRequest,System.Threading.CancellationToken)">
+            <summary>Update organization details. Requires OrgAdmin.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.OrganizationsController.AddMember(System.Guid,BoardSync.Api.Modules.OrgProject.DTOs.AddTeamMemberRequest,System.Threading.CancellationToken)">
+            <summary>Add a user to the organization. Requires OrgAdmin.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.OrganizationsController.RemoveMember(System.Guid,System.Guid,System.Threading.CancellationToken)">
+            <summary>Remove a user from the organization. Requires OrgAdmin.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.OrgProject.Controllers.ProjectsController">
+            <summary>
+            Manage projects within an organization.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.ProjectsController.GetForOrg(System.Guid,BoardSync.Api.Shared.Kernel.PaginationQuery,System.Threading.CancellationToken)">
+            <summary>List all projects in an organization.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.ProjectsController.Create(System.Guid,BoardSync.Api.Modules.OrgProject.DTOs.CreateProjectRequest,System.Threading.CancellationToken)">
+            <summary>Create a new project within an organization. Requires OrgAdmin or ProjectAdmin.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.ProjectsController.GetById(System.Guid,System.Threading.CancellationToken)">
+            <summary>Get a project by ID.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.ProjectsController.Update(System.Guid,BoardSync.Api.Modules.OrgProject.DTOs.UpdateProjectRequest,System.Threading.CancellationToken)">
+            <summary>Update project details. Requires ProjectAdmin.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController">
+            <summary>
+            Manage teams within a project.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController.GetForProject(System.Guid,BoardSync.Api.Shared.Kernel.PaginationQuery,System.Threading.CancellationToken)">
+            <summary>List all teams in a project.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController.Create(System.Guid,BoardSync.Api.Modules.OrgProject.DTOs.CreateTeamRequest,System.Threading.CancellationToken)">
+            <summary>Create a new team in a project. Requires ProjectAdmin.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController.GetById(System.Guid,System.Threading.CancellationToken)">
+            <summary>Get a team by ID.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController.Update(System.Guid,BoardSync.Api.Modules.OrgProject.DTOs.UpdateTeamRequest,System.Threading.CancellationToken)">
+            <summary>Update team details. Requires ProjectAdmin.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController.GetMembers(System.Guid,BoardSync.Api.Shared.Kernel.PaginationQuery,System.Threading.CancellationToken)">
+            <summary>Get team members.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController.AddMember(System.Guid,BoardSync.Api.Modules.OrgProject.DTOs.AddTeamMemberRequest,System.Threading.CancellationToken)">
+            <summary>Add a member to a team. Requires ProjectAdmin.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController.RemoveMember(System.Guid,System.Guid,System.Threading.CancellationToken)">
+            <summary>Remove a member from a team. Requires ProjectAdmin.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.OrgProject.DTOs.CreateOrganizationRequest.Slug">
+            <summary>
+            Optional slug — auto-generated from Name if not provided.
+            Must be lowercase alphanumeric + hyphens.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.OrgProject.Models.Organization">
+            <summary>
+            Top-level tenant container. A user can belong to multiple organizations.
+            </summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.OrgProject.Models.Organization.Slug">
+            <summary>Unique URL-friendly identifier (slug).</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.OrgProject.Models.OrganizationMembership">
+            <summary>
+            Tracks that a user belongs to an organization (independent of project/team membership).
+            </summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.OrgProject.Models.OrganizationMembership.JoinedAt">
+            <summary>When the user accepted/joined the organization.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.OrgProject.Models.Project">
+            <summary>
+            A project lives inside an organization. Work items, boards and sprints are scoped to a project.
+            </summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.OrgProject.Models.Project.Slug">
+            <summary>Unique slug within the organization (used in URLs).</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.OrgProject.Models.Team">
+            <summary>
+            A team within a project. Boards and iterations are scoped to a team.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.OrgProject.Models.TeamMembership">
+            <summary>
+            Tracks that a user is a member of a team.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Rbac.Models.RoleType">
+            <summary>
+            Roles available in the system, ordered from most to least privileged within a scope.
+            </summary>
+        </member>
+        <member name="F:BoardSync.Api.Modules.Rbac.Models.RoleType.OrgAdmin">
+            <summary>Can manage the entire organization: create/delete projects, manage all members.</summary>
+        </member>
+        <member name="F:BoardSync.Api.Modules.Rbac.Models.RoleType.ProjectAdmin">
+            <summary>Can manage a project: configure board, manage team members, create iterations.</summary>
+        </member>
+        <member name="F:BoardSync.Api.Modules.Rbac.Models.RoleType.TeamMember">
+            <summary>Full contributor on a team: create/edit/move work items, manage sprints.</summary>
+        </member>
+        <member name="F:BoardSync.Api.Modules.Rbac.Models.RoleType.Reader">
+            <summary>Read-only stakeholder: can view boards, backlogs, and reports but cannot mutate.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Rbac.Models.RoleScope">
+            <summary>
+            The scope at which a role assignment applies.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Rbac.Models.RoleAssignment">
+            <summary>
+            Assigns a role to a user within a specific scope (org/project/team).
+            One user can hold different roles at different scopes.
+            </summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.Rbac.Models.RoleAssignment.UserId">
+            <summary>The user this assignment belongs to.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.Rbac.Models.RoleAssignment.Role">
+            <summary>Role granted to the user.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.Rbac.Models.RoleAssignment.Scope">
+            <summary>Scope level at which this role applies.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.Rbac.Models.RoleAssignment.ScopeId">
+            <summary>
+            The resource ID for the scope.
+            For Scope=Organization this is the OrgId,
+            for Scope=Project this is the ProjectId,
+            for Scope=Team this is the TeamId.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Services.IRbacService.AssignRoleAsync(System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType,BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid,System.Nullable{System.Guid},System.Threading.CancellationToken)">
+            <summary>
+            Assign a role to a user at the given scope.
+            Idempotent — if an identical assignment already exists it is returned unchanged.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Services.IRbacService.RemoveRoleAsync(System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType,BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid,System.Threading.CancellationToken)">
+            <summary>Remove a specific role assignment.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Services.IRbacService.HasRoleAsync(System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType,BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Check whether a user holds at least <paramref name="minimumRole"/> at the given scope.
+            A more-privileged role (lower enum value) satisfies a less-privileged requirement.
+            OrgAdmin implicitly satisfies any project or team scope check within that org.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Services.IRbacService.GetUserRolesAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Return all role assignments for a user.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Services.IRbacService.GetScopeRolesAsync(BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid,System.Threading.CancellationToken)">
+            <summary>Return all role assignments for a specific scope resource.</summary>
+        </member>
         <member name="T:BoardSync.Api.Shared.Auth.Attributes.RequireAuthenticationAttribute">
             <summary>
             Requires the user to be authenticated
@@ -188,6 +364,69 @@
         </member>
         <member name="M:BoardSync.Api.Shared.Data.Migrations.InitialAuthenticationMigration.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
             <inheritdoc />
+        </member>
+        <member name="T:BoardSync.Api.Shared.Kernel.BaseEntity">
+            <summary>
+            Base class for all domain entities. Provides common audit fields.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Kernel.Events.IDomainEvent">
+            <summary>
+            Marker interface for all domain events published on the internal event bus.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Kernel.Events.DomainEvent">
+            <summary>
+            Base record for domain events — provides EventId and OccurredAt automatically.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Kernel.Events.IEventBus">
+            <summary>
+            In-process event bus abstraction.
+            Modules publish events here; other modules subscribe to react without direct coupling.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Kernel.Events.IEventBus.PublishAsync``1(``0,System.Threading.CancellationToken)">
+            <summary>Publish a domain event to all registered handlers.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Kernel.Events.IEventBus.Subscribe``1(BoardSync.Api.Shared.Kernel.Events.IEventHandler{``0})">
+            <summary>Subscribe a handler for a specific event type.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Kernel.Events.IEventHandler`1">
+            <summary>
+            Handler for a specific domain event type.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Kernel.Events.InMemoryEventBus">
+            <summary>
+            Simple in-process event bus backed by the DI container.
+            All handlers registered as IEventHandler&lt;TEvent&gt; in DI are resolved and invoked.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Kernel.Exceptions.DomainException">
+            <summary>Base class for all domain-specific exceptions.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Kernel.Exceptions.NotFoundException">
+            <summary>Thrown when a requested resource does not exist.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Kernel.Exceptions.ForbiddenException">
+            <summary>Thrown when an operation is not permitted for the current user.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Kernel.Exceptions.BusinessRuleException">
+            <summary>Thrown when business rules are violated.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Kernel.Exceptions.ConflictException">
+            <summary>Thrown when a conflicting resource already exists.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Kernel.PagedResult`1">
+            <summary>
+            Generic paginated result wrapper used across all list endpoints.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Kernel.PaginationQuery">
+            <summary>
+            Query parameters for paginated requests.
+            </summary>
         </member>
         <member name="T:Program">
             <summary>

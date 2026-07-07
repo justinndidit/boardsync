@@ -19,7 +19,7 @@ public class TokenService : ITokenService
         _jwtSettings = jwtSettings.Value;
     }
 
-    public string GenerateAccessToken(User user)
+    public string GenerateAccessToken(User user, Guid? currentWorkspaceId = null)
     {
         var tokenHandler = new JwtSecurityTokenHandler();
         var key = Encoding.ASCII.GetBytes(_jwtSettings.Secret);
@@ -33,6 +33,12 @@ public class TokenService : ITokenService
             new(ClaimTypes.Surname, user.LastName),
             new("email_confirmed", user.IsEmailConfirmed.ToString()),
         };
+
+        // Embed workspace context when the user has an active org (for ICurrentUserContext.CurrentWorkspaceId)
+        if (currentWorkspaceId.HasValue && currentWorkspaceId.Value != Guid.Empty)
+        {
+            claims.Add(new Claim("workspace_id", currentWorkspaceId.Value.ToString()));
+        }
 
         var tokenDescriptor = new SecurityTokenDescriptor
         {
