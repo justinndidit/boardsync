@@ -14,18 +14,15 @@ public static class DatabaseExtensions
         try
         {
             logger.LogInformation("Starting database migration...");
-            
-            // Check if database exists and create if it doesn't
-            await context.Database.EnsureCreatedAsync();
-            
+
             // Apply any pending migrations
             var pendingMigrations = await context.Database.GetPendingMigrationsAsync();
             if (pendingMigrations.Any())
             {
-                logger.LogInformation("Applying {Count} pending migrations: {Migrations}", 
-                    pendingMigrations.Count(), 
+                logger.LogInformation("Applying {Count} pending migrations: {Migrations}",
+                    pendingMigrations.Count(),
                     string.Join(", ", pendingMigrations));
-                
+
                 await context.Database.MigrateAsync();
                 logger.LogInformation("Database migration completed successfully");
             }
@@ -37,13 +34,13 @@ public static class DatabaseExtensions
         catch (Exception ex)
         {
             logger.LogError(ex, "An error occurred while migrating the database");
-            
+
             // In production, you might want to fail fast
             if (app.Environment.IsProduction())
             {
                 throw;
             }
-            
+
             // In development, log the error but continue
             logger.LogWarning("Database migration failed in development environment, continuing...");
         }
@@ -60,10 +57,10 @@ public static class DatabaseExtensions
         try
         {
             logger.LogInformation("Starting database seeding...");
-            
+
             // Add any initial seed data here
             // For example, default admin user, roles, etc.
-            
+
             await context.SaveChangesAsync();
             logger.LogInformation("Database seeding completed successfully");
         }
