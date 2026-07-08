@@ -1,11 +1,14 @@
 using BoardSync.Api.Data;
 using BoardSync.Api.Extensions;
 using BoardSync.Api.Middleware;
+using BoardSync.Api.Modules.OrgProject.Services;
+using BoardSync.Api.Modules.Rbac.Services;
 using BoardSync.Api.Shared.Auth;
 using BoardSync.Api.Shared.Auth.Configuration;
 using BoardSync.Api.Shared.Auth.Handlers;
 using BoardSync.Api.Shared.Auth.Services;
 using BoardSync.Api.Shared.Auth.Services.Implementations;
+using BoardSync.Api.Shared.Kernel.Events;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -52,6 +55,17 @@ builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<IPasswordService, PasswordService>();
 builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddScoped<ICurrentUserContext, CurrentUserContext>();
+
+// Shared Kernel — Event Bus
+builder.Services.AddScoped<IEventBus, InMemoryEventBus>();
+
+// RBAC Module
+builder.Services.AddScoped<IRbacService, RbacService>();
+
+// OrgProject Module
+builder.Services.AddScoped<IOrganizationService, OrganizationService>();
+builder.Services.AddScoped<IProjectService, ProjectService>();
+builder.Services.AddScoped<ITeamService, TeamService>();
 
 // Add HTTP Context Accessor
 builder.Services.AddHttpContextAccessor();
