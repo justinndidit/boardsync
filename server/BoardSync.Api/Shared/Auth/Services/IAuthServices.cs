@@ -50,6 +50,6 @@ public interface IEmailService
 {
     Task<ApiResponse> SendEmailConfirmationAsync(string email, string token, string baseUrl);
     Task<ApiResponse> SendPasswordResetAsync(string email, string token, string baseUrl);
-    Task<ApiResponse> SendWelcomeEmailAsync(string email, string firstName);
+    Task<ApiResponse> SendWelcomeEmailAsync(string email, string firstName, string baseUrl);
     Task<ApiResponse> SendEmailAsync(string to, string subject, string body, bool isHtml = true);
 }

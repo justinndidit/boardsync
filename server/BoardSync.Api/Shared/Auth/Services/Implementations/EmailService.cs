@@ -38,10 +38,10 @@ public class EmailService : IEmailService
         return await SendEmailAsync(email, subject, body);
     }
 
-    public async Task<ApiResponse> SendWelcomeEmailAsync(string email, string firstName)
+    public async Task<ApiResponse> SendWelcomeEmailAsync(string email, string firstName, string baseUrl)
     {
         var subject = "Welcome to BoardSync!";
-        var body = GenerateWelcomeTemplate(firstName);
+        var body = GenerateWelcomeTemplate(firstName, baseUrl);
         
         return await SendEmailAsync(email, subject, body);
     }
@@ -135,8 +135,9 @@ public class EmailService : IEmailService
             </html>";
     }
 
-    private static string GenerateWelcomeTemplate(string firstName)
+    private static string GenerateWelcomeTemplate(string firstName, string baseUrl)
     {
+        var loginUrl = $"{baseUrl}/auth/login";
         return $@"
             <html>
             <body style='font-family: Arial, sans-serif; line-height: 1.6; color: #333;'>
@@ -145,7 +146,7 @@ public class EmailService : IEmailService
                     <p>Your account has been successfully created and your email has been confirmed.</p>
                     <p>You can now start using BoardSync to manage your projects and collaborate with your team.</p>
                     <div style='text-align: center; margin: 30px 0;'>
-                        <a href='#' 
+                        <a href='{loginUrl}' 
                            style='background-color: #27ae60; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block;'>
                            Get Started
                         </a>
