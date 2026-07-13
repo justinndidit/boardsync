@@ -103,7 +103,8 @@ public class AuthController : ControllerBase
             // Send welcome email if email confirmation is not required
             if (result.Data.IsEmailConfirmed)
             {
-                var welcomeResult = await _emailService.SendWelcomeEmailAsync(result.Data.Email, result.Data.FirstName);
+                var baseUrl = Request.Headers.Origin.FirstOrDefault() ?? $"{Request.Scheme}://{Request.Host}";
+                var welcomeResult = await _emailService.SendWelcomeEmailAsync(result.Data.Email, result.Data.FirstName, baseUrl);
                 if (!welcomeResult.Success)
                 {
                     _logger.LogWarning("Failed to send welcome email to {Email}: {Message}",
@@ -294,7 +295,8 @@ public class AuthController : ControllerBase
         var userResult = await _userService.GetByEmailAsync(request.Email);
         if (userResult.Success && userResult.Data != null)
         {
-            await _emailService.SendWelcomeEmailAsync(userResult.Data.Email, userResult.Data.FirstName);
+            var baseUrl = Request.Headers.Origin.FirstOrDefault() ?? $"{Request.Scheme}://{Request.Host}";
+            await _emailService.SendWelcomeEmailAsync(userResult.Data.Email, userResult.Data.FirstName, baseUrl);
         }
 
         return Ok(result);
