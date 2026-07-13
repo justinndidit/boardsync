@@ -357,6 +357,135 @@
         <member name="M:BoardSync.Api.Modules.Rbac.Services.IRbacService.GetScopeRolesAsync(BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid,System.Threading.CancellationToken)">
             <summary>Return all role assignments for a specific scope resource.</summary>
         </member>
+        <member name="T:BoardSync.Api.Modules.WorkItems.Controllers.WorkItemsController">
+            <summary>
+            Work item CRUD, state transitions, comments, history, and links.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.WorkItems.Controllers.WorkItemsController.GetForProject(System.Guid,BoardSync.Api.Modules.WorkItems.DTOs.WorkItemFilterQuery,System.Threading.CancellationToken)">
+            <summary>List work items in a project with optional filters.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.WorkItems.Controllers.WorkItemsController.Create(System.Guid,BoardSync.Api.Modules.WorkItems.DTOs.CreateWorkItemRequest,System.Threading.CancellationToken)">
+            <summary>Create a new work item in a project.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.WorkItems.Controllers.WorkItemsController.GetById(System.Guid,System.Threading.CancellationToken)">
+            <summary>Get a work item by ID.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.WorkItems.Controllers.WorkItemsController.Update(System.Guid,BoardSync.Api.Modules.WorkItems.DTOs.UpdateWorkItemRequest,System.Threading.CancellationToken)">
+            <summary>Update work item fields (title, description, priority, assignee, tags, story points).</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.WorkItems.Controllers.WorkItemsController.UpdateState(System.Guid,BoardSync.Api.Modules.WorkItems.DTOs.UpdateWorkItemStateRequest,System.Threading.CancellationToken)">
+            <summary>Transition work item state (New → Active → Resolved → Closed).</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.WorkItems.Controllers.WorkItemsController.Delete(System.Guid,System.Threading.CancellationToken)">
+            <summary>Soft-delete a work item. Requires ProjectAdmin.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.WorkItems.Controllers.WorkItemsController.GetComments(System.Guid,BoardSync.Api.Shared.Kernel.PaginationQuery,System.Threading.CancellationToken)">
+            <summary>List comments on a work item.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.WorkItems.Controllers.WorkItemsController.AddComment(System.Guid,BoardSync.Api.Modules.WorkItems.DTOs.AddWorkItemCommentRequest,System.Threading.CancellationToken)">
+            <summary>Add a comment to a work item.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.WorkItems.Controllers.WorkItemsController.UpdateComment(System.Guid,BoardSync.Api.Modules.WorkItems.DTOs.UpdateWorkItemCommentRequest,System.Threading.CancellationToken)">
+            <summary>Edit your own comment.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.WorkItems.Controllers.WorkItemsController.DeleteComment(System.Guid,System.Threading.CancellationToken)">
+            <summary>Delete your own comment.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.WorkItems.Controllers.WorkItemsController.GetHistory(System.Guid,BoardSync.Api.Shared.Kernel.PaginationQuery,System.Threading.CancellationToken)">
+            <summary>Get the audit history for a work item.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.WorkItems.Controllers.WorkItemsController.GetLinks(System.Guid,System.Threading.CancellationToken)">
+            <summary>Get all links for a work item.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.WorkItems.Controllers.WorkItemsController.AddLink(System.Guid,BoardSync.Api.Modules.WorkItems.DTOs.AddWorkItemLinkRequest,System.Threading.CancellationToken)">
+            <summary>Create a link between two work items.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.WorkItems.Controllers.WorkItemsController.RemoveLink(System.Guid,System.Threading.CancellationToken)">
+            <summary>Remove a link between work items.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.WorkItems.DTOs.CreateWorkItemRequest.ParentId">
+            <summary>Parent work item ID for hierarchy (e.g., Epic → Feature → Story → Task).</summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.WorkItems.DTOs.CreateWorkItemRequest.TeamId">
+            <summary>Optional team scope.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.WorkItems.Models.WorkItemType">
+            <summary>
+            Work item types supported in the system (Epic → Feature → Story → Task/Bug).
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.WorkItems.Models.WorkItemState">
+            <summary>
+            Fixed state machine for MVP: New → Active → Resolved → Closed.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.WorkItems.Models.WorkItemPriority">
+            <summary>
+            Priority levels for a work item.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.WorkItems.Models.WorkItem">
+            <summary>
+            A trackable unit of work scoped to a project.
+            Supports the full hierarchy: Epic → Feature → Story → Task/Bug.
+            </summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.WorkItems.Models.WorkItem.TeamId">
+            <summary>Optional team scope (for board/sprint assignment).</summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.WorkItems.Models.WorkItem.ParentId">
+            <summary>Optional parent work item (for hierarchy).</summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.WorkItems.Models.WorkItem.AssigneeId">
+            <summary>User ID of the assigned user (nullable — no cross-module nav property).</summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.WorkItems.Models.WorkItem.StoryPoints">
+            <summary>Story points / effort estimate.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.WorkItems.Models.WorkItemComment">
+            <summary>
+            A comment on a work item.
+            </summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.WorkItems.Models.WorkItemComment.AuthorId">
+            <summary>Author user ID.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.WorkItems.Models.WorkItemHistory">
+            <summary>
+            Immutable audit trail entry recording a field change on a work item.
+            </summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.WorkItems.Models.WorkItemHistory.ChangedBy">
+            <summary>User who made the change.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.WorkItems.Models.WorkItemHistory.FieldName">
+            <summary>Name of the field that changed (e.g., "State", "AssigneeId", "Title").</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.WorkItems.Models.WorkItemLinkType">
+            <summary>
+            Relationship type between two linked work items.
+            </summary>
+        </member>
+        <member name="F:BoardSync.Api.Modules.WorkItems.Models.WorkItemLinkType.Blocks">
+            <summary>Source blocks target from progressing.</summary>
+        </member>
+        <member name="F:BoardSync.Api.Modules.WorkItems.Models.WorkItemLinkType.RelatedTo">
+            <summary>Items are related without a dependency direction.</summary>
+        </member>
+        <member name="F:BoardSync.Api.Modules.WorkItems.Models.WorkItemLinkType.Duplicates">
+            <summary>Source duplicates target.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.WorkItems.Models.WorkItemLink">
+            <summary>
+            A directed link between two work items (distinct from the parent-child hierarchy).
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.WorkItems.Models.WorkItemTag">
+            <summary>
+            A label/tag attached to a work item. Stored per-item (not a shared tag registry for MVP).
+            </summary>
+        </member>
         <member name="T:BoardSync.Api.Shared.Auth.Attributes.RequireAuthenticationAttribute">
             <summary>
             Requires the user to be authenticated
