@@ -1,4 +1,4 @@
-namespace BoardSync.Api.Modules.Rbac.Models;
+ namespace BoardSync.Api.Modules.Rbac.Models;
 
 /// <summary>
 /// Roles available in the system, ordered from most to least privileged within a scope.
