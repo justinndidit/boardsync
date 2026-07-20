@@ -1,5 +1,6 @@
 using BoardSync.Api.Modules.OrgProject.Models;
 using BoardSync.Api.Modules.Rbac.Models;
+using BoardSync.Api.Modules.WorkItems.Models;
 using BoardSync.Api.Shared.Auth.Models;
 using Microsoft.EntityFrameworkCore;
 
@@ -15,6 +16,13 @@ public class BoardSyncDbContext : DbContext
     public DbSet<User> Users { get; set; } = null!;
     public DbSet<RefreshToken> RefreshTokens { get; set; } = null!;
 
+    // ---- WorkItems module ----
+    public DbSet<WorkItem> WorkItems { get; set; } = null!;
+    public DbSet<WorkItemComment> WorkItemComments { get; set; } = null!;
+    public DbSet<WorkItemHistory> WorkItemHistory { get; set; } = null!;
+    public DbSet<WorkItemLink> WorkItemLinks { get; set; } = null!;
+    public DbSet<WorkItemTag> WorkItemTags { get; set; } = null!;
+
     // ---- RBAC module ----
     public DbSet<RoleAssignment> RoleAssignments { get; set; } = null!;
 
@@ -28,6 +36,100 @@ public class BoardSyncDbContext : DbContext
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+
+        // ----------------------------------------------------------------
+        // WorkItems Module — schema: work
+        // ----------------------------------------------------------------
+        modelBuilder.Entity<WorkItem>(entity =>
+        {
+            entity.ToTable("WorkItems", "work");
+            entity.HasKey(w => w.Id);
+            entity.HasIndex(w => w.ProjectId);
+            entity.HasIndex(w => w.TeamId);
+            entity.HasIndex(w => w.AssigneeId);
+            entity.HasIndex(w => w.State);
+            entity.HasIndex(w => w.Type);
+            entity.HasIndex(w => w.ParentId);
+            entity.HasIndex(w => w.IsActive);
+
+            entity.Property(w => w.Title).IsRequired().HasMaxLength(255);
+            entity.Property(w => w.Description).HasMaxLength(10000);
+            entity.Property(w => w.Type).HasConversion<string>().HasMaxLength(20);
+            entity.Property(w => w.State).HasConversion<string>().HasMaxLength(20);
+            entity.Property(w => w.Priority).HasConversion<string>().HasMaxLength(20);
+
+            entity.HasOne(w => w.Parent)
+                .WithMany(w => w.Children)
+                .HasForeignKey(w => w.ParentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasMany(w => w.Comments)
+                .WithOne(c => c.WorkItem)
+                .HasForeignKey(c => c.WorkItemId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(w => w.History)
+                .WithOne(h => h.WorkItem)
+                .HasForeignKey(h => h.WorkItemId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(w => w.Tags)
+                .WithOne(t => t.WorkItem)
+                .HasForeignKey(t => t.WorkItemId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(w => w.LinksFrom)
+                .WithOne(l => l.Source)
+                .HasForeignKey(l => l.SourceId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(w => w.LinksTo)
+                .WithOne(l => l.Target)
+                .HasForeignKey(l => l.TargetId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<WorkItemComment>(entity =>
+        {
+            entity.ToTable("WorkItemComments", "work");
+            entity.HasKey(c => c.Id);
+            entity.HasIndex(c => c.WorkItemId);
+            entity.HasIndex(c => c.AuthorId);
+
+            entity.Property(c => c.Body).IsRequired().HasMaxLength(10000);
+        });
+
+        modelBuilder.Entity<WorkItemHistory>(entity =>
+        {
+            entity.ToTable("WorkItemHistory", "work");
+            entity.HasKey(h => h.Id);
+            entity.HasIndex(h => h.WorkItemId);
+            entity.HasIndex(h => h.ChangedBy);
+
+            entity.Property(h => h.FieldName).IsRequired().HasMaxLength(100);
+            entity.Property(h => h.OldValue).HasMaxLength(1000);
+            entity.Property(h => h.NewValue).HasMaxLength(1000);
+        });
+
+        modelBuilder.Entity<WorkItemLink>(entity =>
+        {
+            entity.ToTable("WorkItemLinks", "work");
+            entity.HasKey(l => l.Id);
+            entity.HasIndex(l => new { l.SourceId, l.TargetId, l.LinkType }).IsUnique();
+            entity.HasIndex(l => l.TargetId);
+
+            entity.Property(l => l.LinkType).HasConversion<string>().HasMaxLength(30);
+        });
+
+        modelBuilder.Entity<WorkItemTag>(entity =>
+        {
+            entity.ToTable("WorkItemTags", "work");
+            entity.HasKey(t => t.Id);
+            entity.HasIndex(t => new { t.WorkItemId, t.Name }).IsUnique();
+            entity.HasIndex(t => t.Name);
+
+            entity.Property(t => t.Name).IsRequired().HasMaxLength(50);
+        });
 
         // ----------------------------------------------------------------
         // RBAC Module — schema: iam
