@@ -6,8 +6,8 @@ namespace BoardSync.Api.Modules.OrgProject.Services;
 public interface IOrganizationService
 {
     Task<OrganizationResponse> CreateAsync(CreateOrganizationRequest request, Guid createdBy, CancellationToken ct = default);
-    Task<OrganizationResponse> GetByIdAsync(Guid orgId, CancellationToken ct = default);
-    Task<OrganizationResponse> GetBySlugAsync(string slug, CancellationToken ct = default);
+    Task<OrganizationResponse> GetByIdAsync(Guid orgId, Guid requestingUserId, CancellationToken ct = default);
+    Task<OrganizationResponse> GetBySlugAsync(string slug, Guid requestingUserId, CancellationToken ct = default);
     Task<PagedResult<OrganizationSummaryResponse>> GetForUserAsync(Guid userId, PaginationQuery pagination, CancellationToken ct = default);
     Task<OrganizationResponse> UpdateAsync(Guid orgId, UpdateOrganizationRequest request, Guid updatedBy, CancellationToken ct = default);
     Task AddMemberAsync(Guid orgId, Guid userId, Guid addedBy, CancellationToken ct = default);

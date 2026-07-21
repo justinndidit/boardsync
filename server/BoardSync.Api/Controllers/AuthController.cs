@@ -1,3 +1,5 @@
+using BoardSync.Api.Modules.Rbac.Models;
+using BoardSync.Api.Modules.Rbac.Services;
 using BoardSync.Api.Shared.Auth.Attributes;
 using BoardSync.Api.Shared.Auth.Configuration;
 using BoardSync.Api.Shared.Auth.DTOs;
@@ -22,6 +24,7 @@ public class AuthController : ControllerBase
     private readonly IAuthenticationService _authService;
     private readonly IUserService _userService;
     private readonly IEmailService _emailService;
+    private readonly IRbacService _rbac;
     private readonly JwtSettings _jwtSettings;
     private readonly ILogger<AuthController> _logger;
 
@@ -29,12 +32,14 @@ public class AuthController : ControllerBase
         IAuthenticationService authService,
         IUserService userService,
         IEmailService emailService,
+        IRbacService rbac,
         IOptions<JwtSettings> jwtSettings,
         ILogger<AuthController> logger)
     {
         _authService = authService;
         _userService = userService;
         _emailService = emailService;
+        _rbac = rbac;
         _jwtSettings = jwtSettings.Value;
         _logger = logger;
     }
@@ -353,9 +358,9 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
-    /// Get current user's profile information
+    /// Get current user's profile information including all role assignments.
     /// </summary>
-    /// <returns>User profile data</returns>
+    /// <returns>User profile data with roles</returns>
     /// <response code="200">Profile retrieved successfully</response>
     /// <response code="401">User not authenticated</response>
     /// <response code="404">User profile not found</response>
@@ -364,17 +369,21 @@ public class AuthController : ControllerBase
     [ProducesResponseType(typeof(ApiResponse<UserProfile>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> GetProfile()
+    public async Task<IActionResult> GetProfile(CancellationToken ct)
     {
         var userId = GetCurrentUserId();
         var result = await _userService.GetByIdAsync(userId);
 
-        if (!result.Success)
-        {
+        if (!result.Success || result.Data is null)
             return NotFound(result);
-        }
 
-        return Ok(result);
+        var assignments = await _rbac.GetUserRolesAsync(userId, ct);
+        var roles = assignments
+            .Select(ra => new UserRoleResponse(ra.Role, ra.Scope, ra.ScopeId))
+            .ToList();
+
+        var profile = result.Data with { Roles = roles };
+        return Ok(new ApiResponse<UserProfile>(true, "Profile retrieved successfully.", profile));
     }
 
     /// <summary>
