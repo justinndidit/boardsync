@@ -103,11 +103,11 @@
             <response code="400">Invalid current password or validation errors</response>
             <response code="401">User not authenticated</response>
         </member>
-        <member name="M:BoardSync.Api.Controllers.AuthController.GetProfile">
+        <member name="M:BoardSync.Api.Controllers.AuthController.GetProfile(System.Threading.CancellationToken)">
             <summary>
-            Get current user's profile information
+            Get current user's profile information including all role assignments.
             </summary>
-            <returns>User profile data</returns>
+            <returns>User profile data with roles</returns>
             <response code="200">Profile retrieved successfully</response>
             <response code="401">User not authenticated</response>
             <response code="404">User profile not found</response>
@@ -306,6 +306,9 @@
         </member>
         <member name="F:BoardSync.Api.Modules.Rbac.Models.RoleType.Reader">
             <summary>Read-only stakeholder: can view boards, backlogs, and reports but cannot mutate.</summary>
+        </member>
+        <member name="F:BoardSync.Api.Modules.Rbac.Models.RoleType.User">
+            <summary>Regular authenticated user with no org-specific permissions yet assigned.</summary>
         </member>
         <member name="T:BoardSync.Api.Modules.Rbac.Models.RoleScope">
             <summary>
@@ -510,6 +513,12 @@
             <summary>
             Rate limiting attribute for sensitive operations
             </summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Auth.DTOs.UserRoleResponse">
+            <summary>A single role assignment returned inside a user's profile.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Auth.DTOs.UserRoleResponse.#ctor(BoardSync.Api.Modules.Rbac.Models.RoleType,BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid)">
+            <summary>A single role assignment returned inside a user's profile.</summary>
         </member>
         <member name="T:BoardSync.Api.Shared.Data.Migrations.InitialAuthenticationMigration">
             <inheritdoc />

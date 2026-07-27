@@ -127,6 +127,7 @@ public class AuthenticationService : IAuthenticationService
                 user.DisplayName,
                 user.ProfilePictureUrl,
                 user.IsEmailConfirmed,
+                user.IsActive,
                 user.CreatedAt
             );
 

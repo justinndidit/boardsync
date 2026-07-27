@@ -361,6 +361,7 @@ public class UserService : IUserService
             user.DisplayName,
             user.ProfilePictureUrl,
             user.IsEmailConfirmed,
+            user.IsActive,
             user.CreatedAt
         );
     }

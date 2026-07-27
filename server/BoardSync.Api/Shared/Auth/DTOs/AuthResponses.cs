@@ -1,3 +1,5 @@
+using BoardSync.Api.Modules.Rbac.Models;
+
 namespace BoardSync.Api.Shared.Auth.DTOs;
 
 // Authentication Responses
@@ -5,6 +7,13 @@ public record AuthResponse(
     string AccessToken,
     DateTime ExpiresAt,
     UserProfile User
+);
+
+/// <summary>A single role assignment returned inside a user's profile.</summary>
+public record UserRoleResponse(
+    RoleType Role,
+    RoleScope Scope,
+    Guid ScopeId
 );
 
 public record UserProfile(
@@ -15,7 +24,9 @@ public record UserProfile(
     string DisplayName,
     string? ProfilePictureUrl,
     bool IsEmailConfirmed,
-    DateTime CreatedAt
+    bool IsActive,
+    DateTime CreatedAt,
+    IReadOnlyList<UserRoleResponse>? Roles = null
 );
 
 public record TokenResponse(

@@ -62,7 +62,7 @@ public class OrganizationsController : ControllerBase
     public async Task<IActionResult> GetById(Guid orgId, CancellationToken ct)
     {
         await RequireOrgRoleAsync(orgId, RoleType.Reader, ct);
-        var org = await _orgService.GetByIdAsync(orgId, ct);
+        var org = await _orgService.GetByIdAsync(orgId, _currentUser.UserId, ct);
         return Ok(new ApiResponse<OrganizationResponse>(true, "Organization retrieved.", org));
     }
 
@@ -72,7 +72,7 @@ public class OrganizationsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetBySlug(string slug, CancellationToken ct)
     {
-        var org = await _orgService.GetBySlugAsync(slug, ct);
+        var org = await _orgService.GetBySlugAsync(slug, _currentUser.UserId, ct);
         await RequireOrgRoleAsync(org.Id, RoleType.Reader, ct);
         return Ok(new ApiResponse<OrganizationResponse>(true, "Organization retrieved.", org));
     }

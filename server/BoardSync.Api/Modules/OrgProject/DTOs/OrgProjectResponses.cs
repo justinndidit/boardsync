@@ -1,3 +1,5 @@
+using BoardSync.Api.Modules.Rbac.Models;
+
 namespace BoardSync.Api.Modules.OrgProject.DTOs;
 
 public record OrganizationResponse(
@@ -9,14 +11,21 @@ public record OrganizationResponse(
     bool IsActive,
     int MemberCount,
     int ProjectCount,
-    DateTime CreatedAt
+    DateTime CreatedAt,
+    string UserRole
 );
 
 public record OrganizationSummaryResponse(
     Guid Id,
     string Slug,
     string Name,
-    string? AvatarUrl
+    string? AvatarUrl,
+    string Description,
+    bool IsActive,
+    int MemberCount,
+    int ProjectCount,
+    DateTime CreatedAt,
+    string UserRole
 );
 
 public record ProjectResponse(
