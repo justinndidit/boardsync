@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   postgres:
     image: postgres:16-alpine
@@ -22,16 +20,12 @@ services:
       - "1025:1025"   # SMTP
       - "8025:8025"   # Web UI
     environment:
-      - MH_STORAGE=maildir
-      - MH_MAILDIR_PATH=/home/surgee/Desktop/sidmach/projects/boardsync/mailhog/maildir
-    volumes:
-      - mailhog_data:/home/mailhog/maildir
+      - MH_STORAGE=memory
     networks:
       - boardsync-network
 
 volumes:
   pgdata:
-  mailhog_data:
 
 networks:
   boardsync-network:

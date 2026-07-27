@@ -103,7 +103,7 @@
             <response code="400">Invalid current password or validation errors</response>
             <response code="401">User not authenticated</response>
         </member>
-        <member name="M:BoardSync.Api.Controllers.AuthController.GetProfile(System.Threading.CancellationToken)(System.Threading.CancellationToken)(System.Threading.CancellationToken)">
+        <member name="M:BoardSync.Api.Controllers.AuthController.GetProfile(System.Threading.CancellationToken)">
             <summary>
             Get current user's profile information including all role assignments.
             </summary>
@@ -499,7 +499,7 @@
              <summary>
              Data access for the WorkItems module. Owns every query against the <c>work</c> schema
              (work items, tags, comments, history, links) so that no other layer touches the DbContext.
-
+            
              Mutations are staged in-memory and only persisted by <see cref="M:BoardSync.Api.Modules.WorkItems.Repository.IWorkItemRepository.SaveChangesAsync(System.Threading.CancellationToken)"/>, which
              lets the service decide the transaction boundary (e.g. a work item, its tags and its first
              history row are written in a single save).
@@ -577,60 +577,6 @@
             Rate limiting attribute for sensitive operations
             </summary>
         </member>
-        <member name="P:BoardSync.Api.Shared.Auth.Models.RefreshToken.IsExpired">
-            <summary>In-memory only. For queries use <see cref="M:BoardSync.Api.Shared.Auth.Models.RefreshTokenQueryExtensions.WhereActive(System.Linq.IQueryable{BoardSync.Api.Shared.Auth.Models.RefreshToken})"/>.</summary>
-        </member>
-        <member name="P:BoardSync.Api.Shared.Auth.Models.RefreshToken.IsActive">
-            <summary>In-memory only. For queries use <see cref="M:BoardSync.Api.Shared.Auth.Models.RefreshTokenQueryExtensions.WhereActive(System.Linq.IQueryable{BoardSync.Api.Shared.Auth.Models.RefreshToken})"/>.</summary>
-        </member>
-        <member name="M:BoardSync.Api.Shared.Auth.Models.RefreshTokenQueryExtensions.WhereActive(System.Linq.IQueryable{BoardSync.Api.Shared.Auth.Models.RefreshToken})">
-            <summary>
-            Server-side equivalent of <see cref="P:BoardSync.Api.Shared.Auth.Models.RefreshToken.IsActive"/>. The property itself is
-            unmapped and cannot be translated to SQL, so it must not be used inside a query predicate.
-            </summary>
-        </member>
-        <member name="T:BoardSync.Api.Shared.Auth.DTOs.UserRoleResponse">
-            <summary>A single role assignment returned inside a user's profile.</summary>
-        </member>
-        <member name="M:BoardSync.Api.Shared.Auth.DTOs.UserRoleResponse.#ctor(BoardSync.Api.Modules.Rbac.Models.RoleType,BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid)">
-            <summary>A single role assignment returned inside a user's profile.</summary>
-        </member>
-        <member name="T:BoardSync.Api.Shared.Auth.DTOs.UserRoleResponse">
-            <summary>A single role assignment returned inside a user's profile.</summary>
-        </member>
-        <member name="M:BoardSync.Api.Shared.Auth.DTOs.UserRoleResponse.#ctor(BoardSync.Api.Modules.Rbac.Models.RoleType,BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid)">
-            <summary>A single role assignment returned inside a user's profile.</summary>
-        </member>
-        <member name="P:BoardSync.Api.Shared.Auth.Models.RefreshToken.IsExpired">
-            <summary>In-memory only. For queries use <see cref="M:BoardSync.Api.Shared.Auth.Models.RefreshTokenQueryExtensions.WhereActive(System.Linq.IQueryable{BoardSync.Api.Shared.Auth.Models.RefreshToken})"/>.</summary>
-        </member>
-        <member name="P:BoardSync.Api.Shared.Auth.Models.RefreshToken.IsActive">
-            <summary>In-memory only. For queries use <see cref="M:BoardSync.Api.Shared.Auth.Models.RefreshTokenQueryExtensions.WhereActive(System.Linq.IQueryable{BoardSync.Api.Shared.Auth.Models.RefreshToken})"/>.</summary>
-        </member>
-        <member name="M:BoardSync.Api.Shared.Auth.Models.RefreshTokenQueryExtensions.WhereActive(System.Linq.IQueryable{BoardSync.Api.Shared.Auth.Models.RefreshToken})">
-            <summary>
-            Server-side equivalent of <see cref="P:BoardSync.Api.Shared.Auth.Models.RefreshToken.IsActive"/>. The property itself is
-            unmapped and cannot be translated to SQL, so it must not be used inside a query predicate.
-            </summary>
-        </member>
-        <member name="T:BoardSync.Api.Shared.Auth.DTOs.UserRoleResponse">
-            <summary>A single role assignment returned inside a user's profile.</summary>
-        </member>
-        <member name="M:BoardSync.Api.Shared.Auth.DTOs.UserRoleResponse.#ctor(BoardSync.Api.Modules.Rbac.Models.RoleType,BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid)">
-            <summary>A single role assignment returned inside a user's profile.</summary>
-        </member>
-        <member name="P:BoardSync.Api.Shared.Auth.Models.RefreshToken.IsExpired">
-            <summary>In-memory only. For queries use <see cref="M:BoardSync.Api.Shared.Auth.Models.RefreshTokenQueryExtensions.WhereActive(System.Linq.IQueryable{BoardSync.Api.Shared.Auth.Models.RefreshToken})"/>.</summary>
-        </member>
-        <member name="P:BoardSync.Api.Shared.Auth.Models.RefreshToken.IsActive">
-            <summary>In-memory only. For queries use <see cref="M:BoardSync.Api.Shared.Auth.Models.RefreshTokenQueryExtensions.WhereActive(System.Linq.IQueryable{BoardSync.Api.Shared.Auth.Models.RefreshToken})"/>.</summary>
-        </member>
-        <member name="M:BoardSync.Api.Shared.Auth.Models.RefreshTokenQueryExtensions.WhereActive(System.Linq.IQueryable{BoardSync.Api.Shared.Auth.Models.RefreshToken})">
-            <summary>
-            Server-side equivalent of <see cref="P:BoardSync.Api.Shared.Auth.Models.RefreshToken.IsActive"/>. The property itself is
-            unmapped and cannot be translated to SQL, so it must not be used inside a query predicate.
-            </summary>
-        </member>
         <member name="T:BoardSync.Api.Shared.Auth.DTOs.UserRoleResponse">
             <summary>A single role assignment returned inside a user's profile.</summary>
         </member>
@@ -693,7 +639,7 @@
         <member name="T:BoardSync.Api.Shared.Kernel.Configuration.RateLimitSettings">
              <summary>
              Rate limiting configuration, bound from the "RateLimiting" configuration section.
-
+            
              Every window is applied <b>per caller</b> — partitioned by authenticated user ID when the
              request carries one, otherwise by client IP. A limit is never shared across unrelated
              callers, so one user exhausting their budget cannot lock anybody else out.
