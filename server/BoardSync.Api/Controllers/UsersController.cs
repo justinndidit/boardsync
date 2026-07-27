@@ -37,7 +37,7 @@ public class UsersController : ControllerBase
             .Select(u => new UserProfile(
                 u.Id, u.Email, u.FirstName, u.LastName,
                 u.DisplayName, u.ProfilePictureUrl,
-                u.IsEmailConfirmed, u.CreatedAt))
+                u.IsEmailConfirmed, u.IsActive, u.CreatedAt))
             .FirstOrDefaultAsync(ct)
             ?? throw new NotFoundException("User", userId);
 
@@ -63,7 +63,7 @@ public class UsersController : ControllerBase
             .Select(u => new UserProfile(
                 u.Id, u.Email, u.FirstName, u.LastName,
                 u.DisplayName, u.ProfilePictureUrl,
-                u.IsEmailConfirmed, u.CreatedAt))
+                u.IsEmailConfirmed, u.IsActive, u.CreatedAt))
             .FirstOrDefaultAsync(ct)
             ?? throw new NotFoundException($"No user found with email '{email}'.");
 
@@ -81,7 +81,7 @@ public class UsersController : ControllerBase
             .Select(u => new UserProfile(
                 u.Id, u.Email, u.FirstName, u.LastName,
                 u.DisplayName, u.ProfilePictureUrl,
-                u.IsEmailConfirmed, u.CreatedAt))
+                u.IsEmailConfirmed, u.IsActive, u.CreatedAt))
             .FirstOrDefaultAsync(ct)
             ?? throw new NotFoundException("User", _currentUser.UserId);
 

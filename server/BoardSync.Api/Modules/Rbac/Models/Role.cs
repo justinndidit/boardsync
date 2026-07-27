@@ -15,7 +15,10 @@ public enum RoleType
     TeamMember = 30,
 
     /// <summary>Read-only stakeholder: can view boards, backlogs, and reports but cannot mutate.</summary>
-    Reader = 40
+    Reader = 40,
+
+    /// <summary>Regular authenticated user with no org-specific permissions yet assigned.</summary>
+    User = 50
 }
 
 /// <summary>
