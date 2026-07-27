@@ -72,3 +72,55 @@ public record OrgMemberResponse(
     string Role,
     DateTime JoinedAt
 );
+
+// ---------------------------------------------------------------------------
+// Workspace DTOs
+// ---------------------------------------------------------------------------
+
+/// <summary>Aggregate counts for the current user's workspace dashboard.</summary>
+public record WorkspaceSummaryResponse(
+    int Organizations,
+    int Projects,
+    int Members,
+    int ActiveWorkItems
+);
+
+/// <summary>A single notification entry for the workspace bell.</summary>
+public record WorkspaceNotificationResponse(
+    Guid Id,
+    string Type,
+    string Title,
+    string Organization,
+    DateTime CreatedAt
+);
+
+/// <summary>A single recent-activity entry for the workspace feed.</summary>
+public record WorkspaceActivityResponse(
+    Guid Id,
+    string Type,
+    string Title,
+    string? Detail,
+    string ActorName,
+    string Organization,
+    string Project,
+    DateTime OccurredAt
+);
+
+// ---------------------------------------------------------------------------
+// Search DTOs
+// ---------------------------------------------------------------------------
+
+/// <summary>Slim hit returned inside a global search result.</summary>
+public record SearchHit(
+    Guid Id,
+    string Name,
+    string? Slug
+);
+
+/// <summary>Response envelope for GET /api/search?q=.</summary>
+public record GlobalSearchResponse(
+    IReadOnlyList<SearchHit> Organizations,
+    IReadOnlyList<SearchHit> Projects,
+    IReadOnlyList<SearchHit> Members,
+    IReadOnlyList<SearchHit> WorkItems
+);
