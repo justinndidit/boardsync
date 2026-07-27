@@ -62,3 +62,13 @@ public record TeamMemberResponse(
     string? ProfilePictureUrl,
     DateTime JoinedAt
 );
+
+/// <summary>A member of an organization with their org-level role.</summary>
+public record OrgMemberResponse(
+    Guid UserId,
+    string DisplayName,
+    string Email,
+    string? ProfilePictureUrl,
+    string Role,
+    DateTime JoinedAt
+);
