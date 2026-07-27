@@ -3,12 +3,15 @@ using BoardSync.Api.Extensions;
 using BoardSync.Api.Middleware;
 using BoardSync.Api.Modules.OrgProject.Services;
 using BoardSync.Api.Modules.Rbac.Services;
+using BoardSync.Api.Modules.WorkItems.Repository;
 using BoardSync.Api.Modules.WorkItems.Services;
 using BoardSync.Api.Shared.Auth;
 using BoardSync.Api.Shared.Auth.Configuration;
+using BoardSync.Api.Shared.Auth.DTOs;
 using BoardSync.Api.Shared.Auth.Handlers;
 using BoardSync.Api.Shared.Auth.Services;
 using BoardSync.Api.Shared.Auth.Services.Implementations;
+using BoardSync.Api.Shared.Kernel.Configuration;
 using BoardSync.Api.Shared.Kernel.Events;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
@@ -18,7 +21,9 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
 using Npgsql;
+using System.Security.Claims;
 using System.Text;
+using System.Text.Json;
 using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -100,45 +105,44 @@ builder.Services.AddScoped<IProjectService, ProjectService>();
 builder.Services.AddScoped<ITeamService, TeamService>();
 
 // WorkItems Module
+builder.Services.AddScoped<IWorkItemRepository, WorkItemRepository>();
 builder.Services.AddScoped<IWorkItemService, WorkItemService>();
 
 // Add HTTP Context Accessor
 builder.Services.AddHttpContextAccessor();
 
 // Configure Rate Limiting
+builder.Services.Configure<RateLimitSettings>(builder.Configuration.GetSection("RateLimiting"));
+var rateLimitSettings = builder.Configuration.GetSection("RateLimiting").Get<RateLimitSettings>() ?? new RateLimitSettings();
+
 builder.Services.AddRateLimiter(options =>
 {
-    // General API rate limiting
-    options.AddFixedWindowLimiter("api", limiterOptions =>
-    {
-        limiterOptions.Window = TimeSpan.FromMinutes(1);
-        limiterOptions.PermitLimit = 100;
-        limiterOptions.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
-        limiterOptions.QueueLimit = 10;
-    });
+    // Each policy is partitioned per caller, so one caller can never consume another's budget.
+    options.AddPolicy("api", ctx => PartitionFor(ctx, rateLimitSettings.Api, rateLimitSettings.Enabled));
+    options.AddPolicy("auth", ctx => PartitionFor(ctx, rateLimitSettings.Auth, rateLimitSettings.Enabled));
+    options.AddPolicy("password", ctx => PartitionFor(ctx, rateLimitSettings.Password, rateLimitSettings.Enabled));
 
-    // Strict rate limiting for auth endpoints
-    options.AddFixedWindowLimiter("auth", limiterOptions =>
+    options.OnRejected = async (context, cancellationToken) =>
     {
-        limiterOptions.Window = TimeSpan.FromMinutes(1);
-        limiterOptions.PermitLimit = 10; // 10 requests per minute for auth operations
-        limiterOptions.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
-        limiterOptions.QueueLimit = 2;
-    });
+        var response = context.HttpContext.Response;
+        response.StatusCode = StatusCodes.Status429TooManyRequests;
+        response.ContentType = "application/json";
 
-    // Very strict for password operations
-    options.AddFixedWindowLimiter("password", limiterOptions =>
-    {
-        limiterOptions.Window = TimeSpan.FromMinutes(5);
-        limiterOptions.PermitLimit = 3; // 3 attempts per 5 minutes
-        limiterOptions.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
-        limiterOptions.QueueLimit = 0;
-    });
+        // Tell the client when it is worth trying again instead of making it guess.
+        var retryAfterSeconds = context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter)
+            ? (int)Math.Ceiling(retryAfter.TotalSeconds)
+            : (int)Math.Ceiling(TimeSpan.FromSeconds(rateLimitSettings.Auth.WindowSeconds).TotalSeconds);
 
-    options.OnRejected = async (context, _) =>
-    {
-        context.HttpContext.Response.StatusCode = 429;
-        await context.HttpContext.Response.WriteAsync("Rate limit exceeded. Please try again later.");
+        response.Headers.RetryAfter = retryAfterSeconds.ToString();
+
+        var payload = new ErrorResponse(
+            Message: $"Rate limit exceeded. Please retry in {retryAfterSeconds} second(s).",
+            StatusCode: StatusCodes.Status429TooManyRequests);
+
+        await response.WriteAsJsonAsync(payload, new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        }, cancellationToken);
     };
 });
 
@@ -295,16 +299,43 @@ if (app.Environment.IsProduction())
     app.UseHsts();
 }
 
-// Add rate limiting middleware
+app.UseAuthentication();
+
+// Must run after authentication: rate limit partitions are keyed on the authenticated
+// user when one is present, which requires HttpContext.User to be populated.
 app.UseRateLimiter();
 
-app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapHealthChecks("/healthz");
 app.MapControllers();
 
 app.Run();
+
+/// <summary>
+/// Builds a rate limit partition for a single caller. Authenticated requests are keyed by user ID
+/// so that users sharing an IP (NAT, office network, mobile carrier) get independent budgets;
+/// anonymous requests fall back to the client IP.
+/// </summary>
+static RateLimitPartition<string> PartitionFor(HttpContext httpContext, RateLimitPolicySettings policy, bool enabled)
+{
+    var userId = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+    var partitionKey = !string.IsNullOrEmpty(userId)
+        ? $"user:{userId}"
+        : $"ip:{httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown"}";
+
+    if (!enabled)
+        return RateLimitPartition.GetNoLimiter(partitionKey);
+
+    return RateLimitPartition.GetFixedWindowLimiter(partitionKey, _ => new FixedWindowRateLimiterOptions
+    {
+        Window = TimeSpan.FromSeconds(policy.WindowSeconds),
+        PermitLimit = policy.PermitLimit,
+        QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+        QueueLimit = policy.QueueLimit
+    });
+}
 
 static void ValidateJwtSettings(JwtSettings jwtSettings, IWebHostEnvironment environment)
 {

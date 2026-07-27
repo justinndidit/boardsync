@@ -21,11 +21,17 @@ services:
     ports:
       - "1025:1025"   # SMTP
       - "8025:8025"   # Web UI
+    environment:
+      - MH_STORAGE=maildir
+      - MH_MAILDIR_PATH=/home/surgee/Desktop/sidmach/projects/boardsync/mailhog/maildir
+    volumes:
+      - mailhog_data:/home/mailhog/maildir
     networks:
       - boardsync-network
 
 volumes:
   pgdata:
+  mailhog_data:
 
 networks:
   boardsync-network:

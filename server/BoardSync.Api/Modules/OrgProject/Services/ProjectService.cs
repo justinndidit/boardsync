@@ -77,6 +77,9 @@ public class ProjectService : IProjectService
         return MapToResponse(project);
     }
 
+    public Task<bool> ExistsAsync(Guid projectId, CancellationToken ct = default) =>
+        _context.Projects.AnyAsync(p => p.Id == projectId && p.IsActive, ct);
+
     public async Task<PagedResult<ProjectSummaryResponse>> GetForOrgAsync(
         Guid orgId,
         PaginationQuery pagination,

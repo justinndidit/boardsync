@@ -95,7 +95,8 @@ public class AuthenticationService : IAuthenticationService
             if (!request.RememberMe)
             {
                 var oldTokens = await _context.RefreshTokens
-                    .Where(rt => rt.UserId == user.Id && rt.IsActive)
+                    .Where(rt => rt.UserId == user.Id)
+                    .WhereActive()
                     .ToListAsync();
 
                 foreach (var oldToken in oldTokens)
@@ -148,7 +149,7 @@ public class AuthenticationService : IAuthenticationService
     {
         try
         {
-            var tokensToRevoke = _context.RefreshTokens.Where(rt => rt.UserId == userId && rt.IsActive);
+            var tokensToRevoke = _context.RefreshTokens.Where(rt => rt.UserId == userId).WhereActive();
 
             if (!string.IsNullOrEmpty(refreshToken))
             {
@@ -344,7 +345,7 @@ public class AuthenticationService : IAuthenticationService
             user.PasswordResetTokenExpires = null;
             user.UpdatedAt = DateTime.UtcNow;
 
-            var refreshTokens = await _context.RefreshTokens.Where(rt => rt.UserId == user.Id && rt.IsActive).ToListAsync();
+            var refreshTokens = await _context.RefreshTokens.Where(rt => rt.UserId == user.Id).WhereActive().ToListAsync();
             foreach (var token in refreshTokens)
             {
                 token.Revoked = DateTime.UtcNow;
