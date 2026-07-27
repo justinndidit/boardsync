@@ -103,7 +103,7 @@
             <response code="400">Invalid current password or validation errors</response>
             <response code="401">User not authenticated</response>
         </member>
-        <member name="M:BoardSync.Api.Controllers.AuthController.GetProfile(System.Threading.CancellationToken)">
+        <member name="M:BoardSync.Api.Controllers.AuthController.GetProfile(System.Threading.CancellationToken)(System.Threading.CancellationToken)(System.Threading.CancellationToken)">
             <summary>
             Get current user's profile information including all role assignments.
             </summary>
@@ -288,6 +288,12 @@
         <member name="T:BoardSync.Api.Modules.OrgProject.Models.TeamMembership">
             <summary>
             Tracks that a user is a member of a team.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Services.IProjectService.ExistsAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Whether an active project exists. Exposed so other modules can validate a project
+            reference without querying the OrgProject module's tables directly.
             </summary>
         </member>
         <member name="T:BoardSync.Api.Modules.Rbac.Models.RoleType">
@@ -489,6 +495,63 @@
             A label/tag attached to a work item. Stored per-item (not a shared tag registry for MVP).
             </summary>
         </member>
+        <member name="T:BoardSync.Api.Modules.WorkItems.Repository.IWorkItemRepository">
+             <summary>
+             Data access for the WorkItems module. Owns every query against the <c>work</c> schema
+             (work items, tags, comments, history, links) so that no other layer touches the DbContext.
+
+             Mutations are staged in-memory and only persisted by <see cref="M:BoardSync.Api.Modules.WorkItems.Repository.IWorkItemRepository.SaveChangesAsync(System.Threading.CancellationToken)"/>, which
+             lets the service decide the transaction boundary (e.g. a work item, its tags and its first
+             history row are written in a single save).
+             </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.WorkItems.Repository.IWorkItemRepository.GetActiveAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Active work item by ID, or null.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.WorkItems.Repository.IWorkItemRepository.GetActiveWithTagsAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Active work item by ID with its tags loaded, or null.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.WorkItems.Repository.IWorkItemRepository.GetWithTagsAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Work item by ID with tags loaded, regardless of <c>IsActive</c>. Used when building a
+            response for an item that was just soft-deleted or updated.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.WorkItems.Repository.IWorkItemRepository.GetActiveInProjectAsync(System.Guid,System.Guid,System.Threading.CancellationToken)">
+            <summary>Active work item scoped to a project — used to validate a parent reference.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.WorkItems.Repository.IWorkItemRepository.GetForProjectAsync(System.Guid,BoardSync.Api.Modules.WorkItems.DTOs.WorkItemFilterQuery,System.Int32,System.Int32,System.Threading.CancellationToken)">
+            <summary>Filtered, paginated slice of a project's active work items, with tags loaded.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.WorkItems.Repository.IWorkItemRepository.GetChildCountsAsync(System.Collections.Generic.IEnumerable{System.Guid},System.Threading.CancellationToken)">
+            <summary>Number of active children per parent, for the given parent IDs.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.WorkItems.Repository.IWorkItemRepository.GetChildCountAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Number of active children of a single work item.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.WorkItems.Repository.IWorkItemRepository.GetLinksWithTargetAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Outgoing links for a work item, with the target work item loaded.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.WorkItems.Repository.IWorkItemRepository.SaveChangesAsync(System.Threading.CancellationToken)">
+            <summary>Persists everything staged since the last save.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.WorkItems.Repository.WorkItemRepository">
+            <inheritdoc />
+        </member>
+        <member name="T:BoardSync.Api.Modules.WorkItems.Services.WorkItemService">
+            <summary>
+            Business logic for the WorkItems module: validation, the state machine, the type
+            hierarchy, audit history and domain events. All persistence goes through
+            <see cref="T:BoardSync.Api.Modules.WorkItems.Repository.IWorkItemRepository"/>; project references go through <see cref="T:BoardSync.Api.Modules.OrgProject.Services.IProjectService"/>.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.WorkItems.Services.WorkItemService.NormalizeTags(System.Collections.Generic.IEnumerable{System.String})">
+            <summary>
+            Trims, lower-cases and de-duplicates tag names, dropping blanks. Normalization must happen
+            before de-duplication so that casing variants collapse to the single row the unique
+            (WorkItemId, Name) index allows.
+            </summary>
+        </member>
         <member name="T:BoardSync.Api.Shared.Auth.Attributes.RequireAuthenticationAttribute">
             <summary>
             Requires the user to be authenticated
@@ -514,11 +577,77 @@
             Rate limiting attribute for sensitive operations
             </summary>
         </member>
+        <member name="P:BoardSync.Api.Shared.Auth.Models.RefreshToken.IsExpired">
+            <summary>In-memory only. For queries use <see cref="M:BoardSync.Api.Shared.Auth.Models.RefreshTokenQueryExtensions.WhereActive(System.Linq.IQueryable{BoardSync.Api.Shared.Auth.Models.RefreshToken})"/>.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Auth.Models.RefreshToken.IsActive">
+            <summary>In-memory only. For queries use <see cref="M:BoardSync.Api.Shared.Auth.Models.RefreshTokenQueryExtensions.WhereActive(System.Linq.IQueryable{BoardSync.Api.Shared.Auth.Models.RefreshToken})"/>.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Auth.Models.RefreshTokenQueryExtensions.WhereActive(System.Linq.IQueryable{BoardSync.Api.Shared.Auth.Models.RefreshToken})">
+            <summary>
+            Server-side equivalent of <see cref="P:BoardSync.Api.Shared.Auth.Models.RefreshToken.IsActive"/>. The property itself is
+            unmapped and cannot be translated to SQL, so it must not be used inside a query predicate.
+            </summary>
+        </member>
         <member name="T:BoardSync.Api.Shared.Auth.DTOs.UserRoleResponse">
             <summary>A single role assignment returned inside a user's profile.</summary>
         </member>
         <member name="M:BoardSync.Api.Shared.Auth.DTOs.UserRoleResponse.#ctor(BoardSync.Api.Modules.Rbac.Models.RoleType,BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid)">
             <summary>A single role assignment returned inside a user's profile.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Auth.DTOs.UserRoleResponse">
+            <summary>A single role assignment returned inside a user's profile.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Auth.DTOs.UserRoleResponse.#ctor(BoardSync.Api.Modules.Rbac.Models.RoleType,BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid)">
+            <summary>A single role assignment returned inside a user's profile.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Auth.Models.RefreshToken.IsExpired">
+            <summary>In-memory only. For queries use <see cref="M:BoardSync.Api.Shared.Auth.Models.RefreshTokenQueryExtensions.WhereActive(System.Linq.IQueryable{BoardSync.Api.Shared.Auth.Models.RefreshToken})"/>.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Auth.Models.RefreshToken.IsActive">
+            <summary>In-memory only. For queries use <see cref="M:BoardSync.Api.Shared.Auth.Models.RefreshTokenQueryExtensions.WhereActive(System.Linq.IQueryable{BoardSync.Api.Shared.Auth.Models.RefreshToken})"/>.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Auth.Models.RefreshTokenQueryExtensions.WhereActive(System.Linq.IQueryable{BoardSync.Api.Shared.Auth.Models.RefreshToken})">
+            <summary>
+            Server-side equivalent of <see cref="P:BoardSync.Api.Shared.Auth.Models.RefreshToken.IsActive"/>. The property itself is
+            unmapped and cannot be translated to SQL, so it must not be used inside a query predicate.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Auth.DTOs.UserRoleResponse">
+            <summary>A single role assignment returned inside a user's profile.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Auth.DTOs.UserRoleResponse.#ctor(BoardSync.Api.Modules.Rbac.Models.RoleType,BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid)">
+            <summary>A single role assignment returned inside a user's profile.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Auth.Models.RefreshToken.IsExpired">
+            <summary>In-memory only. For queries use <see cref="M:BoardSync.Api.Shared.Auth.Models.RefreshTokenQueryExtensions.WhereActive(System.Linq.IQueryable{BoardSync.Api.Shared.Auth.Models.RefreshToken})"/>.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Auth.Models.RefreshToken.IsActive">
+            <summary>In-memory only. For queries use <see cref="M:BoardSync.Api.Shared.Auth.Models.RefreshTokenQueryExtensions.WhereActive(System.Linq.IQueryable{BoardSync.Api.Shared.Auth.Models.RefreshToken})"/>.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Auth.Models.RefreshTokenQueryExtensions.WhereActive(System.Linq.IQueryable{BoardSync.Api.Shared.Auth.Models.RefreshToken})">
+            <summary>
+            Server-side equivalent of <see cref="P:BoardSync.Api.Shared.Auth.Models.RefreshToken.IsActive"/>. The property itself is
+            unmapped and cannot be translated to SQL, so it must not be used inside a query predicate.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Auth.DTOs.UserRoleResponse">
+            <summary>A single role assignment returned inside a user's profile.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Auth.DTOs.UserRoleResponse.#ctor(BoardSync.Api.Modules.Rbac.Models.RoleType,BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid)">
+            <summary>A single role assignment returned inside a user's profile.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Auth.Models.RefreshToken.IsExpired">
+            <summary>In-memory only. For queries use <see cref="M:BoardSync.Api.Shared.Auth.Models.RefreshTokenQueryExtensions.WhereActive(System.Linq.IQueryable{BoardSync.Api.Shared.Auth.Models.RefreshToken})"/>.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Auth.Models.RefreshToken.IsActive">
+            <summary>In-memory only. For queries use <see cref="M:BoardSync.Api.Shared.Auth.Models.RefreshTokenQueryExtensions.WhereActive(System.Linq.IQueryable{BoardSync.Api.Shared.Auth.Models.RefreshToken})"/>.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Auth.Models.RefreshTokenQueryExtensions.WhereActive(System.Linq.IQueryable{BoardSync.Api.Shared.Auth.Models.RefreshToken})">
+            <summary>
+            Server-side equivalent of <see cref="P:BoardSync.Api.Shared.Auth.Models.RefreshToken.IsActive"/>. The property itself is
+            unmapped and cannot be translated to SQL, so it must not be used inside a query predicate.
+            </summary>
         </member>
         <member name="T:BoardSync.Api.Shared.Data.Migrations.InitialAuthenticationMigration">
             <inheritdoc />
@@ -544,10 +673,55 @@
         <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase1_OrgProjectRbac.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
             <inheritdoc />
         </member>
+        <member name="T:BoardSync.Api.Shared.Data.Migrations.Phase2_WorkItems">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase2_WorkItems.Up(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase2_WorkItems.Down(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase2_WorkItems.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
+            <inheritdoc />
+        </member>
         <member name="T:BoardSync.Api.Shared.Kernel.BaseEntity">
             <summary>
             Base class for all domain entities. Provides common audit fields.
             </summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Kernel.Configuration.RateLimitSettings">
+             <summary>
+             Rate limiting configuration, bound from the "RateLimiting" configuration section.
+
+             Every window is applied <b>per caller</b> — partitioned by authenticated user ID when the
+             request carries one, otherwise by client IP. A limit is never shared across unrelated
+             callers, so one user exhausting their budget cannot lock anybody else out.
+             </summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Kernel.Configuration.RateLimitSettings.Enabled">
+            <summary>Set to false to disable rate limiting entirely (useful for local development and tests).</summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Kernel.Configuration.RateLimitSettings.Api">
+            <summary>General API traffic.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Kernel.Configuration.RateLimitSettings.Auth">
+            <summary>Authentication endpoints: login, register, refresh, logout.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Kernel.Configuration.RateLimitSettings.Password">
+            <summary>Password recovery endpoints: forgot-password and reset-password.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Kernel.Configuration.RateLimitPolicySettings">
+            <summary>A single fixed-window policy.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Kernel.Configuration.RateLimitPolicySettings.PermitLimit">
+            <summary>Requests allowed per window, per caller.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Kernel.Configuration.RateLimitPolicySettings.WindowSeconds">
+            <summary>Length of the window in seconds.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Kernel.Configuration.RateLimitPolicySettings.QueueLimit">
+            <summary>How many requests may wait for the next window instead of being rejected outright.</summary>
         </member>
         <member name="T:BoardSync.Api.Shared.Kernel.Events.IDomainEvent">
             <summary>
