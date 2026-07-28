@@ -202,7 +202,7 @@ public class UserService : IUserService
             user.PasswordHash = _passwordService.HashPassword(request.NewPassword);
             user.UpdatedAt = DateTime.UtcNow;
 
-            var refreshTokens = await _context.RefreshTokens.Where(rt => rt.UserId == userId && rt.IsActive).ToListAsync();
+            var refreshTokens = await _context.RefreshTokens.Where(rt => rt.UserId == userId).WhereActive().ToListAsync();
             foreach (var token in refreshTokens)
             {
                 token.Revoked = DateTime.UtcNow;
