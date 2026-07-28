@@ -152,6 +152,22 @@
         <member name="P:BoardSync.Api.Controllers.ResendConfirmationRequest.Email">
             <summary>Email address to resend confirmation to</summary>
         </member>
+        <member name="T:BoardSync.Api.Controllers.SearchController">
+            <summary>
+            Global search across organizations, projects, members, and work items
+            scoped to the resources the calling user has access to.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Controllers.SearchController.Search(System.String,System.Threading.CancellationToken)">
+            <summary>
+            Search organizations, projects, members, and work items by name/title.
+            Results are scoped to the organizations the calling user belongs to.
+            Requires a query string of at least 2 characters.
+            </summary>
+            <param name="q">The search term (minimum 2 characters).</param>
+            <param name="ct">Cancellation token.</param>
+            <returns>Matched hits grouped by resource type, up to 10 results per category.</returns>
+        </member>
         <member name="T:BoardSync.Api.Controllers.UsersController">
             <summary>
             User lookup endpoints — used primarily when inviting members to orgs/teams.
@@ -188,6 +204,9 @@
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.OrganizationsController.Update(System.Guid,BoardSync.Api.Modules.OrgProject.DTOs.UpdateOrganizationRequest,System.Threading.CancellationToken)">
             <summary>Update organization details. Requires OrgAdmin.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.OrganizationsController.GetMembers(System.Guid,BoardSync.Api.Shared.Kernel.PaginationQuery,System.Threading.CancellationToken)">
+            <summary>List all members of an organization with their roles. Requires Reader.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.OrganizationsController.AddMember(System.Guid,BoardSync.Api.Modules.OrgProject.DTOs.AddTeamMemberRequest,System.Threading.CancellationToken)">
             <summary>Add a user to the organization. Requires OrgAdmin.</summary>
@@ -250,11 +269,74 @@
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController.RemoveMember(System.Guid,System.Guid,System.Threading.CancellationToken)">
             <summary>Remove a member from a team. Requires ProjectAdmin.</summary>
         </member>
+        <member name="T:BoardSync.Api.Modules.OrgProject.Controllers.WorkspaceController">
+            <summary>
+            Workspace-level aggregates: dashboard summary, notification bell, and activity feed.
+            All data is scoped to the organizations the calling user belongs to.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.WorkspaceController.GetSummary(System.Threading.CancellationToken)">
+            <summary>
+            Aggregate counts for the current user's workspace dashboard.
+            Returns organization count, project count, total member count across all orgs,
+            and the number of active (non-closed) work items across all projects.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.WorkspaceController.GetNotifications(System.Threading.CancellationToken)">
+            <summary>
+            Recent notifications for the current user's workspace bell.
+            Returns the 20 most recent work item changes across all projects the user has access to,
+            ordered by most recent first.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.WorkspaceController.GetActivity(System.Threading.CancellationToken)">
+            <summary>
+            Recent activity feed for the current user's workspace cards.
+            Returns the 30 most recent work item history entries across all accessible projects,
+            formatted as human-readable activity entries.
+            </summary>
+        </member>
         <member name="P:BoardSync.Api.Modules.OrgProject.DTOs.CreateOrganizationRequest.Slug">
             <summary>
             Optional slug — auto-generated from Name if not provided.
             Must be lowercase alphanumeric + hyphens.
             </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.OrgProject.DTOs.OrgMemberResponse">
+            <summary>A member of an organization with their org-level role.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.DTOs.OrgMemberResponse.#ctor(System.Guid,System.String,System.String,System.String,System.String,System.DateTime)">
+            <summary>A member of an organization with their org-level role.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.OrgProject.DTOs.WorkspaceSummaryResponse">
+            <summary>Aggregate counts for the current user's workspace dashboard.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.DTOs.WorkspaceSummaryResponse.#ctor(System.Int32,System.Int32,System.Int32,System.Int32)">
+            <summary>Aggregate counts for the current user's workspace dashboard.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.OrgProject.DTOs.WorkspaceNotificationResponse">
+            <summary>A single notification entry for the workspace bell.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.DTOs.WorkspaceNotificationResponse.#ctor(System.Guid,System.String,System.String,System.String,System.DateTime)">
+            <summary>A single notification entry for the workspace bell.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.OrgProject.DTOs.WorkspaceActivityResponse">
+            <summary>A single recent-activity entry for the workspace feed.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.DTOs.WorkspaceActivityResponse.#ctor(System.Guid,System.String,System.String,System.String,System.String,System.String,System.String,System.DateTime)">
+            <summary>A single recent-activity entry for the workspace feed.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.OrgProject.DTOs.SearchHit">
+            <summary>Slim hit returned inside a global search result.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.DTOs.SearchHit.#ctor(System.Guid,System.String,System.String)">
+            <summary>Slim hit returned inside a global search result.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.OrgProject.DTOs.GlobalSearchResponse">
+            <summary>Response envelope for GET /api/search?q=.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.DTOs.GlobalSearchResponse.#ctor(System.Collections.Generic.IReadOnlyList{BoardSync.Api.Modules.OrgProject.DTOs.SearchHit},System.Collections.Generic.IReadOnlyList{BoardSync.Api.Modules.OrgProject.DTOs.SearchHit},System.Collections.Generic.IReadOnlyList{BoardSync.Api.Modules.OrgProject.DTOs.SearchHit},System.Collections.Generic.IReadOnlyList{BoardSync.Api.Modules.OrgProject.DTOs.SearchHit})">
+            <summary>Response envelope for GET /api/search?q=.</summary>
         </member>
         <member name="T:BoardSync.Api.Modules.OrgProject.Models.Organization">
             <summary>

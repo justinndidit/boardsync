@@ -13,6 +13,7 @@ public interface IOrganizationService
     Task AddMemberAsync(Guid orgId, Guid userId, Guid addedBy, CancellationToken ct = default);
     Task RemoveMemberAsync(Guid orgId, Guid userId, CancellationToken ct = default);
     Task<bool> IsMemberAsync(Guid orgId, Guid userId, CancellationToken ct = default);
+    Task<PagedResult<OrgMemberResponse>> GetMembersAsync(Guid orgId, PaginationQuery pagination, CancellationToken ct = default);
 }
 
 public interface IProjectService
