@@ -42,13 +42,7 @@ if (builder.Environment.IsProduction() && configuredOrigins.Length == 0)
 }
 
 //Dependency Injection
-builder.Services.AddControllers()
-    .AddJsonOptions(options =>
-    {
-        // Serialize all enums as their string names (e.g. "OrgAdmin" not 10).
-        // This keeps role values consistent across every endpoint.
-        options.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
-    });
+builder.Services.AddControllers();
 builder.Services.AddProblemDetails();
 builder.Services.AddHealthChecks();
 
