@@ -89,6 +89,18 @@ public class OrganizationsController : ControllerBase
         return Ok(new ApiResponse<OrganizationResponse>(true, "Organization updated.", org));
     }
 
+    /// <summary>List all members of an organization with their roles. Requires Reader.</summary>
+    [HttpGet("{orgId:guid}/members")]
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<OrgMemberResponse>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetMembers(Guid orgId, [FromQuery] PaginationQuery pagination, CancellationToken ct)
+    {
+        await RequireOrgRoleAsync(orgId, RoleType.Reader, ct);
+        var result = await _orgService.GetMembersAsync(orgId, pagination, ct);
+        return Ok(new ApiResponse<PagedResult<OrgMemberResponse>>(true, "Members retrieved.", result));
+    }
+
     /// <summary>Add a user to the organization. Requires OrgAdmin.</summary>
     [HttpPost("{orgId:guid}/members")]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status200OK)]

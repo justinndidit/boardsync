@@ -206,6 +206,62 @@ public class OrganizationService : IOrganizationService
             .AnyAsync(m => m.OrganizationId == orgId && m.UserId == userId, ct);
     }
 
+    public async Task<PagedResult<OrgMemberResponse>> GetMembersAsync(
+        Guid orgId,
+        PaginationQuery pagination,
+        CancellationToken ct = default)
+    {
+        if (!await _context.Organizations.AnyAsync(o => o.Id == orgId && o.IsActive, ct))
+            throw new NotFoundException(nameof(Organization), orgId);
+
+        var query = _context.OrganizationMemberships
+            .Where(m => m.OrganizationId == orgId)
+            .OrderBy(m => m.JoinedAt);
+
+        var total = await query.CountAsync(ct);
+
+        // Fetch memberships with user data in one query
+        var memberships = await query
+            .Skip(pagination.Skip)
+            .Take(pagination.PageSize)
+            .Join(_context.Users,
+                m => m.UserId,
+                u => u.Id,
+                (m, u) => new
+                {
+                    m.UserId,
+                    u.DisplayName,
+                    u.Email,
+                    u.ProfilePictureUrl,
+                    m.JoinedAt
+                })
+            .ToListAsync(ct);
+
+        // Batch-load org-scope role assignments for these members in one query
+        var userIds = memberships.Select(m => m.UserId).ToList();
+        var roleMap = await _context.RoleAssignments
+            .Where(ra => ra.Scope == RoleScope.Organization
+                         && ra.ScopeId == orgId
+                         && userIds.Contains(ra.UserId))
+            .GroupBy(ra => ra.UserId)
+            .Select(g => new
+            {
+                UserId = g.Key,
+                // Pick the most-privileged role (lowest enum value) per user
+                Role = g.OrderBy(ra => (int)ra.Role).First().Role
+            })
+            .ToDictionaryAsync(x => x.UserId, x => x.Role, ct);
+
+        var items = memberships.Select(m =>
+        {
+            var role = roleMap.TryGetValue(m.UserId, out var r) ? r.ToString() : "None";
+            return new OrgMemberResponse(
+                m.UserId, m.DisplayName, m.Email, m.ProfilePictureUrl, role, m.JoinedAt);
+        }).ToList();
+
+        return new PagedResult<OrgMemberResponse>(items, total, pagination.Page, pagination.PageSize);
+    }
+
     // -------------------------------------------------------------------------
     private static string NormalizeSlug(string input)
     {
