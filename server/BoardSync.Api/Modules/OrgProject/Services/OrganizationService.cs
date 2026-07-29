@@ -41,28 +41,49 @@ public class OrganizationService : IOrganizationService
         if (await _context.Organizations.AnyAsync(o => o.Slug == slug, ct))
             throw new ConflictException($"An organization with slug '{slug}' already exists.");
 
-        var org = new Organization
+        // EF Core's retry strategy cannot span multiple SaveChangesAsync calls unless
+        // we wrap the whole operation in ExecuteAsync — required when EnableRetryOnFailure is set.
+        var strategy = _context.Database.CreateExecutionStrategy();
+
+        Organization org = null!;
+
+        await strategy.ExecuteAsync(async () =>
         {
-            Slug = slug,
-            Name = request.Name.Trim(),
-            Description = request.Description?.Trim() ?? string.Empty,
-            CreatedBy = createdBy
-        };
+            await using var tx = await _context.Database.BeginTransactionAsync(ct);
 
-        _context.Organizations.Add(org);
-        await _context.SaveChangesAsync(ct);
+            org = new Organization
+            {
+                Slug = slug,
+                Name = request.Name.Trim(),
+                Description = request.Description?.Trim() ?? string.Empty,
+                CreatedBy = createdBy
+            };
 
-        // Creator becomes OrgAdmin automatically
-        await _rbac.AssignRoleAsync(createdBy, RoleType.OrgAdmin, RoleScope.Organization, org.Id, createdBy, ct);
+            _context.Organizations.Add(org);
+            await _context.SaveChangesAsync(ct);
 
-        // Add to org membership
-        _context.OrganizationMemberships.Add(new OrganizationMembership
-        {
-            OrganizationId = org.Id,
-            UserId = createdBy,
-            CreatedBy = createdBy
+            // Creator becomes OrgAdmin automatically
+            var assignment = new RoleAssignment
+            {
+                UserId = createdBy,
+                Role = RoleType.OrgAdmin,
+                Scope = RoleScope.Organization,
+                ScopeId = org.Id,
+                CreatedBy = createdBy
+            };
+            _context.RoleAssignments.Add(assignment);
+
+            // Add to org membership
+            _context.OrganizationMemberships.Add(new OrganizationMembership
+            {
+                OrganizationId = org.Id,
+                UserId = createdBy,
+                CreatedBy = createdBy
+            });
+
+            await _context.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
         });
-        await _context.SaveChangesAsync(ct);
 
         await _eventBus.PublishAsync(new OrganizationCreated(org.Id, org.Name, org.Slug, createdBy), ct);
 
