@@ -1,5 +1,5 @@
 using BoardSync.Api.Data;
-using BoardSync.Api.Modules.OrgProject.DTOs;
+using BoardSync.Api.Modules.OrgProject.Domain.DTOs;
 using BoardSync.Api.Shared.Auth;
 using BoardSync.Api.Shared.Auth.DTOs;
 using Microsoft.AspNetCore.Authorization;

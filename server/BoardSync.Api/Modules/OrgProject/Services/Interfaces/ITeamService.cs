@@ -1,4 +1,4 @@
-using BoardSync.Api.Modules.OrgProject.DTOs;
+using BoardSync.Api.Modules.OrgProject.Domain.DTOs;
 using BoardSync.Api.Shared.Kernel;
 
 namespace BoardSync.Api.Modules.OrgProject.Services.Interfaces;

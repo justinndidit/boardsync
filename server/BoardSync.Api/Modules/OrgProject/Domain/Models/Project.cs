@@ -1,6 +1,6 @@
 using BoardSync.Api.Shared.Kernel;
 
-namespace BoardSync.Api.Modules.OrgProject.Models;
+namespace BoardSync.Api.Modules.OrgProject.Domain.Models;
 
 /// <summary>
 /// A project lives inside an organization. Work items, boards and sprints are scoped to a project.

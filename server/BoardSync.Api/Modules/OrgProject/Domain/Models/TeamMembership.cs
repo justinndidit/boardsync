@@ -1,6 +1,6 @@
 using BoardSync.Api.Shared.Kernel;
 
-namespace BoardSync.Api.Modules.OrgProject.Models;
+namespace BoardSync.Api.Modules.OrgProject.Domain.Models;
 
 /// <summary>
 /// Tracks that a user is a member of a team.

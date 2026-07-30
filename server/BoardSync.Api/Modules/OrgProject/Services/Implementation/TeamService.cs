@@ -1,7 +1,7 @@
 using BoardSync.Api.Data;
-using BoardSync.Api.Modules.OrgProject.DTOs;
-using BoardSync.Api.Modules.OrgProject.Events;
-using BoardSync.Api.Modules.OrgProject.Models;
+using BoardSync.Api.Modules.OrgProject.Domain.DTOs;
+using BoardSync.Api.Modules.OrgProject.Domain.Events;
+using BoardSync.Api.Modules.OrgProject.Domain.Models;
 using BoardSync.Api.Modules.OrgProject.Services.Interfaces;
 using BoardSync.Api.Modules.Rbac.Models;
 using BoardSync.Api.Modules.Rbac.Services;

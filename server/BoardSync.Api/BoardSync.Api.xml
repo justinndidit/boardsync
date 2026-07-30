@@ -193,7 +193,7 @@
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.OrganizationsController.GetMyOrgs(BoardSync.Api.Shared.Kernel.PaginationQuery,System.Threading.CancellationToken)">
             <summary>Get all organizations the current user belongs to.</summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.OrganizationsController.Create(BoardSync.Api.Modules.OrgProject.DTOs.CreateOrganizationRequest,System.Threading.CancellationToken)">
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.OrganizationsController.Create(BoardSync.Api.Modules.OrgProject.Domain.DTOs.CreateOrganizationRequest,System.Threading.CancellationToken)">
             <summary>Create a new organization. The caller automatically becomes OrgAdmin.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.OrganizationsController.GetById(System.Guid,System.Threading.CancellationToken)">
@@ -202,13 +202,13 @@
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.OrganizationsController.GetBySlug(System.String,System.Threading.CancellationToken)">
             <summary>Get organization by slug.</summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.OrganizationsController.Update(System.Guid,BoardSync.Api.Modules.OrgProject.DTOs.UpdateOrganizationRequest,System.Threading.CancellationToken)">
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.OrganizationsController.Update(System.Guid,BoardSync.Api.Modules.OrgProject.Domain.DTOs.UpdateOrganizationRequest,System.Threading.CancellationToken)">
             <summary>Update organization details. Requires OrgAdmin.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.OrganizationsController.GetMembers(System.Guid,BoardSync.Api.Shared.Kernel.PaginationQuery,System.Threading.CancellationToken)">
             <summary>List all members of an organization with their roles. Requires Reader.</summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.OrganizationsController.AddMember(System.Guid,BoardSync.Api.Modules.OrgProject.DTOs.AddTeamMemberRequest,System.Threading.CancellationToken)">
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.OrganizationsController.AddMember(System.Guid,BoardSync.Api.Modules.OrgProject.Domain.DTOs.AddTeamMemberRequest,System.Threading.CancellationToken)">
             <summary>Add a user to the organization. Requires OrgAdmin.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.OrganizationsController.RemoveMember(System.Guid,System.Guid,System.Threading.CancellationToken)">
@@ -234,13 +234,13 @@
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.ProjectsController.GetForOrg(System.Guid,BoardSync.Api.Shared.Kernel.PaginationQuery,System.Threading.CancellationToken)">
             <summary>List all projects in an organization.</summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.ProjectsController.Create(System.Guid,BoardSync.Api.Modules.OrgProject.DTOs.CreateProjectRequest,System.Threading.CancellationToken)">
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.ProjectsController.Create(System.Guid,BoardSync.Api.Modules.OrgProject.Domain.DTOs.CreateProjectRequest,System.Threading.CancellationToken)">
             <summary>Create a new project within an organization. Requires OrgAdmin.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.ProjectsController.GetById(System.Guid,System.Threading.CancellationToken)">
             <summary>Get a project by ID.</summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.ProjectsController.Update(System.Guid,BoardSync.Api.Modules.OrgProject.DTOs.UpdateProjectRequest,System.Threading.CancellationToken)">
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.ProjectsController.Update(System.Guid,BoardSync.Api.Modules.OrgProject.Domain.DTOs.UpdateProjectRequest,System.Threading.CancellationToken)">
             <summary>Update project details. Requires ProjectAdmin.</summary>
         </member>
         <member name="T:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController">
@@ -251,19 +251,19 @@
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController.GetForProject(System.Guid,BoardSync.Api.Shared.Kernel.PaginationQuery,System.Threading.CancellationToken)">
             <summary>List all teams in a project.</summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController.Create(System.Guid,BoardSync.Api.Modules.OrgProject.DTOs.CreateTeamRequest,System.Threading.CancellationToken)">
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController.Create(System.Guid,BoardSync.Api.Modules.OrgProject.Domain.DTOs.CreateTeamRequest,System.Threading.CancellationToken)">
             <summary>Create a new team in a project. Requires ProjectAdmin.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController.GetById(System.Guid,System.Threading.CancellationToken)">
             <summary>Get a team by ID.</summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController.Update(System.Guid,BoardSync.Api.Modules.OrgProject.DTOs.UpdateTeamRequest,System.Threading.CancellationToken)">
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController.Update(System.Guid,BoardSync.Api.Modules.OrgProject.Domain.DTOs.UpdateTeamRequest,System.Threading.CancellationToken)">
             <summary>Update team details. Requires ProjectAdmin.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController.GetMembers(System.Guid,BoardSync.Api.Shared.Kernel.PaginationQuery,System.Threading.CancellationToken)">
             <summary>Get team members.</summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController.AddMember(System.Guid,BoardSync.Api.Modules.OrgProject.DTOs.AddTeamMemberRequest,System.Threading.CancellationToken)">
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController.AddMember(System.Guid,BoardSync.Api.Modules.OrgProject.Domain.DTOs.AddTeamMemberRequest,System.Threading.CancellationToken)">
             <summary>Add a member to a team. Requires ProjectAdmin.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController.RemoveMember(System.Guid,System.Guid,System.Threading.CancellationToken)">
@@ -296,78 +296,78 @@
             formatted as human-readable activity entries.
             </summary>
         </member>
-        <member name="P:BoardSync.Api.Modules.OrgProject.DTOs.CreateOrganizationRequest.Slug">
+        <member name="P:BoardSync.Api.Modules.OrgProject.Domain.DTOs.CreateOrganizationRequest.Slug">
             <summary>
             Optional slug — auto-generated from Name if not provided.
             Must be lowercase alphanumeric + hyphens.
             </summary>
         </member>
-        <member name="T:BoardSync.Api.Modules.OrgProject.DTOs.OrgMemberResponse">
+        <member name="T:BoardSync.Api.Modules.OrgProject.Domain.DTOs.OrgMemberResponse">
             <summary>A member of an organization with their org-level role.</summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.OrgProject.DTOs.OrgMemberResponse.#ctor(System.Guid,System.String,System.String,System.String,System.String,System.DateTime)">
+        <member name="M:BoardSync.Api.Modules.OrgProject.Domain.DTOs.OrgMemberResponse.#ctor(System.Guid,System.String,System.String,System.String,System.String,System.DateTime)">
             <summary>A member of an organization with their org-level role.</summary>
         </member>
-        <member name="T:BoardSync.Api.Modules.OrgProject.DTOs.WorkspaceSummaryResponse">
+        <member name="T:BoardSync.Api.Modules.OrgProject.Domain.DTOs.WorkspaceSummaryResponse">
             <summary>Aggregate counts for the current user's workspace dashboard.</summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.OrgProject.DTOs.WorkspaceSummaryResponse.#ctor(System.Int32,System.Int32,System.Int32,System.Int32)">
+        <member name="M:BoardSync.Api.Modules.OrgProject.Domain.DTOs.WorkspaceSummaryResponse.#ctor(System.Int32,System.Int32,System.Int32,System.Int32)">
             <summary>Aggregate counts for the current user's workspace dashboard.</summary>
         </member>
-        <member name="T:BoardSync.Api.Modules.OrgProject.DTOs.WorkspaceNotificationResponse">
+        <member name="T:BoardSync.Api.Modules.OrgProject.Domain.DTOs.WorkspaceNotificationResponse">
             <summary>A single notification entry for the workspace bell.</summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.OrgProject.DTOs.WorkspaceNotificationResponse.#ctor(System.Guid,System.String,System.String,System.String,System.DateTime)">
+        <member name="M:BoardSync.Api.Modules.OrgProject.Domain.DTOs.WorkspaceNotificationResponse.#ctor(System.Guid,System.String,System.String,System.String,System.DateTime)">
             <summary>A single notification entry for the workspace bell.</summary>
         </member>
-        <member name="T:BoardSync.Api.Modules.OrgProject.DTOs.WorkspaceActivityResponse">
+        <member name="T:BoardSync.Api.Modules.OrgProject.Domain.DTOs.WorkspaceActivityResponse">
             <summary>A single recent-activity entry for the workspace feed.</summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.OrgProject.DTOs.WorkspaceActivityResponse.#ctor(System.Guid,System.String,System.String,System.String,System.String,System.String,System.String,System.DateTime)">
+        <member name="M:BoardSync.Api.Modules.OrgProject.Domain.DTOs.WorkspaceActivityResponse.#ctor(System.Guid,System.String,System.String,System.String,System.String,System.String,System.String,System.DateTime)">
             <summary>A single recent-activity entry for the workspace feed.</summary>
         </member>
-        <member name="T:BoardSync.Api.Modules.OrgProject.DTOs.SearchHit">
+        <member name="T:BoardSync.Api.Modules.OrgProject.Domain.DTOs.SearchHit">
             <summary>Slim hit returned inside a global search result.</summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.OrgProject.DTOs.SearchHit.#ctor(System.Guid,System.String,System.String)">
+        <member name="M:BoardSync.Api.Modules.OrgProject.Domain.DTOs.SearchHit.#ctor(System.Guid,System.String,System.String)">
             <summary>Slim hit returned inside a global search result.</summary>
         </member>
-        <member name="T:BoardSync.Api.Modules.OrgProject.DTOs.GlobalSearchResponse">
+        <member name="T:BoardSync.Api.Modules.OrgProject.Domain.DTOs.GlobalSearchResponse">
             <summary>Response envelope for GET /api/search?q=.</summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.OrgProject.DTOs.GlobalSearchResponse.#ctor(System.Collections.Generic.IReadOnlyList{BoardSync.Api.Modules.OrgProject.DTOs.SearchHit},System.Collections.Generic.IReadOnlyList{BoardSync.Api.Modules.OrgProject.DTOs.SearchHit},System.Collections.Generic.IReadOnlyList{BoardSync.Api.Modules.OrgProject.DTOs.SearchHit},System.Collections.Generic.IReadOnlyList{BoardSync.Api.Modules.OrgProject.DTOs.SearchHit})">
+        <member name="M:BoardSync.Api.Modules.OrgProject.Domain.DTOs.GlobalSearchResponse.#ctor(System.Collections.Generic.IReadOnlyList{BoardSync.Api.Modules.OrgProject.Domain.DTOs.SearchHit},System.Collections.Generic.IReadOnlyList{BoardSync.Api.Modules.OrgProject.Domain.DTOs.SearchHit},System.Collections.Generic.IReadOnlyList{BoardSync.Api.Modules.OrgProject.Domain.DTOs.SearchHit},System.Collections.Generic.IReadOnlyList{BoardSync.Api.Modules.OrgProject.Domain.DTOs.SearchHit})">
             <summary>Response envelope for GET /api/search?q=.</summary>
         </member>
-        <member name="T:BoardSync.Api.Modules.OrgProject.Models.Organization">
+        <member name="T:BoardSync.Api.Modules.OrgProject.Domain.Models.Organization">
             <summary>
             Top-level tenant container. A user can belong to multiple organizations.
             </summary>
         </member>
-        <member name="P:BoardSync.Api.Modules.OrgProject.Models.Organization.Slug">
+        <member name="P:BoardSync.Api.Modules.OrgProject.Domain.Models.Organization.Slug">
             <summary>Unique URL-friendly identifier (slug).</summary>
         </member>
-        <member name="T:BoardSync.Api.Modules.OrgProject.Models.OrganizationMembership">
+        <member name="T:BoardSync.Api.Modules.OrgProject.Domain.Models.OrganizationMembership">
             <summary>
             Tracks that a user belongs to an organization (independent of project/team membership).
             </summary>
         </member>
-        <member name="P:BoardSync.Api.Modules.OrgProject.Models.OrganizationMembership.JoinedAt">
+        <member name="P:BoardSync.Api.Modules.OrgProject.Domain.Models.OrganizationMembership.JoinedAt">
             <summary>When the user accepted/joined the organization.</summary>
         </member>
-        <member name="T:BoardSync.Api.Modules.OrgProject.Models.Project">
+        <member name="T:BoardSync.Api.Modules.OrgProject.Domain.Models.Project">
             <summary>
             A project lives inside an organization. Work items, boards and sprints are scoped to a project.
             </summary>
         </member>
-        <member name="P:BoardSync.Api.Modules.OrgProject.Models.Project.Slug">
+        <member name="P:BoardSync.Api.Modules.OrgProject.Domain.Models.Project.Slug">
             <summary>Unique slug within the organization (used in URLs).</summary>
         </member>
-        <member name="T:BoardSync.Api.Modules.OrgProject.Models.Team">
+        <member name="T:BoardSync.Api.Modules.OrgProject.Domain.Models.Team">
             <summary>
             A team within a project. Boards and iterations are scoped to a team.
             </summary>
         </member>
-        <member name="T:BoardSync.Api.Modules.OrgProject.Models.TeamMembership">
+        <member name="T:BoardSync.Api.Modules.OrgProject.Domain.Models.TeamMembership">
             <summary>
             Tracks that a user is a member of a team.
             </summary>
