@@ -258,20 +258,21 @@ public class OrganizationService : IOrganizationService
                 })
             .ToListAsync(ct);
 
-        // Batch-load org-scope role assignments for these members in one query
+        // Batch-load org-scope role assignments for these members in one query,
+        // then pick the most-privileged role per user in memory (avoids (int) cast in SQL).
         var userIds = memberships.Select(m => m.UserId).ToList();
-        var roleMap = await _context.RoleAssignments
+        var roleRows = await _context.RoleAssignments
             .Where(ra => ra.Scope == RoleScope.Organization
                          && ra.ScopeId == orgId
                          && userIds.Contains(ra.UserId))
+            .Select(ra => new { ra.UserId, ra.Role })
+            .ToListAsync(ct);
+
+        var roleMap = roleRows
             .GroupBy(ra => ra.UserId)
-            .Select(g => new
-            {
-                UserId = g.Key,
-                // Pick the most-privileged role (lowest enum value) per user
-                Role = g.OrderBy(ra => (int)ra.Role).First().Role
-            })
-            .ToDictionaryAsync(x => x.UserId, x => x.Role, ct);
+            .ToDictionary(
+                g => g.Key,
+                g => g.OrderBy(ra => (int)ra.Role).First().Role);
 
         var items = memberships.Select(m =>
         {
@@ -306,13 +307,18 @@ public class OrganizationService : IOrganizationService
 
     private async Task<string> ResolveUserRoleAsync(Guid userId, Guid orgId, CancellationToken ct)
     {
-        var assignment = await _context.RoleAssignments
+        // Pull all role assignments for this user/org into memory, then pick the
+        // most-privileged one in C# — (int) cast cannot be translated against varchar column.
+        var roles = await _context.RoleAssignments
             .Where(ra => ra.UserId == userId
                          && ra.Scope == RoleScope.Organization
                          && ra.ScopeId == orgId)
-            .OrderBy(ra => (int)ra.Role) // lowest value = most privileged
-            .FirstOrDefaultAsync(ct);
+            .Select(ra => ra.Role)
+            .ToListAsync(ct);
 
-        return assignment?.Role.ToString() ?? "None";
+        if (roles.Count == 0) return "None";
+
+        var best = roles.OrderBy(r => (int)r).First();
+        return best.ToString();
     }
 }

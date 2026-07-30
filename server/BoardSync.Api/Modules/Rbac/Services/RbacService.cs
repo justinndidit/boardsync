@@ -68,24 +68,23 @@ public class RbacService : IRbacService
         Guid scopeId,
         CancellationToken ct = default)
     {
-        // A role satisfies the requirement if its numeric value is <= minimumRole
-        // (lower value = more privileged in the enum)
-        var directMatch = await _context.RoleAssignments.AnyAsync(
-            ra => ra.UserId == userId
-                  && ra.Scope == scope
-                  && ra.ScopeId == scopeId
-                  && (int)ra.Role <= (int)minimumRole,
-            ct);
+        // Load all role assignments for this user at this scope into memory,
+        // then do the numeric privilege comparison in C#.
+        // We cannot use (int)ra.Role in SQL because the column is stored as a
+        // character varying (HasConversion<string>) and Postgres rejects integer casts on it.
+        var assignments = await _context.RoleAssignments
+            .Where(ra => ra.UserId == userId
+                         && ra.Scope == scope
+                         && ra.ScopeId == scopeId)
+            .Select(ra => ra.Role)
+            .ToListAsync(ct);
 
+        var directMatch = assignments.Any(role => (int)role <= (int)minimumRole);
         if (directMatch) return true;
 
-        // OrgAdmin implicitly satisfies any lower-scope check — but we need the orgId to resolve this.
-        // For project/team scopes we do a secondary lookup via the hierarchy stored in OrgProject module.
-        // This is resolved through the context: if the user is OrgAdmin for any org that contains
-        // the resource, they pass. We keep this simple by checking RoleScope.Organization rows.
+        // OrgAdmin implicitly satisfies any project/team scope check within that org.
         if (scope == RoleScope.Project || scope == RoleScope.Team)
         {
-            // Find all orgs where this user is OrgAdmin and where the scopeId lives
             var isOrgAdmin = await IsOrgAdminForScopeAsync(userId, scope, scopeId, ct);
             if (isOrgAdmin) return true;
         }
