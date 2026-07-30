@@ -1,4 +1,4 @@
-using BoardSync.Api.Modules.OrgProject.Services;
+using BoardSync.Api.Modules.OrgProject.Services.Interfaces;
 using BoardSync.Api.Modules.WorkItems.DTOs;
 using BoardSync.Api.Modules.WorkItems.Events;
 using BoardSync.Api.Modules.WorkItems.Models;

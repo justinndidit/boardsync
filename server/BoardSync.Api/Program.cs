@@ -1,7 +1,8 @@
 using BoardSync.Api.Data;
 using BoardSync.Api.Extensions;
 using BoardSync.Api.Middleware;
-using BoardSync.Api.Modules.OrgProject.Services;
+using BoardSync.Api.Modules.OrgProject.Services.Implementations;
+using BoardSync.Api.Modules.OrgProject.Services.Interfaces;
 using BoardSync.Api.Modules.Rbac.Services;
 using BoardSync.Api.Modules.Sprints.Services;
 using BoardSync.Api.Modules.WorkItems.Repository;

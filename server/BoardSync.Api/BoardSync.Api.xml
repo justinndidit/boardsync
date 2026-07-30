@@ -372,7 +372,7 @@
             Tracks that a user is a member of a team.
             </summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.OrgProject.Services.IProjectService.ExistsAsync(System.Guid,System.Threading.CancellationToken)">
+        <member name="M:BoardSync.Api.Modules.OrgProject.Services.Interfaces.IProjectService.ExistsAsync(System.Guid,System.Threading.CancellationToken)">
             <summary>
             Whether an active project exists. Exposed so other modules can validate a project
             reference without querying the OrgProject module's tables directly.
@@ -855,7 +855,7 @@
             <summary>
             Business logic for the WorkItems module: validation, the state machine, the type
             hierarchy, audit history and domain events. All persistence goes through
-            <see cref="T:BoardSync.Api.Modules.WorkItems.Repository.IWorkItemRepository"/>; project references go through <see cref="T:BoardSync.Api.Modules.OrgProject.Services.IProjectService"/>.
+            <see cref="T:BoardSync.Api.Modules.WorkItems.Repository.IWorkItemRepository"/>; project references go through <see cref="T:BoardSync.Api.Modules.OrgProject.Services.Interfaces.IProjectService"/>.
             </summary>
         </member>
         <member name="M:BoardSync.Api.Modules.WorkItems.Services.WorkItemService.NormalizeTags(System.Collections.Generic.IEnumerable{System.String})">

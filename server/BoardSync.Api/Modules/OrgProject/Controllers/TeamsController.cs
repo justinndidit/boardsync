@@ -1,5 +1,5 @@
 using BoardSync.Api.Modules.OrgProject.DTOs;
-using BoardSync.Api.Modules.OrgProject.Services;
+using BoardSync.Api.Modules.OrgProject.Services.Interfaces;
 using BoardSync.Api.Modules.Rbac.Models;
 using BoardSync.Api.Modules.Rbac.Services;
 using BoardSync.Api.Shared.Auth;

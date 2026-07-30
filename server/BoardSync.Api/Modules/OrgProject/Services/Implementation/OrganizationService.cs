@@ -2,6 +2,7 @@ using BoardSync.Api.Data;
 using BoardSync.Api.Modules.OrgProject.DTOs;
 using BoardSync.Api.Modules.OrgProject.Events;
 using BoardSync.Api.Modules.OrgProject.Models;
+using BoardSync.Api.Modules.OrgProject.Services.Interfaces;
 using BoardSync.Api.Modules.Rbac.Models;
 using BoardSync.Api.Modules.Rbac.Services;
 using BoardSync.Api.Shared.Auth.Models;
@@ -10,7 +11,7 @@ using BoardSync.Api.Shared.Kernel.Events;
 using BoardSync.Api.Shared.Kernel.Exceptions;
 using Microsoft.EntityFrameworkCore;
 
-namespace BoardSync.Api.Modules.OrgProject.Services;
+namespace BoardSync.Api.Modules.OrgProject.Services.Implementations;
 
 public class OrganizationService : IOrganizationService
 {
