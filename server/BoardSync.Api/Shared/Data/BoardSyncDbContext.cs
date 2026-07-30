@@ -142,8 +142,19 @@ public class BoardSyncDbContext : DbContext
             entity.HasIndex(r => new { r.Scope, r.ScopeId });
             entity.HasIndex(r => r.UserId);
 
-            entity.Property(r => r.Role).HasConversion<string>().HasMaxLength(30);
-            entity.Property(r => r.Scope).HasConversion<string>().HasMaxLength(20);
+            // Store enum as its name string (e.g. "OrgAdmin"), not the numeric value ("10").
+            // ValueConverter ensures EF uses Enum.GetName / Enum.Parse rather than (int) cast.
+            entity.Property(r => r.Role)
+                .HasMaxLength(30)
+                .HasConversion(
+                    v => v.ToString(),
+                    v => (RoleType)Enum.Parse(typeof(RoleType), v));
+
+            entity.Property(r => r.Scope)
+                .HasMaxLength(20)
+                .HasConversion(
+                    v => v.ToString(),
+                    v => (RoleScope)Enum.Parse(typeof(RoleScope), v));
         });
 
         // ----------------------------------------------------------------
