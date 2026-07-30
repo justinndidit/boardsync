@@ -1,10 +1,17 @@
 using BoardSync.Api.Data;
 using BoardSync.Api.Extensions;
 using BoardSync.Api.Middleware;
+using BoardSync.Api.Modules.OrgProject.Repositories.Implementations;
+using BoardSync.Api.Modules.OrgProject.Repositories.Interfaces;
 using BoardSync.Api.Modules.OrgProject.Services.Implementations;
 using BoardSync.Api.Modules.OrgProject.Services.Interfaces;
+<<<<<<< HEAD
 using BoardSync.Api.Modules.Rbac.Services;
 using BoardSync.Api.Modules.Sprints.Services;
+=======
+using BoardSync.Api.Modules.Rbac.Services.Interfaces;
+using BoardSync.Api.Modules.Rbac.Services.Implementations;
+>>>>>>> cd9a727 (decouple orgproject module services from db context)
 using BoardSync.Api.Modules.WorkItems.Repository;
 using BoardSync.Api.Modules.WorkItems.Services;
 using BoardSync.Api.Shared.Auth;
@@ -44,7 +51,13 @@ if (builder.Environment.IsProduction() && configuredOrigins.Length == 0)
 }
 
 //Dependency Injection
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        // Serialize all enums as their string names (e.g. "OrgAdmin" not 10).
+        // This keeps role values consistent across every endpoint.
+        options.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+    });
 builder.Services.AddProblemDetails();
 builder.Services.AddHealthChecks();
 
@@ -96,6 +109,9 @@ builder.Services.AddScoped<IEventBus, InMemoryEventBus>();
 builder.Services.AddScoped<IRbacService, RbacService>();
 
 // OrgProject Module
+builder.Services.AddScoped<IOrganizationRepository, OrganizationRepository>();
+builder.Services.AddScoped<IProjectRepository, ProjectRepository>();
+builder.Services.AddScoped<ITeamRepository, TeamRepository>();
 builder.Services.AddScoped<IOrganizationService, OrganizationService>();
 builder.Services.AddScoped<IProjectService, ProjectService>();
 builder.Services.AddScoped<ITeamService, TeamService>();

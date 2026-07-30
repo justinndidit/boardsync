@@ -1,5 +1,5 @@
 using BoardSync.Api.Modules.Rbac.Models;
-using BoardSync.Api.Modules.Rbac.Services;
+using BoardSync.Api.Modules.Rbac.Services.Interfaces;
 using BoardSync.Api.Modules.WorkItems.DTOs;
 using BoardSync.Api.Modules.WorkItems.Models;
 using BoardSync.Api.Modules.WorkItems.Services;

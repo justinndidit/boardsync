@@ -1,32 +1,38 @@
-using BoardSync.Api.Data;
 using BoardSync.Api.Modules.OrgProject.Domain.DTOs;
 using BoardSync.Api.Modules.OrgProject.Domain.Events;
 using BoardSync.Api.Modules.OrgProject.Domain.Models;
+using BoardSync.Api.Modules.OrgProject.Repositories.Interfaces;
 using BoardSync.Api.Modules.OrgProject.Services.Interfaces;
 using BoardSync.Api.Modules.Rbac.Models;
-using BoardSync.Api.Modules.Rbac.Services;
+using BoardSync.Api.Modules.Rbac.Services.Interfaces;
+using BoardSync.Api.Shared.Auth.Services;
 using BoardSync.Api.Shared.Kernel;
 using BoardSync.Api.Shared.Kernel.Events;
 using BoardSync.Api.Shared.Kernel.Exceptions;
-using Microsoft.EntityFrameworkCore;
 
 namespace BoardSync.Api.Modules.OrgProject.Services.Implementations;
 
 public class TeamService : ITeamService
 {
-    private readonly BoardSyncDbContext _context;
+    private readonly ITeamRepository _teamRepo;
+    private readonly IProjectRepository _projectRepo;
     private readonly IRbacService _rbac;
+    private readonly IUserService _userService;
     private readonly IEventBus _eventBus;
     private readonly ILogger<TeamService> _logger;
 
     public TeamService(
-        BoardSyncDbContext context,
+        ITeamRepository teamRepository,
+        IProjectRepository projectRepository,
         IRbacService rbac,
+        IUserService userService,
         IEventBus eventBus,
         ILogger<TeamService> logger)
     {
-        _context = context;
+        _teamRepo = teamRepository;
+        _projectRepo = projectRepository;
         _rbac = rbac;
+        _userService = userService;
         _eventBus = eventBus;
         _logger = logger;
     }
@@ -37,22 +43,34 @@ public class TeamService : ITeamService
         Guid createdBy,
         CancellationToken ct = default)
     {
-        if (!await _context.Projects.AnyAsync(p => p.Id == projectId && p.IsActive, ct))
+        if (!await _projectRepo.ExistsActiveAsync(projectId, ct))
             throw new NotFoundException("Project", projectId);
+
+        var name = request.Name.Trim();
+
+        // Team names are unique per project; check first so the collision surfaces as a 409
+        // rather than a unique-index violation surfacing as a 500.
+        if (await _teamRepo.NameExistsInProjectAsync(projectId, name, ct))
+            throw new ConflictException($"A team named '{name}' already exists in this project.");
 
         var team = new Team
         {
             ProjectId = projectId,
-            Name = request.Name.Trim(),
+            Name = name,
             Description = request.Description?.Trim() ?? string.Empty,
             CreatedBy = createdBy
         };
 
-        _context.Teams.Add(team);
-        await _context.SaveChangesAsync(ct);
+        // Team and the creator's membership land in one save.
+        _teamRepo.Add(team);
+        _teamRepo.AddMembership(new TeamMembership
+        {
+            TeamId = team.Id,
+            UserId = createdBy,
+            CreatedBy = createdBy
+        });
+        await _teamRepo.SaveChangesAsync(ct);
 
-        // Creator joins team as TeamMember
-        await AddMemberInternalAsync(team, createdBy, createdBy, ct);
         await _rbac.AssignRoleAsync(createdBy, RoleType.TeamMember, RoleScope.Team, team.Id, createdBy, ct);
 
         await _eventBus.PublishAsync(new TeamCreated(team.Id, projectId, team.Name, createdBy), ct);
@@ -65,12 +83,10 @@ public class TeamService : ITeamService
 
     public async Task<TeamResponse> GetByIdAsync(Guid teamId, CancellationToken ct = default)
     {
-        var team = await _context.Teams
-            .Include(t => t.Members)
-            .FirstOrDefaultAsync(t => t.Id == teamId && t.IsActive, ct)
+        var team = await _teamRepo.GetActiveAsync(teamId, ct)
             ?? throw new NotFoundException(nameof(Team), teamId);
 
-        return MapToResponse(team);
+        return await MapToResponseAsync(team, ct);
     }
 
     public async Task<PagedResult<TeamResponse>> GetForProjectAsync(
@@ -78,14 +94,15 @@ public class TeamService : ITeamService
         PaginationQuery pagination,
         CancellationToken ct = default)
     {
-        var query = _context.Teams
-            .Include(t => t.Members)
-            .Where(t => t.ProjectId == projectId && t.IsActive)
-            .OrderBy(t => t.Name);
+        var (records, total) = await _teamRepo.GetForProjectAsync(
+            projectId, pagination.Skip, pagination.PageSize, ct);
 
-        var total = await query.CountAsync(ct);
-        var items = await query.Skip(pagination.Skip).Take(pagination.PageSize).ToListAsync(ct);
-        return new PagedResult<TeamResponse>(items.Select(MapToResponse).ToList(), total, pagination.Page, pagination.PageSize);
+        var items = records
+            .Select(t => new TeamResponse(
+                t.Id, t.ProjectId, t.Name, t.Description, t.IsActive, t.MemberCount, t.CreatedAt))
+            .ToList();
+
+        return new PagedResult<TeamResponse>(items, total, pagination.Page, pagination.PageSize);
     }
 
     public async Task<TeamResponse> UpdateAsync(
@@ -94,17 +111,15 @@ public class TeamService : ITeamService
         Guid updatedBy,
         CancellationToken ct = default)
     {
-        var team = await _context.Teams
-            .Include(t => t.Members)
-            .FirstOrDefaultAsync(t => t.Id == teamId && t.IsActive, ct)
+        var team = await _teamRepo.GetActiveAsync(teamId, ct)
             ?? throw new NotFoundException(nameof(Team), teamId);
 
         team.Name = request.Name.Trim();
         team.Description = request.Description?.Trim() ?? team.Description;
         team.UpdatedAt = DateTime.UtcNow;
 
-        await _context.SaveChangesAsync(ct);
-        return MapToResponse(team);
+        await _teamRepo.SaveChangesAsync(ct);
+        return await MapToResponseAsync(team, ct);
     }
 
     public async Task<TeamMemberResponse> AddMemberAsync(
@@ -113,38 +128,45 @@ public class TeamService : ITeamService
         Guid addedBy,
         CancellationToken ct = default)
     {
-        var team = await _context.Teams
-            .Include(t => t.Project)
-            .FirstOrDefaultAsync(t => t.Id == teamId && t.IsActive, ct)
+        var team = await _teamRepo.GetActiveAsync(teamId, ct)
             ?? throw new NotFoundException(nameof(Team), teamId);
 
-        var user = await _context.Users.FindAsync([userId], ct)
-            ?? throw new NotFoundException("User", userId);
+        var user = await _userService.GetByIdAsync(userId);
+        if (!user.Success || user.Data is null)
+            throw new NotFoundException("User", userId);
 
-        var exists = await _context.TeamMemberships.AnyAsync(m => m.TeamId == teamId && m.UserId == userId, ct);
-        if (!exists)
+        var membership = await _teamRepo.GetMembershipAsync(teamId, userId, ct);
+
+        if (membership is null)
         {
-            await AddMemberInternalAsync(team, userId, addedBy, ct);
+            membership = new TeamMembership
+            {
+                TeamId = teamId,
+                UserId = userId,
+                CreatedBy = addedBy
+            };
+
+            _teamRepo.AddMembership(membership);
+            await _teamRepo.SaveChangesAsync(ct);
+
             await _rbac.AssignRoleAsync(userId, RoleType.TeamMember, RoleScope.Team, teamId, addedBy, ct);
         }
 
         await _eventBus.PublishAsync(new MemberAddedToTeam(teamId, team.ProjectId, userId, addedBy), ct);
 
-        var membership = await _context.TeamMemberships.FirstAsync(m => m.TeamId == teamId && m.UserId == userId, ct);
-        return new TeamMemberResponse(userId, user.DisplayName, user.Email, user.ProfilePictureUrl, membership.JoinedAt);
+        return new TeamMemberResponse(
+            userId, user.Data.DisplayName, user.Data.Email, user.Data.ProfilePictureUrl, membership.JoinedAt);
     }
 
     public async Task RemoveMemberAsync(Guid teamId, Guid userId, CancellationToken ct = default)
     {
-        var membership = await _context.TeamMemberships
-            .FirstOrDefaultAsync(m => m.TeamId == teamId && m.UserId == userId, ct);
+        var membership = await _teamRepo.GetMembershipAsync(teamId, userId, ct);
+        if (membership is null) return;
 
-        if (membership != null)
-        {
-            _context.TeamMemberships.Remove(membership);
-            await _context.SaveChangesAsync(ct);
-            await _eventBus.PublishAsync(new MemberRemovedFromTeam(teamId, userId), ct);
-        }
+        _teamRepo.RemoveMembership(membership);
+        await _teamRepo.SaveChangesAsync(ct);
+
+        await _eventBus.PublishAsync(new MemberRemovedFromTeam(teamId, userId), ct);
     }
 
     public async Task<PagedResult<TeamMemberResponse>> GetMembersAsync(
@@ -152,39 +174,25 @@ public class TeamService : ITeamService
         PaginationQuery pagination,
         CancellationToken ct = default)
     {
-        if (!await _context.Teams.AnyAsync(t => t.Id == teamId, ct))
+        if (!await _teamRepo.ExistsAsync(teamId, ct))
             throw new NotFoundException(nameof(Team), teamId);
 
-        var query = _context.TeamMemberships
-            .Where(m => m.TeamId == teamId)
-            .Join(_context.Users,
-                m => m.UserId,
-                u => u.Id,
-                (m, u) => new TeamMemberResponse(u.Id, u.DisplayName, u.Email, u.ProfilePictureUrl, m.JoinedAt))
-            .OrderBy(r => r.DisplayName);
+        var (members, total) = await _teamRepo.GetMembersAsync(
+            teamId, pagination.Skip, pagination.PageSize, ct);
 
-        var total = await query.CountAsync(ct);
-        var items = await query.Skip(pagination.Skip).Take(pagination.PageSize).ToListAsync(ct);
+        var items = members
+            .Select(m => new TeamMemberResponse(
+                m.UserId, m.DisplayName, m.Email, m.ProfilePictureUrl, m.JoinedAt))
+            .ToList();
+
         return new PagedResult<TeamMemberResponse>(items, total, pagination.Page, pagination.PageSize);
     }
 
-    private async Task AddMemberInternalAsync(Team team, Guid userId, Guid addedBy, CancellationToken ct)
-    {
-        _context.TeamMemberships.Add(new TeamMembership
-        {
-            TeamId = team.Id,
-            UserId = userId,
-            CreatedBy = addedBy
-        });
-        await _context.SaveChangesAsync(ct);
-    }
-
-    private static TeamResponse MapToResponse(Team t) =>
-        new(t.Id, t.ProjectId, t.Name, t.Description, t.IsActive, t.Members.Count, t.CreatedAt);
+    // -------------------------------------------------------------------------
 
     private async Task<TeamResponse> MapToResponseAsync(Team t, CancellationToken ct)
     {
-        var memberCount = await _context.TeamMemberships.CountAsync(m => m.TeamId == t.Id, ct);
+        var memberCount = await _teamRepo.GetMemberCountAsync(t.Id, ct);
         return new(t.Id, t.ProjectId, t.Name, t.Description, t.IsActive, memberCount, t.CreatedAt);
     }
 }

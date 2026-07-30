@@ -1,8 +1,9 @@
 using BoardSync.Api.Data;
 using BoardSync.Api.Modules.Rbac.Models;
+using BoardSync.Api.Modules.Rbac.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
 
-namespace BoardSync.Api.Modules.Rbac.Services;
+namespace BoardSync.Api.Modules.Rbac.Services.Implementations;
 
 public class RbacService : IRbacService
 {
