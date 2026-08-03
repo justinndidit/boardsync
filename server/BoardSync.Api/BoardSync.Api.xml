@@ -448,6 +448,237 @@
         <member name="M:BoardSync.Api.Modules.Rbac.Services.IRbacService.GetScopeRolesAsync(BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid,System.Threading.CancellationToken)">
             <summary>Return all role assignments for a specific scope resource.</summary>
         </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.Controllers.BoardsController">
+            <summary>
+            Kanban board management scoped to a team.
+            The board is auto-created with four default columns on first access.
+            Read:             Reader+
+            Column management: ProjectAdmin+
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Controllers.BoardsController.GetForTeam(System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Get (or auto-create) the board for a team, populated with active-sprint cards.
+            Requires Reader.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Controllers.BoardsController.GetById(System.Guid,System.Threading.CancellationToken)">
+            <summary>Get a board by ID with all columns and cards. Requires Reader.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Controllers.BoardsController.Update(System.Guid,BoardSync.Api.Modules.Sprints.DTOs.UpdateBoardRequest,System.Threading.CancellationToken)">
+            <summary>Rename a board. Requires ProjectAdmin.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Controllers.BoardsController.AddColumn(System.Guid,BoardSync.Api.Modules.Sprints.DTOs.CreateBoardColumnRequest,System.Threading.CancellationToken)">
+            <summary>Add a column to a board. Requires ProjectAdmin.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Controllers.BoardsController.UpdateColumn(System.Guid,BoardSync.Api.Modules.Sprints.DTOs.UpdateBoardColumnRequest,System.Threading.CancellationToken)">
+            <summary>Update a column's name, mapped state, WIP limit, or position. Requires ProjectAdmin.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Controllers.BoardsController.DeleteColumn(System.Guid,System.Threading.CancellationToken)">
+            <summary>Delete a column from a board. Requires ProjectAdmin.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Controllers.BoardsController.ReorderColumns(System.Guid,BoardSync.Api.Modules.Sprints.DTOs.ReorderBoardColumnsRequest,System.Threading.CancellationToken)">
+            <summary>Reorder columns by providing the desired left-to-right column ID sequence. Requires ProjectAdmin.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Controllers.BoardsController.RequireColumnTeamRoleAsync(System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType,System.Threading.CancellationToken)">
+            <summary>
+            Resolves the teamId for a column (column → board → teamId) then checks the role.
+            Avoids an extra service call by querying the DB directly.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.Controllers.SprintsController">
+            <summary>
+            Sprint lifecycle and backlog management scoped to a team.
+            Read operations:      Reader+
+            Sprint management:    ProjectAdmin+
+            Backlog management:   TeamMember+
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.GetForTeam(System.Guid,BoardSync.Api.Shared.Kernel.PaginationQuery,System.Threading.CancellationToken)">
+            <summary>List all sprints for a team, newest first.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.GetActive(System.Guid,System.Threading.CancellationToken)">
+            <summary>Get the currently active sprint for a team. Returns null data if none is active.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.GetById(System.Guid,System.Threading.CancellationToken)">
+            <summary>Get a sprint by ID.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.Create(System.Guid,BoardSync.Api.Modules.Sprints.DTOs.CreateSprintRequest,System.Threading.CancellationToken)">
+            <summary>Create a new sprint for a team. Requires ProjectAdmin.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.Update(System.Guid,BoardSync.Api.Modules.Sprints.DTOs.UpdateSprintRequest,System.Threading.CancellationToken)">
+            <summary>Update a sprint's goal and dates. Only allowed while Planning. Requires ProjectAdmin.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.UpdateStatus(System.Guid,BoardSync.Api.Modules.Sprints.DTOs.UpdateSprintStatusRequest,System.Threading.CancellationToken)">
+            <summary>
+            Transition sprint status: Planning → Active → Completed.
+            Only one Active sprint per team is allowed at a time.
+            Requires ProjectAdmin.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.Delete(System.Guid,System.Threading.CancellationToken)">
+            <summary>Delete a Planning sprint with no work items. Requires ProjectAdmin.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.GetWorkItems(System.Guid,BoardSync.Api.Shared.Kernel.PaginationQuery,System.Threading.CancellationToken)">
+            <summary>List work items in a sprint ordered by position.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.AddWorkItem(System.Guid,BoardSync.Api.Modules.Sprints.DTOs.AddSprintWorkItemRequest,System.Threading.CancellationToken)">
+            <summary>Add a work item to the sprint backlog. Requires TeamMember.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.RemoveWorkItem(System.Guid,System.Guid,System.Threading.CancellationToken)">
+            <summary>Remove a work item from the sprint backlog. Requires TeamMember.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.ReorderWorkItems(System.Guid,BoardSync.Api.Modules.Sprints.DTOs.ReorderSprintWorkItemsRequest,System.Threading.CancellationToken)">
+            <summary>Reorder work items within the sprint backlog. Requires TeamMember.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.DTOs.UpdateBoardRequest">
+            <summary>Rename an existing board.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.DTOs.CreateBoardColumnRequest">
+            <summary>Add a column to a board.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.Sprints.DTOs.CreateBoardColumnRequest.MappedState">
+            <summary>
+            WorkItemState name this column maps to: "New", "Active", "Resolved", or "Closed".
+            </summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.Sprints.DTOs.CreateBoardColumnRequest.Position">
+            <summary>0-based position. Omit to append at the end.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.Sprints.DTOs.CreateBoardColumnRequest.WipLimit">
+            <summary>Optional WIP limit. Null = no limit.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.DTOs.UpdateBoardColumnRequest">
+            <summary>Update a column's properties.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.DTOs.ReorderBoardColumnsRequest">
+            <summary>Reorder all columns on a board.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.Sprints.DTOs.ReorderBoardColumnsRequest.ColumnIds">
+            <summary>Ordered list of column IDs representing the desired left-to-right order.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.DTOs.BoardCardResponse">
+            <summary>A work item card displayed in a board column.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.DTOs.BoardCardResponse.#ctor(System.Guid,System.String,BoardSync.Api.Modules.WorkItems.Models.WorkItemType,BoardSync.Api.Modules.WorkItems.Models.WorkItemPriority,System.Nullable{System.Guid},System.Nullable{System.Int32},System.Collections.Generic.IReadOnlyList{System.String})">
+            <summary>A work item card displayed in a board column.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.DTOs.BoardColumnResponse">
+            <summary>A board column with its current cards.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.DTOs.BoardColumnResponse.#ctor(System.Guid,System.String,System.String,System.Int32,System.Nullable{System.Int32},System.Collections.Generic.IReadOnlyList{BoardSync.Api.Modules.Sprints.DTOs.BoardCardResponse})">
+            <summary>A board column with its current cards.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.DTOs.BoardResponse">
+            <summary>Full board view — all columns with their active-sprint cards.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.DTOs.BoardResponse.#ctor(System.Guid,System.Guid,System.String,System.Nullable{System.Guid},System.Collections.Generic.IReadOnlyList{BoardSync.Api.Modules.Sprints.DTOs.BoardColumnResponse},System.DateTime)">
+            <summary>Full board view — all columns with their active-sprint cards.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.DTOs.BoardColumnDetailResponse">
+            <summary>A single column without card data — used by column-management endpoints.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.DTOs.BoardColumnDetailResponse.#ctor(System.Guid,System.Guid,System.String,System.String,System.Int32,System.Nullable{System.Int32},System.DateTime)">
+            <summary>A single column without card data — used by column-management endpoints.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.DTOs.CreateSprintRequest">
+            <summary>Create a new sprint for a team.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.DTOs.UpdateSprintRequest">
+            <summary>Update a sprint's goal or dates. Only allowed while Planning.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.DTOs.UpdateSprintStatusRequest">
+            <summary>Transition a sprint to the next status.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.DTOs.AddSprintWorkItemRequest">
+            <summary>Add a work item to a sprint backlog.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.Sprints.DTOs.AddSprintWorkItemRequest.Position">
+            <summary>0-based position in the backlog. Omit to append at the end.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.DTOs.ReorderSprintWorkItemsRequest">
+            <summary>Reorder work items within a sprint backlog.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.Sprints.DTOs.ReorderSprintWorkItemsRequest.WorkItemIds">
+            <summary>Ordered list of WorkItem IDs representing the desired backlog order.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.DTOs.SprintResponse">
+            <summary>Full sprint detail including velocity metrics.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.DTOs.SprintResponse.#ctor(System.Guid,System.Guid,System.Int32,System.String,System.DateTime,System.DateTime,BoardSync.Api.Modules.Sprints.Models.SprintStatus,System.Int32,System.Int32,System.Int32,System.Int32,System.DateTime)">
+            <summary>Full sprint detail including velocity metrics.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.DTOs.SprintSummaryResponse">
+            <summary>Lightweight sprint summary for list views.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.DTOs.SprintSummaryResponse.#ctor(System.Guid,System.Int32,System.String,System.DateTime,System.DateTime,BoardSync.Api.Modules.Sprints.Models.SprintStatus,System.Int32)">
+            <summary>Lightweight sprint summary for list views.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.DTOs.SprintWorkItemResponse">
+            <summary>A single work item entry within a sprint backlog.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.DTOs.SprintWorkItemResponse.#ctor(System.Guid,System.String,BoardSync.Api.Modules.WorkItems.Models.WorkItemType,BoardSync.Api.Modules.WorkItems.Models.WorkItemState,BoardSync.Api.Modules.WorkItems.Models.WorkItemPriority,System.Nullable{System.Guid},System.Nullable{System.Int32},System.Int32)">
+            <summary>A single work item entry within a sprint backlog.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.Models.Board">
+            <summary>
+            A Kanban/Scrum board scoped to a team.
+            One board per team, auto-created on first access with four default columns.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.Models.BoardColumn">
+            <summary>
+            A column on the Kanban board (e.g. "To Do", "In Progress", "Done").
+            Each column maps to a WorkItemState string so the board query can filter
+            work items into the correct lane without a cross-module enum dependency.
+            </summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.Sprints.Models.BoardColumn.MappedState">
+            <summary>
+            The WorkItemState name this column represents ("New", "Active", "Resolved", "Closed").
+            </summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.Sprints.Models.BoardColumn.Position">
+            <summary>Left-to-right display order (0-based).</summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.Sprints.Models.BoardColumn.WipLimit">
+            <summary>Optional WIP limit — null means no limit enforced.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.Models.SprintStatus">
+            <summary>
+            Sprint lifecycle state machine.
+            Planning → Active → Completed (transitions are one-way).
+            Only one Active sprint per team is allowed at a time.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.Models.Sprint">
+            <summary>
+            A time-boxed iteration scoped to a team.
+            </summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.Sprints.Models.Sprint.TeamId">
+            <summary>The team this sprint belongs to.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.Sprints.Models.Sprint.Number">
+            <summary>Auto-incremented sprint number within the team (Sprint 1, Sprint 2 …).</summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.Sprints.Models.Sprint.Goal">
+            <summary>Optional sprint goal / focus statement shown on the board header.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.Models.SprintWorkItem">
+            <summary>
+            Join table — assigns a work item to a sprint with an optional display order.
+            </summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.Sprints.Models.SprintWorkItem.Position">
+            <summary>Display position within the sprint backlog (0-based).</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Services.BoardService.BuildDefaultBoard(System.Guid,System.Guid)">
+            <summary>Creates a board with the four default columns mapped to WorkItemState values.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Services.IBoardService.GetOrCreateForTeamAsync(System.Guid,System.Guid,System.Threading.CancellationToken)">
+            <summary>Get (or auto-create with default columns) the board for a team.</summary>
+        </member>
         <member name="T:BoardSync.Api.Modules.WorkItems.Controllers.WorkItemsController">
             <summary>
             Work item CRUD, state transitions, comments, history, and links.
@@ -711,6 +942,18 @@
             <inheritdoc />
         </member>
         <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase2_WorkItems.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="T:BoardSync.Api.Shared.Data.Migrations.Phase3_SprintsBoards">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase3_SprintsBoards.Up(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase3_SprintsBoards.Down(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase3_SprintsBoards.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
             <inheritdoc />
         </member>
         <member name="T:BoardSync.Api.Shared.Kernel.BaseEntity">

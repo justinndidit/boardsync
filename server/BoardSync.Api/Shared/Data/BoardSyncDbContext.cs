@@ -1,5 +1,6 @@
 using BoardSync.Api.Modules.OrgProject.Models;
 using BoardSync.Api.Modules.Rbac.Models;
+using BoardSync.Api.Modules.Sprints.Models;
 using BoardSync.Api.Modules.WorkItems.Models;
 using BoardSync.Api.Shared.Auth.Models;
 using Microsoft.EntityFrameworkCore;
@@ -32,6 +33,12 @@ public class BoardSyncDbContext : DbContext
     public DbSet<Project> Projects { get; set; } = null!;
     public DbSet<Team> Teams { get; set; } = null!;
     public DbSet<TeamMembership> TeamMemberships { get; set; } = null!;
+
+    // ---- Sprints / Boards module ----
+    public DbSet<Sprint> Sprints { get; set; } = null!;
+    public DbSet<SprintWorkItem> SprintWorkItems { get; set; } = null!;
+    public DbSet<Board> Boards { get; set; } = null!;
+    public DbSet<BoardColumn> BoardColumns { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -230,6 +237,62 @@ public class BoardSyncDbContext : DbContext
             entity.HasKey(m => m.Id);
             entity.HasIndex(m => new { m.TeamId, m.UserId }).IsUnique();
             entity.HasIndex(m => m.UserId);
+        });
+
+        // ----------------------------------------------------------------
+        // Sprints / Boards Module — schema: plan
+        // ----------------------------------------------------------------
+        modelBuilder.Entity<Sprint>(entity =>
+        {
+            entity.ToTable("Sprints", "plan");
+            entity.HasKey(s => s.Id);
+            entity.HasIndex(s => s.TeamId);
+            entity.HasIndex(s => new { s.TeamId, s.Number }).IsUnique();
+            entity.HasIndex(s => s.Status);
+
+            entity.Property(s => s.Goal).HasMaxLength(500);
+            entity.Property(s => s.Status)
+                .HasMaxLength(20)
+                .HasConversion(
+                    v => v.ToString(),
+                    v => (SprintStatus)Enum.Parse(typeof(SprintStatus), v));
+
+            entity.HasMany(s => s.SprintWorkItems)
+                .WithOne(sw => sw.Sprint)
+                .HasForeignKey(sw => sw.SprintId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<SprintWorkItem>(entity =>
+        {
+            entity.ToTable("SprintWorkItems", "plan");
+            entity.HasKey(sw => sw.Id);
+            entity.HasIndex(sw => new { sw.SprintId, sw.WorkItemId }).IsUnique();
+            entity.HasIndex(sw => sw.WorkItemId);
+        });
+
+        modelBuilder.Entity<Board>(entity =>
+        {
+            entity.ToTable("Boards", "plan");
+            entity.HasKey(b => b.Id);
+            entity.HasIndex(b => b.TeamId).IsUnique(); // one board per team
+
+            entity.Property(b => b.Name).IsRequired().HasMaxLength(100);
+
+            entity.HasMany(b => b.Columns)
+                .WithOne(c => c.Board)
+                .HasForeignKey(c => c.BoardId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<BoardColumn>(entity =>
+        {
+            entity.ToTable("BoardColumns", "plan");
+            entity.HasKey(c => c.Id);
+            entity.HasIndex(c => c.BoardId);
+
+            entity.Property(c => c.Name).IsRequired().HasMaxLength(100);
+            entity.Property(c => c.MappedState).IsRequired().HasMaxLength(20);
         });
 
         // ----------------------------------------------------------------
