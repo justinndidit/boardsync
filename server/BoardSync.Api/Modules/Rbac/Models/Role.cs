@@ -1,8 +1,11 @@
- namespace BoardSync.Api.Modules.Rbac.Models;
+using System.Text.Json.Serialization;
+
+namespace BoardSync.Api.Modules.Rbac.Models;
 
 /// <summary>
 /// Roles available in the system, ordered from most to least privileged within a scope.
 /// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum RoleType
 {
     /// <summary>Can manage the entire organization: create/delete projects, manage all members.</summary>
@@ -24,6 +27,7 @@ public enum RoleType
 /// <summary>
 /// The scope at which a role assignment applies.
 /// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum RoleScope
 {
     Organization,

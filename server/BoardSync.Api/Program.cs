@@ -3,6 +3,7 @@ using BoardSync.Api.Extensions;
 using BoardSync.Api.Middleware;
 using BoardSync.Api.Modules.OrgProject.Services;
 using BoardSync.Api.Modules.Rbac.Services;
+using BoardSync.Api.Modules.Sprints.Services;
 using BoardSync.Api.Modules.WorkItems.Repository;
 using BoardSync.Api.Modules.WorkItems.Services;
 using BoardSync.Api.Shared.Auth;
@@ -42,13 +43,7 @@ if (builder.Environment.IsProduction() && configuredOrigins.Length == 0)
 }
 
 //Dependency Injection
-builder.Services.AddControllers()
-    .AddJsonOptions(options =>
-    {
-        // Serialize all enums as their string names (e.g. "OrgAdmin" not 10).
-        // This keeps role values consistent across every endpoint.
-        options.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
-    });
+builder.Services.AddControllers();
 builder.Services.AddProblemDetails();
 builder.Services.AddHealthChecks();
 
@@ -107,6 +102,10 @@ builder.Services.AddScoped<ITeamService, TeamService>();
 // WorkItems Module
 builder.Services.AddScoped<IWorkItemRepository, WorkItemRepository>();
 builder.Services.AddScoped<IWorkItemService, WorkItemService>();
+
+// Sprints / Boards Module
+builder.Services.AddScoped<ISprintService, SprintService>();
+builder.Services.AddScoped<IBoardService, BoardService>();
 
 // Add HTTP Context Accessor
 builder.Services.AddHttpContextAccessor();
