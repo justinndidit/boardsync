@@ -1,7 +1,6 @@
 using BoardSync.Api.Modules.Rbac.Models;
-using BoardSync.Api.Modules.Rbac.Services;
+using BoardSync.Api.Modules.Rbac.Services.Interfaces;
 using BoardSync.Api.Modules.Sprints.DTOs;
-using BoardSync.Api.Modules.Sprints.Models;
 using BoardSync.Api.Modules.Sprints.Services;
 using BoardSync.Api.Shared.Auth;
 using BoardSync.Api.Shared.Auth.DTOs;
