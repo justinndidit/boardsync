@@ -196,52 +196,9 @@ public class OrganizationService : IOrganizationService
         // One query for every org-scope role in this organization; matched to members in memory.
         var assignments = await _rbac.GetScopeRolesAsync(RoleScope.Organization, orgId, ct);
         var roleMap = MostPrivilegedBy(assignments, ra => ra.UserId);
-
-<<<<<<< HEAD
-        // Fetch memberships with user data in one query
-        var memberships = await query
-            .Skip(pagination.Skip)
-            .Take(pagination.PageSize)
-            .Join(_context.Users,
-                m => m.UserId,
-                u => u.Id,
-                (m, u) => new
-                {
-                    m.UserId,
-                    u.DisplayName,
-                    u.Email,
-                    u.ProfilePictureUrl,
-                    m.JoinedAt
-                })
-            .ToListAsync(ct);
-
-        // Batch-load org-scope role assignments for these members in one query,
-        // then pick the most-privileged role per user in memory (avoids (int) cast in SQL).
-        var userIds = memberships.Select(m => m.UserId).ToList();
-        var roleRows = await _context.RoleAssignments
-            .Where(ra => ra.Scope == RoleScope.Organization
-                         && ra.ScopeId == orgId
-                         && userIds.Contains(ra.UserId))
-            .Select(ra => new { ra.UserId, ra.Role })
-            .ToListAsync(ct);
-
-        var roleMap = roleRows
-            .GroupBy(ra => ra.UserId)
-            .ToDictionary(
-                g => g.Key,
-                g => g.OrderBy(ra => (int)ra.Role).First().Role);
-
-        var items = memberships.Select(m =>
-        {
-            var role = roleMap.TryGetValue(m.UserId, out var r) ? r.ToString() : "None";
-            return new OrgMemberResponse(
-                m.UserId, m.DisplayName, m.Email, m.ProfilePictureUrl, role, m.JoinedAt);
-        }).ToList();
-=======
         var items = members.Select(m => new OrgMemberResponse(
             m.UserId, m.DisplayName, m.Email, m.ProfilePictureUrl,
             RoleNameFor(roleMap, m.UserId), m.JoinedAt)).ToList();
->>>>>>> cd9a727 (decouple orgproject module services from db context)
 
         return new PagedResult<OrgMemberResponse>(items, total, pagination.Page, pagination.PageSize);
     }
@@ -254,21 +211,6 @@ public class OrganizationService : IOrganizationService
 
     private async Task<string> ResolveUserRoleAsync(Guid userId, Guid orgId, CancellationToken ct)
     {
-<<<<<<< HEAD
-        // Pull all role assignments for this user/org into memory, then pick the
-        // most-privileged one in C# — (int) cast cannot be translated against varchar column.
-        var roles = await _context.RoleAssignments
-            .Where(ra => ra.UserId == userId
-                         && ra.Scope == RoleScope.Organization
-                         && ra.ScopeId == orgId)
-            .Select(ra => ra.Role)
-            .ToListAsync(ct);
-
-        if (roles.Count == 0) return "None";
-
-        var best = roles.OrderBy(r => (int)r).First();
-        return best.ToString();
-=======
         var assignments = await _rbac.GetUserRolesAsync(userId, ct);
 
         var role = assignments
@@ -277,7 +219,6 @@ public class OrganizationService : IOrganizationService
             .FirstOrDefault()?.Role;
 
         return role?.ToString() ?? "None";
->>>>>>> cd9a727 (decouple orgproject module services from db context)
     }
 
     /// <summary>
