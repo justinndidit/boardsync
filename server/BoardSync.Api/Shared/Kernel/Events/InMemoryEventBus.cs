@@ -42,10 +42,4 @@ public class InMemoryEventBus : IEventBus
         }
     }
 
-    // Manual subscribe not needed when using DI-based handler registration,
-    // but kept to satisfy the interface for future extensibility.
-    public void Subscribe<TEvent>(IEventHandler<TEvent> handler) where TEvent : IDomainEvent
-    {
-        // No-op: DI registration is the subscribe mechanism for this implementation
-    }
 }

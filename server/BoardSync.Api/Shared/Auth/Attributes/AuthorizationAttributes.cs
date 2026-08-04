@@ -32,27 +32,10 @@ public class RequireActiveUserAttribute : AuthorizeAttribute
     }
 }
 
-/// <summary>
-/// Allows only users who own the resource or are administrators
-/// </summary>
-public class RequireOwnershipAttribute : AuthorizeAttribute
-{
-    public RequireOwnershipAttribute() : base("RequireOwnership")
-    {
-    }
-}
-
-/// <summary>
-/// Rate limiting attribute for sensitive operations
-/// </summary>
-public class RateLimitAttribute : Attribute
-{
-    public int RequestsPerMinute { get; }
-    public int RequestsPerHour { get; }
-
-    public RateLimitAttribute(int requestsPerMinute = 10, int requestsPerHour = 100)
-    {
-        RequestsPerMinute = requestsPerMinute;
-        RequestsPerHour = requestsPerHour;
-    }
-}
+// RequireOwnershipAttribute and its handler were removed: the requirement needed a resource
+// instance passed to IAuthorizationService.AuthorizeAsync, which no call site ever did, so the
+// policy could only ever fail. Resource ownership is currently enforced inside the services
+// (e.g. comment author checks in WorkItemService).
+//
+// RateLimitAttribute was also removed — it carried limits that nothing read. Rate limiting is
+// configured in Program.cs and applied with [EnableRateLimiting] plus the global limiter.

@@ -1,6 +1,6 @@
 using BoardSync.Api.Shared.Kernel;
 
-namespace BoardSync.Api.Modules.OrgProject.Models;
+namespace BoardSync.Api.Modules.OrgProject.Domain.Models;
 
 /// <summary>
 /// A team within a project. Boards and iterations are scoped to a team.

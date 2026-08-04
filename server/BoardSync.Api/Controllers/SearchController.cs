@@ -1,5 +1,5 @@
 using BoardSync.Api.Data;
-using BoardSync.Api.Modules.OrgProject.DTOs;
+using BoardSync.Api.Modules.OrgProject.Domain.DTOs;
 using BoardSync.Api.Shared.Auth;
 using BoardSync.Api.Shared.Auth.DTOs;
 using Microsoft.AspNetCore.Authorization;
@@ -57,8 +57,10 @@ public class SearchController : ControllerBase
             .Select(p => p.Id)
             .ToListAsync(ct);
 
-        // Run all four searches in parallel
-        var orgsTask = _context.Organizations
+        // These four run sequentially by design. They share the one DbContext scoped to this
+        // request, which is not thread-safe: starting them concurrently and awaiting with
+        // Task.WhenAll throws "a second operation was started on this context instance".
+        var organizations = await _context.Organizations
             .Where(o => orgIds.Contains(o.Id) && o.IsActive
                         && (o.Name.ToLower().Contains(term) || o.Slug.ToLower().Contains(term)))
             .OrderBy(o => o.Name)
@@ -66,7 +68,7 @@ public class SearchController : ControllerBase
             .Select(o => new SearchHit(o.Id, o.Name, o.Slug))
             .ToListAsync(ct);
 
-        var projectsTask = _context.Projects
+        var projects = await _context.Projects
             .Where(p => projectIds.Contains(p.Id)
                         && (p.Name.ToLower().Contains(term) || p.Slug.ToLower().Contains(term)))
             .OrderBy(p => p.Name)
@@ -74,7 +76,9 @@ public class SearchController : ControllerBase
             .Select(p => new SearchHit(p.Id, p.Name, p.Slug))
             .ToListAsync(ct);
 
-        var membersTask = _context.OrganizationMemberships
+        // Order on the joined shape, not on a constructed SearchHit: EF cannot translate an
+        // OrderBy that reads a property off a projected record and fails the whole request.
+        var members = await _context.OrganizationMemberships
             .Where(m => orgIds.Contains(m.OrganizationId))
             .Select(m => m.UserId)
             .Distinct()
@@ -84,12 +88,13 @@ public class SearchController : ControllerBase
                         || u.Email.ToLower().Contains(term))),
                 uid => uid,
                 u => u.Id,
-                (uid, u) => new SearchHit(u.Id, u.DisplayName, u.Email))
-            .OrderBy(h => h.Name)
+                (uid, u) => new { u.Id, u.DisplayName, u.Email })
+            .OrderBy(x => x.DisplayName)
             .Take(10)
+            .Select(x => new SearchHit(x.Id, x.DisplayName, x.Email))
             .ToListAsync(ct);
 
-        var workItemsTask = _context.WorkItems
+        var workItems = await _context.WorkItems
             .Where(w => projectIds.Contains(w.ProjectId)
                         && w.IsActive
                         && w.Title.ToLower().Contains(term))
@@ -98,13 +103,11 @@ public class SearchController : ControllerBase
             .Select(w => new SearchHit(w.Id, w.Title, null))
             .ToListAsync(ct);
 
-        await Task.WhenAll(orgsTask, projectsTask, membersTask, workItemsTask);
-
         var response = new GlobalSearchResponse(
-            Organizations: await orgsTask,
-            Projects: await projectsTask,
-            Members: await membersTask,
-            WorkItems: await workItemsTask
+            Organizations: organizations,
+            Projects: projects,
+            Members: members,
+            WorkItems: workItems
         );
 
         return Ok(new ApiResponse<GlobalSearchResponse>(true, "Search completed.", response));

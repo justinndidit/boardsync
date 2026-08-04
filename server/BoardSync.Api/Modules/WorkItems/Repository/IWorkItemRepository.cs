@@ -90,6 +90,16 @@ public interface IWorkItemRepository
     void AddLink(WorkItemLink link);
     void RemoveLink(WorkItemLink link);
 
+    // ── Scope resolution ──────────────────────────────────────────────────────
+    // Links and comments are addressed by their own IDs, so authorization needs a way to find
+    // the owning project before touching them.
+
+    /// <summary>Project owning the link's source work item, or null if the link does not exist.</summary>
+    Task<Guid?> GetProjectIdForLinkAsync(Guid linkId, CancellationToken ct = default);
+
+    /// <summary>Project owning the comment's work item, or null if the comment does not exist.</summary>
+    Task<Guid?> GetProjectIdForCommentAsync(Guid commentId, CancellationToken ct = default);
+
     // ── Unit of work ──────────────────────────────────────────────────────────
 
     /// <summary>Persists everything staged since the last save.</summary>

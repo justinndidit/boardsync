@@ -262,6 +262,7 @@ public class UserService : IUserService
             }
 
             user.IsEmailConfirmed = true;
+            user.IsActive = true;
             user.EmailConfirmationToken = null;
             user.EmailConfirmationTokenExpires = null;
             user.UpdatedAt = DateTime.UtcNow;

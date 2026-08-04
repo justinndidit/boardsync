@@ -47,26 +47,4 @@ public static class DatabaseExtensions
 
         return app;
     }
-
-    public static async Task SeedDatabaseAsync(this WebApplication app)
-    {
-        using var scope = app.Services.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<BoardSyncDbContext>();
-        var logger = scope.ServiceProvider.GetRequiredService<ILogger<BoardSyncDbContext>>();
-
-        try
-        {
-            logger.LogInformation("Starting database seeding...");
-
-            // Add any initial seed data here
-            // For example, default admin user, roles, etc.
-
-            await context.SaveChangesAsync();
-            logger.LogInformation("Database seeding completed successfully");
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "An error occurred while seeding the database");
-        }
-    }
 }

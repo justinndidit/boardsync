@@ -9,6 +9,12 @@ namespace BoardSync.Api.Middleware;
 
 public class GlobalExceptionHandlingMiddleware
 {
+    /// <summary>PostgreSQL SQLSTATE 23505 — unique_violation.</summary>
+    private const string UniqueViolation = "23505";
+
+    /// <summary>PostgreSQL SQLSTATE 23503 — foreign_key_violation.</summary>
+    private const string ForeignKeyViolation = "23503";
+
     private readonly RequestDelegate _next;
     private readonly ILogger<GlobalExceptionHandlingMiddleware> _logger;
     private readonly IWebHostEnvironment _environment;
@@ -82,6 +88,13 @@ public class GlobalExceptionHandlingMiddleware
             TimeoutException => (408, "Request timeout", false),
             TaskCanceledException => (408, "Request timeout", false),
             
+            // Constraint violations. A lost check-then-insert race (two callers claiming the same
+            // slug at once) is a conflict, not a server fault, and must not be reported as a 500.
+            Microsoft.EntityFrameworkCore.DbUpdateException { InnerException: Npgsql.PostgresException { SqlState: UniqueViolation } } =>
+                (409, "The resource already exists.", false),
+            Microsoft.EntityFrameworkCore.DbUpdateException { InnerException: Npgsql.PostgresException { SqlState: ForeignKeyViolation } } =>
+                (400, "The request references a resource that does not exist.", false),
+
             // Database and infrastructure errors
             Microsoft.EntityFrameworkCore.DbUpdateException => (500, "A data error occurred", false),
             System.Data.Common.DbException => (500, "A database error occurred", false),
@@ -95,40 +108,10 @@ public class GlobalExceptionHandlingMiddleware
     }
 }
 
-public class ValidationExceptionHandlingMiddleware
-{
-    private readonly RequestDelegate _next;
-    private readonly ILogger<ValidationExceptionHandlingMiddleware> _logger;
-
-    public ValidationExceptionHandlingMiddleware(RequestDelegate next, ILogger<ValidationExceptionHandlingMiddleware> logger)
-    {
-        _next = next;
-        _logger = logger;
-    }
-
-    public async Task InvokeAsync(HttpContext context)
-    {
-        await _next(context);
-
-        // Handle model validation errors
-        if (context.Response.StatusCode == 400 && !context.Response.HasStarted)
-        {
-            var requestId = context.Items["RequestId"]?.ToString() ?? "unknown";
-            _logger.LogWarning("Validation error in request {RequestId} - Status: {StatusCode}", 
-                requestId, context.Response.StatusCode);
-        }
-    }
-}
-
 public static class ExceptionMiddlewareExtensions
 {
     public static IApplicationBuilder UseGlobalExceptionHandler(this IApplicationBuilder builder)
     {
         return builder.UseMiddleware<GlobalExceptionHandlingMiddleware>();
-    }
-
-    public static IApplicationBuilder UseValidationExceptionHandler(this IApplicationBuilder builder)
-    {
-        return builder.UseMiddleware<ValidationExceptionHandlingMiddleware>();
     }
 }

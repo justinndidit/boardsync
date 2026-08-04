@@ -1,4 +1,4 @@
-using BoardSync.Api.Modules.OrgProject.Services;
+using BoardSync.Api.Modules.OrgProject.Services.Interfaces;
 using BoardSync.Api.Modules.WorkItems.DTOs;
 using BoardSync.Api.Modules.WorkItems.Events;
 using BoardSync.Api.Modules.WorkItems.Models;
@@ -373,6 +373,16 @@ public class WorkItemService : IWorkItemService
             l.Target.Title, l.Target.Type, l.Target.State
         )).ToList();
     }
+
+    // ── Scope resolution ──────────────────────────────────────────────────────
+
+    public async Task<Guid> GetProjectIdForLinkAsync(Guid linkId, CancellationToken ct = default)
+        => await _repository.GetProjectIdForLinkAsync(linkId, ct)
+           ?? throw new NotFoundException("WorkItemLink", linkId);
+
+    public async Task<Guid> GetProjectIdForCommentAsync(Guid commentId, CancellationToken ct = default)
+        => await _repository.GetProjectIdForCommentAsync(commentId, ct)
+           ?? throw new NotFoundException("Comment", commentId);
 
     // ── Private helpers ───────────────────────────────────────────────────────
 

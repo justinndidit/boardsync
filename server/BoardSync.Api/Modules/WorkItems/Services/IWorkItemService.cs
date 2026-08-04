@@ -27,4 +27,14 @@ public interface IWorkItemService
     Task<WorkItemLinkResponse> AddLinkAsync(Guid workItemId, AddWorkItemLinkRequest request, Guid createdBy, CancellationToken ct = default);
     Task RemoveLinkAsync(Guid linkId, Guid removedBy, CancellationToken ct = default);
     Task<IReadOnlyList<WorkItemLinkResponse>> GetLinksAsync(Guid workItemId, CancellationToken ct = default);
+
+    // ── Scope resolution ──────────────────────────────────────────────────────
+    // Links and comments are addressed by their own IDs, so a caller must be able to resolve the
+    // owning project in order to authorize the request before it is carried out.
+
+    /// <summary>Project owning the link. Throws <see cref="Shared.Kernel.Exceptions.NotFoundException"/> if it does not exist.</summary>
+    Task<Guid> GetProjectIdForLinkAsync(Guid linkId, CancellationToken ct = default);
+
+    /// <summary>Project owning the comment. Throws <see cref="Shared.Kernel.Exceptions.NotFoundException"/> if it does not exist.</summary>
+    Task<Guid> GetProjectIdForCommentAsync(Guid commentId, CancellationToken ct = default);
 }
