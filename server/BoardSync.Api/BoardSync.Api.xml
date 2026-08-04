@@ -65,21 +65,23 @@
             <response code="200">Password reset email sent (or user not found message for security)</response>
             <response code="429">Too many password reset attempts</response>
         </member>
-        <member name="M:BoardSync.Api.Controllers.AuthController.ResetPassword(BoardSync.Api.Shared.Auth.DTOs.ResetPasswordRequest)">
+        <member name="M:BoardSync.Api.Controllers.AuthController.ResetPasswordGet(System.String,System.String)">
             <summary>
             Reset user password using reset token
             </summary>
-            <param name="request">Password reset information including token</param>
+            <param name="email">Email address for the password reset request</param>
+            <param name="token">Password reset token sent to the user</param>
             <returns>Password reset confirmation</returns>
             <response code="200">Password reset successfully</response>
             <response code="400">Invalid token or validation errors</response>
             <response code="429">Too many password reset attempts</response>
         </member>
-        <member name="M:BoardSync.Api.Controllers.AuthController.ConfirmEmail(BoardSync.Api.Shared.Auth.DTOs.ConfirmEmailRequest)">
+        <member name="M:BoardSync.Api.Controllers.AuthController.ConfirmEmailGet(System.String,System.String)">
             <summary>
             Confirm user email address using confirmation token
             </summary>
-            <param name="request">Email confirmation information</param>
+            <param name="email">Email address to confirm</param>
+            <param name="token">Confirmation token sent to the user</param>
             <returns>Email confirmation result</returns>
             <response code="200">Email confirmed successfully</response>
             <response code="400">Invalid token or email already confirmed</response>
@@ -102,6 +104,14 @@
             <response code="200">Password changed successfully</response>
             <response code="400">Invalid current password or validation errors</response>
             <response code="401">User not authenticated</response>
+        </member>
+        <member name="M:BoardSync.Api.Controllers.AuthController.Me(System.Threading.CancellationToken)">
+            <summary>
+            Returns the currently authenticated user profile based on the server-validated bearer token.
+            </summary>
+            <returns>Authenticated user profile data with roles</returns>
+            <response code="200">Token is valid and user profile was returned</response>
+            <response code="401">Token is missing or invalid</response>
         </member>
         <member name="M:BoardSync.Api.Controllers.AuthController.GetProfile(System.Threading.CancellationToken)">
             <summary>
