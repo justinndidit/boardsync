@@ -3,6 +3,7 @@ using BoardSync.Api.Extensions;
 using BoardSync.Api.Middleware;
 using BoardSync.Api.Modules.OrgProject.Services;
 using BoardSync.Api.Modules.Rbac.Services;
+using BoardSync.Api.Modules.Sprints.Services;
 using BoardSync.Api.Modules.WorkItems.Repository;
 using BoardSync.Api.Modules.WorkItems.Services;
 using BoardSync.Api.Shared.Auth;
@@ -101,6 +102,10 @@ builder.Services.AddScoped<ITeamService, TeamService>();
 // WorkItems Module
 builder.Services.AddScoped<IWorkItemRepository, WorkItemRepository>();
 builder.Services.AddScoped<IWorkItemService, WorkItemService>();
+
+// Sprints / Boards Module
+builder.Services.AddScoped<ISprintService, SprintService>();
+builder.Services.AddScoped<IBoardService, BoardService>();
 
 // Add HTTP Context Accessor
 builder.Services.AddHttpContextAccessor();
