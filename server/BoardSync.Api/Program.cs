@@ -138,6 +138,17 @@ builder.Services.AddRateLimiter(options =>
     options.AddPolicy("auth", ctx => PartitionFor(ctx, rateLimitSettings.Auth, rateLimitSettings.Enabled));
     options.AddPolicy("password", ctx => PartitionFor(ctx, rateLimitSettings.Password, rateLimitSettings.Enabled));
 
+    // The general API budget applies to every request, including endpoints that declare no policy
+    // of their own — which was previously all of them outside AuthController.
+    //
+    // This is deliberately the global limiter rather than a RequireRateLimiting("api") convention
+    // on MapControllers: endpoint policy resolution takes the *last* EnableRateLimiting metadata,
+    // and a convention applied at Map time lands after controller attributes, so it would override
+    // AuthController's tighter "auth"/"password" budgets instead of adding to them. The global
+    // limiter composes — a request must satisfy this *and* any endpoint policy.
+    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(
+        ctx => PartitionFor(ctx, rateLimitSettings.Api, rateLimitSettings.Enabled));
+
     options.OnRejected = async (context, cancellationToken) =>
     {
         var response = context.HttpContext.Response;
@@ -212,11 +223,6 @@ builder.Services.AddAuthorization(options =>
         policy.RequireAuthenticatedUser()
               .AddRequirements(new ActiveUserRequirement()));
 
-    // Ownership policy
-    options.AddPolicy("RequireOwnership", policy =>
-        policy.RequireAuthenticatedUser()
-              .AddRequirements(new OwnershipRequirement()));
-
     // Default policy requires authentication
     options.DefaultPolicy = new AuthorizationPolicyBuilder()
         .RequireAuthenticatedUser()
@@ -231,13 +237,45 @@ builder.Services.AddAuthorization(options =>
 // Register authorization handlers
 builder.Services.AddScoped<IAuthorizationHandler, EmailConfirmedHandler>();
 builder.Services.AddScoped<IAuthorizationHandler, ActiveUserHandler>();
-builder.Services.AddScoped<IAuthorizationHandler, OwnershipHandler>();
+
+// Forwarded headers are only honoured from proxies we explicitly trust. The client IP derived here
+// keys the anonymous rate-limit partitions and is recorded against refresh tokens and failed
+// logins, so accepting X-Forwarded-For from anybody would let a caller spoof both.
+//
+// Note that clearing KnownProxies and KnownIPNetworks does NOT lock this down — when both are
+// empty ForwardedHeadersMiddleware sets checkKnownIps=false and trusts every caller's header.
+// The only safe way to express "trust nobody" is to leave the middleware out of the pipeline,
+// which is what UseForwardedHeaders below is gated on.
+var knownProxies = builder.Configuration.GetSection("ForwardedHeaders:KnownProxies").Get<string[]>() ?? [];
+var knownNetworks = builder.Configuration.GetSection("ForwardedHeaders:KnownNetworks").Get<string[]>() ?? [];
+var trustForwardedHeaders = knownProxies.Length > 0 || knownNetworks.Length > 0;
 
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
     options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+
     options.KnownIPNetworks.Clear();
     options.KnownProxies.Clear();
+
+    foreach (var proxy in knownProxies)
+    {
+        if (System.Net.IPAddress.TryParse(proxy, out var address))
+            options.KnownProxies.Add(address);
+        else
+            throw new InvalidOperationException($"ForwardedHeaders:KnownProxies contains an invalid IP address: '{proxy}'.");
+    }
+
+    foreach (var network in knownNetworks)
+    {
+        // Expected form: "10.0.0.0/8"
+        var parts = network.Split('/', 2);
+        if (parts.Length != 2 ||
+            !System.Net.IPAddress.TryParse(parts[0], out var prefix) ||
+            !int.TryParse(parts[1], out var prefixLength))
+            throw new InvalidOperationException($"ForwardedHeaders:KnownNetworks contains an invalid CIDR range: '{network}'.");
+
+        options.KnownIPNetworks.Add(new System.Net.IPNetwork(prefix, prefixLength));
+    }
 });
 
 var dataSourceBuilder = new NpgsqlDataSourceBuilder(connectionString);
@@ -299,8 +337,22 @@ if (app.Environment.IsDevelopment())
 // Exception handling (should be first in pipeline)
 app.UseGlobalExceptionHandler();
 
-// Forwarded headers must be very early for proxy deployments
-app.UseForwardedHeaders();
+// Forwarded headers must be very early for proxy deployments — but only when at least one proxy
+// or network is trusted. Registering it with an empty trust list would honour X-Forwarded-For
+// from every caller, letting anyone forge the client IP used for rate limiting and audit records.
+if (trustForwardedHeaders)
+{
+    app.UseForwardedHeaders();
+    app.Logger.LogInformation(
+        "Trusting X-Forwarded-For/Proto from {ProxyCount} proxy address(es) and {NetworkCount} network(s).",
+        knownProxies.Length, knownNetworks.Length);
+}
+else
+{
+    app.Logger.LogInformation(
+        "No ForwardedHeaders:KnownProxies or :KnownNetworks configured — forwarded headers are ignored " +
+        "and the socket peer address is used as the client IP. Configure them if running behind a proxy.");
+}
 
 // Security and logging middleware (after forwarded headers)
 app.UseSecurityHeaders();
@@ -323,16 +375,18 @@ app.UseRateLimiter();
 
 app.UseAuthorization();
 
-app.MapHealthChecks("/healthz");
+// AllowAnonymous is required, not cosmetic: the authorization fallback policy below demands an
+// authenticated user for any endpoint without its own authorization metadata, which would make
+// every orchestrator health probe fail with 401.
+app.MapHealthChecks("/healthz").AllowAnonymous();
+
 app.MapControllers();
 
 app.Run();
 
-/// <summary>
-/// Builds a rate limit partition for a single caller. Authenticated requests are keyed by user ID
-/// so that users sharing an IP (NAT, office network, mobile carrier) get independent budgets;
-/// anonymous requests fall back to the client IP.
-/// </summary>
+// Builds a rate limit partition for a single caller. Authenticated requests are keyed by user ID
+// so that users sharing an IP (NAT, office network, mobile carrier) get independent budgets;
+// anonymous requests fall back to the client IP.
 static RateLimitPartition<string> PartitionFor(HttpContext httpContext, RateLimitPolicySettings policy, bool enabled)
 {
     var userId = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
@@ -370,9 +424,13 @@ static void ValidateJwtSettings(JwtSettings jwtSettings, IWebHostEnvironment env
              (jwtSettings.Secret.Contains("${") ||
               jwtSettings.Secret.Contains("placeholder", StringComparison.OrdinalIgnoreCase) ||
               jwtSettings.Secret.Contains("change", StringComparison.OrdinalIgnoreCase) ||
-              jwtSettings.Secret.Contains("example", StringComparison.OrdinalIgnoreCase)))
+              jwtSettings.Secret.Contains("example", StringComparison.OrdinalIgnoreCase) ||
+              // The value that used to ship in appsettings.json. Anything derived from it is
+              // public in git history, so it must never sign a production token.
+              jwtSettings.Secret.Contains("YourSuperSecret", StringComparison.OrdinalIgnoreCase) ||
+              jwtSettings.Secret.Contains("Development", StringComparison.OrdinalIgnoreCase)))
     {
-        errors.Add("JWT Secret appears to contain placeholder values in production");
+        errors.Add("JWT Secret appears to contain placeholder or well-known values in production");
     }
 
     // Validate issuer and audience

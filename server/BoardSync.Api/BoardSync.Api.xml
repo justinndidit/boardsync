@@ -185,9 +185,21 @@
         <member name="M:BoardSync.Api.Controllers.UsersController.GetMe(System.Threading.CancellationToken)">
             <summary>Get the currently authenticated user's own profile.</summary>
         </member>
+        <member name="F:BoardSync.Api.Middleware.GlobalExceptionHandlingMiddleware.UniqueViolation">
+            <summary>PostgreSQL SQLSTATE 23505 — unique_violation.</summary>
+        </member>
+        <member name="F:BoardSync.Api.Middleware.GlobalExceptionHandlingMiddleware.ForeignKeyViolation">
+            <summary>PostgreSQL SQLSTATE 23503 — foreign_key_violation.</summary>
+        </member>
         <member name="T:BoardSync.Api.Modules.OrgProject.Controllers.OrganizationsController">
             <summary>
             Manage organizations (top-level tenant containers).
+            </summary>
+        </member>
+        <member name="F:BoardSync.Api.Modules.OrgProject.Controllers.OrganizationsController.AssignableOrgRoles">
+            <summary>
+            Roles assignable at organization scope. User is the "no permissions yet" default carried by
+            every authenticated account and is never granted explicitly.
             </summary>
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.OrganizationsController.GetMyOrgs(BoardSync.Api.Shared.Kernel.PaginationQuery,System.Threading.CancellationToken)">
@@ -231,6 +243,13 @@
             Manage projects within an organization.
             </summary>
         </member>
+        <member name="F:BoardSync.Api.Modules.OrgProject.Controllers.ProjectsController.AssignableProjectRoles">
+            <summary>
+            Roles that are meaningful at project scope. OrgAdmin is organization-wide (and already
+            cascades down to every project in its org), and User is the "no permissions yet" default
+            carried by every authenticated account — neither is assignable here.
+            </summary>
+        </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.ProjectsController.GetForOrg(System.Guid,BoardSync.Api.Shared.Kernel.PaginationQuery,System.Threading.CancellationToken)">
             <summary>List all projects in an organization.</summary>
         </member>
@@ -242,6 +261,39 @@
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.ProjectsController.Update(System.Guid,BoardSync.Api.Modules.OrgProject.Domain.DTOs.UpdateProjectRequest,System.Threading.CancellationToken)">
             <summary>Update project details. Requires ProjectAdmin.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.ProjectsController.GetRoles(System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            List the project-scope role assignments for a project. Requires Reader.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.ProjectsController.AssignRole(System.Guid,BoardSync.Api.Modules.OrgProject.Controllers.AssignProjectRoleRequest,System.Threading.CancellationToken)">
+            <summary>
+            Grant a user a role on this project, replacing any project-scope role they already hold.
+            Requires ProjectAdmin. Valid roles: ProjectAdmin, TeamMember, Reader.
+            </summary>
+            <remarks>
+            This is how a member of the organization gains access to a project's work items —
+            organization membership alone deliberately grants nothing inside a project.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.ProjectsController.RemoveRole(System.Guid,System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Revoke a user's project-scope role. Requires ProjectAdmin.
+            The last remaining ProjectAdmin cannot be revoked.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.OrgProject.Controllers.AssignProjectRoleRequest">
+            <summary>Request body for granting a user a project-scope role.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.AssignProjectRoleRequest.#ctor(System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType)">
+            <summary>Request body for granting a user a project-scope role.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.OrgProject.Controllers.ProjectRoleResponse">
+            <summary>A project-scope role assignment.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.ProjectRoleResponse.#ctor(System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType,System.DateTime)">
+            <summary>A project-scope role assignment.</summary>
         </member>
         <member name="T:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController">
             <summary>
@@ -581,6 +633,12 @@
             For Scope=Organization this is the OrgId,
             for Scope=Project this is the ProjectId,
             for Scope=Team this is the TeamId.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Services.Implementations.RbacService.RolesSatisfying(BoardSync.Api.Modules.Rbac.Models.RoleType)">
+            <summary>
+            Every role at least as privileged as <paramref name="minimumRole"/>. Lower enum value means
+            more privileged, so this is every role whose value is &lt;= the requirement.
             </summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Rbac.Services.Interfaces.IRbacService.AssignRoleAsync(System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType,BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid,System.Nullable{System.Guid},System.Threading.CancellationToken)">
@@ -1002,11 +1060,23 @@
         <member name="M:BoardSync.Api.Modules.WorkItems.Repository.IWorkItemRepository.GetLinksWithTargetAsync(System.Guid,System.Threading.CancellationToken)">
             <summary>Outgoing links for a work item, with the target work item loaded.</summary>
         </member>
+        <member name="M:BoardSync.Api.Modules.WorkItems.Repository.IWorkItemRepository.GetProjectIdForLinkAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Project owning the link's source work item, or null if the link does not exist.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.WorkItems.Repository.IWorkItemRepository.GetProjectIdForCommentAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Project owning the comment's work item, or null if the comment does not exist.</summary>
+        </member>
         <member name="M:BoardSync.Api.Modules.WorkItems.Repository.IWorkItemRepository.SaveChangesAsync(System.Threading.CancellationToken)">
             <summary>Persists everything staged since the last save.</summary>
         </member>
         <member name="T:BoardSync.Api.Modules.WorkItems.Repository.WorkItemRepository">
             <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Modules.WorkItems.Services.IWorkItemService.GetProjectIdForLinkAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Project owning the link. Throws <see cref="T:BoardSync.Api.Shared.Kernel.Exceptions.NotFoundException"/> if it does not exist.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.WorkItems.Services.IWorkItemService.GetProjectIdForCommentAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Project owning the comment. Throws <see cref="T:BoardSync.Api.Shared.Kernel.Exceptions.NotFoundException"/> if it does not exist.</summary>
         </member>
         <member name="T:BoardSync.Api.Modules.WorkItems.Services.WorkItemService">
             <summary>
@@ -1035,16 +1105,6 @@
         <member name="T:BoardSync.Api.Shared.Auth.Attributes.RequireActiveUserAttribute">
             <summary>
             Requires the user to be active (not locked or deactivated)
-            </summary>
-        </member>
-        <member name="T:BoardSync.Api.Shared.Auth.Attributes.RequireOwnershipAttribute">
-            <summary>
-            Allows only users who own the resource or are administrators
-            </summary>
-        </member>
-        <member name="T:BoardSync.Api.Shared.Auth.Attributes.RateLimitAttribute">
-            <summary>
-            Rate limiting attribute for sensitive operations
             </summary>
         </member>
         <member name="T:BoardSync.Api.Shared.Auth.DTOs.UserRoleResponse">
@@ -1169,9 +1229,6 @@
         </member>
         <member name="M:BoardSync.Api.Shared.Kernel.Events.IEventBus.PublishAsync``1(``0,System.Threading.CancellationToken)">
             <summary>Publish a domain event to all registered handlers.</summary>
-        </member>
-        <member name="M:BoardSync.Api.Shared.Kernel.Events.IEventBus.Subscribe``1(BoardSync.Api.Shared.Kernel.Events.IEventHandler{``0})">
-            <summary>Subscribe a handler for a specific event type.</summary>
         </member>
         <member name="T:BoardSync.Api.Shared.Kernel.Events.IEventHandler`1">
             <summary>

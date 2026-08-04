@@ -21,11 +21,9 @@ public class SecurityHeadersMiddleware
         context.Response.Headers.Append("Referrer-Policy", "strict-origin-when-cross-origin");
         context.Response.Headers.Append("Permissions-Policy", "geolocation=(), microphone=(), camera=()");
         
-        // HSTS (HTTP Strict Transport Security)
-        if (context.Request.IsHttps)
-        {
-            context.Response.Headers.Append("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
-        }
+        // HSTS is intentionally not set here. UseHsts() owns it and is registered for Production
+        // only — emitting it from this middleware as well duplicated the header and pinned HSTS on
+        // developer machines running local HTTPS, which browsers then cache for a year.
 
         // Content Security Policy (basic)
         context.Response.Headers.Append("Content-Security-Policy", 

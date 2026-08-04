@@ -374,6 +374,16 @@ public class WorkItemService : IWorkItemService
         )).ToList();
     }
 
+    // ── Scope resolution ──────────────────────────────────────────────────────
+
+    public async Task<Guid> GetProjectIdForLinkAsync(Guid linkId, CancellationToken ct = default)
+        => await _repository.GetProjectIdForLinkAsync(linkId, ct)
+           ?? throw new NotFoundException("WorkItemLink", linkId);
+
+    public async Task<Guid> GetProjectIdForCommentAsync(Guid commentId, CancellationToken ct = default)
+        => await _repository.GetProjectIdForCommentAsync(commentId, ct)
+           ?? throw new NotFoundException("Comment", commentId);
+
     // ── Private helpers ───────────────────────────────────────────────────────
 
     private async Task<WorkItem> GetWorkItemOrThrowAsync(Guid id, CancellationToken ct)

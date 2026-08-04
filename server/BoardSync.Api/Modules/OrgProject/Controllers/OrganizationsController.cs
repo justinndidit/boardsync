@@ -21,6 +21,13 @@ namespace BoardSync.Api.Modules.OrgProject.Controllers;
 [Produces("application/json")]
 public class OrganizationsController : ControllerBase
 {
+    /// <summary>
+    /// Roles assignable at organization scope. User is the "no permissions yet" default carried by
+    /// every authenticated account and is never granted explicitly.
+    /// </summary>
+    private static readonly RoleType[] AssignableOrgRoles =
+        [RoleType.OrgAdmin, RoleType.ProjectAdmin, RoleType.TeamMember, RoleType.Reader];
+
     private readonly IOrganizationService _orgService;
     private readonly IRbacService _rbac;
     private readonly ICurrentUserContext _currentUser;
@@ -141,6 +148,10 @@ public class OrganizationsController : ControllerBase
     {
         await RequireOrgRoleAsync(orgId, RoleType.OrgAdmin, ct);
 
+        if (!AssignableOrgRoles.Contains(request.Role))
+            return BadRequest(new ApiResponse(false,
+                $"'{request.Role}' cannot be assigned at organization scope. Valid roles: {string.Join(", ", AssignableOrgRoles)}."));
+
         // Validate the target user is actually a member
         var isMember = await _orgService.IsMemberAsync(orgId, userId, ct);
         if (!isMember)
@@ -149,6 +160,13 @@ public class OrganizationsController : ControllerBase
         // Remove any existing org-scope role for this user and reassign
         var existingRoles = await _rbac.GetScopeRolesAsync(RoleScope.Organization, orgId, ct);
         var currentOrgRole = existingRoles.FirstOrDefault(r => r.UserId == userId);
+
+        // Refuse to demote the last OrgAdmin — the organization would become unmanageable, and
+        // OrgAdmin is the only role that can hand out organization roles in the first place.
+        if (currentOrgRole?.Role == RoleType.OrgAdmin &&
+            request.Role != RoleType.OrgAdmin &&
+            existingRoles.Count(r => r.Role == RoleType.OrgAdmin) == 1)
+            return BadRequest(new ApiResponse(false, "Cannot demote the last OrgAdmin of an organization."));
 
         if (currentOrgRole != null)
             await _rbac.RemoveRoleAsync(userId, currentOrgRole.Role, RoleScope.Organization, orgId, ct);

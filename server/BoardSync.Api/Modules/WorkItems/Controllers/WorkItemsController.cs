@@ -167,6 +167,11 @@ public class WorkItemsController : ControllerBase
         [FromBody] UpdateWorkItemCommentRequest request,
         CancellationToken ct)
     {
+        // Author-only is enforced in the service; this gates on project access first so a caller
+        // with no rights to the project cannot probe comment IDs.
+        await RequireProjectRoleAsync(await _workItemService.GetProjectIdForCommentAsync(commentId, ct),
+            RoleType.TeamMember, ct);
+
         var comment = await _workItemService.UpdateCommentAsync(commentId, request, _currentUser.UserId, ct);
         return Ok(new ApiResponse<WorkItemCommentResponse>(true, "Comment updated.", comment));
     }
@@ -178,6 +183,9 @@ public class WorkItemsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteComment(Guid commentId, CancellationToken ct)
     {
+        await RequireProjectRoleAsync(await _workItemService.GetProjectIdForCommentAsync(commentId, ct),
+            RoleType.TeamMember, ct);
+
         await _workItemService.DeleteCommentAsync(commentId, _currentUser.UserId, ct);
         return NoContent();
     }
@@ -236,6 +244,9 @@ public class WorkItemsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> RemoveLink(Guid linkId, CancellationToken ct)
     {
+        await RequireProjectRoleAsync(await _workItemService.GetProjectIdForLinkAsync(linkId, ct),
+            RoleType.TeamMember, ct);
+
         await _workItemService.RemoveLinkAsync(linkId, _currentUser.UserId, ct);
         return NoContent();
     }
