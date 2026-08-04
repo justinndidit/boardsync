@@ -5,13 +5,9 @@ using BoardSync.Api.Modules.OrgProject.Repositories.Implementations;
 using BoardSync.Api.Modules.OrgProject.Repositories.Interfaces;
 using BoardSync.Api.Modules.OrgProject.Services.Implementations;
 using BoardSync.Api.Modules.OrgProject.Services.Interfaces;
-<<<<<<< HEAD
-using BoardSync.Api.Modules.Rbac.Services;
 using BoardSync.Api.Modules.Sprints.Services;
-=======
 using BoardSync.Api.Modules.Rbac.Services.Interfaces;
 using BoardSync.Api.Modules.Rbac.Services.Implementations;
->>>>>>> cd9a727 (decouple orgproject module services from db context)
 using BoardSync.Api.Modules.WorkItems.Repository;
 using BoardSync.Api.Modules.WorkItems.Services;
 using BoardSync.Api.Shared.Auth;

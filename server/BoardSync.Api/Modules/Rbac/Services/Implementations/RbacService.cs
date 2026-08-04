@@ -69,7 +69,6 @@ public class RbacService : IRbacService
         Guid scopeId,
         CancellationToken ct = default)
     {
-<<<<<<< HEAD
         // Load all role assignments for this user at this scope into memory,
         // then do the numeric privilege comparison in C#.
         // We cannot use (int)ra.Role in SQL because the column is stored as a
@@ -80,7 +79,6 @@ public class RbacService : IRbacService
                          && ra.ScopeId == scopeId)
             .Select(ra => ra.Role)
             .ToListAsync(ct);
-=======
         // A role satisfies the requirement if its numeric value is <= minimumRole
         // (lower value = more privileged in the enum).
         //
@@ -90,14 +88,6 @@ public class RbacService : IRbacService
         // 'TeamMember' <= 'Reader' is false and 'Reader' <= 'TeamMember' is true, which both denies
         // team members read access and lets readers perform team-member writes.
         var satisfyingRoles = RolesSatisfying(minimumRole);
-
-        var directMatch = await _context.RoleAssignments.AnyAsync(
-            ra => ra.UserId == userId
-                  && ra.Scope == scope
-                  && ra.ScopeId == scopeId
-                  && satisfyingRoles.Contains(ra.Role),
-            ct);
->>>>>>> 5f7a978 (code quality compliance, harden domain driven architecture)
 
         var directMatch = assignments.Any(role => (int)role <= (int)minimumRole);
         if (directMatch) return true;
