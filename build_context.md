@@ -279,7 +279,7 @@ The Shared Kernel is not a "module" with unique business logic, but rather share
 ## PART 2: Phased Delivery Plan (Build Phases)
 
 ### Phasing Philosophy
-This phased approach focuses on **incremental delivery**. Each phase produces a usable, demoable slice. Modules are built in strict dependency order (foundational modules first). 
+This phased approach focuses on **incremental delivery**. Each phase produces a usable, demoable slice. Modules are built in strict dependency order (foundational modules first).
 
 Because Work Item Management, Sprints, and Boards form the absolute core of "a task board with sprint planning," the phases are ordered to get a **Walking Skeleton** (`Auth` → `Project` → `Work Item` → `Board`) working as early as possible. Afterward, the plan layers in Sprints, Backlog planning tools, usability enhancements (Search, Notifications), and finally reporting capabilities.
 

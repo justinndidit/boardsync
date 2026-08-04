@@ -20,21 +20,21 @@ public class EmailService : IEmailService
 
     public async Task<ApiResponse> SendEmailConfirmationAsync(string email, string token, string baseUrl)
     {
-        var confirmationUrl = $"{baseUrl}/auth/confirm-email?email={Uri.EscapeDataString(email)}&token={Uri.EscapeDataString(token)}";
-        
+        var confirmationUrl = $"{baseUrl}/api/auth/confirm-email?email={Uri.EscapeDataString(email)}&token={Uri.EscapeDataString(token)}";
+
         var subject = "Confirm Your Email Address - BoardSync";
         var body = GenerateEmailConfirmationTemplate(confirmationUrl);
-        
+
         return await SendEmailAsync(email, subject, body);
     }
 
     public async Task<ApiResponse> SendPasswordResetAsync(string email, string token, string baseUrl)
     {
-        var resetUrl = $"{baseUrl}/auth/reset-password?email={Uri.EscapeDataString(email)}&token={Uri.EscapeDataString(token)}";
-        
+        var resetUrl = $"{baseUrl}/api/auth/reset-password?email={Uri.EscapeDataString(email)}&token={Uri.EscapeDataString(token)}";
+
         var subject = "Reset Your Password - BoardSync";
         var body = GeneratePasswordResetTemplate(resetUrl);
-        
+
         return await SendEmailAsync(email, subject, body);
     }
 
@@ -42,7 +42,7 @@ public class EmailService : IEmailService
     {
         var subject = "Welcome to BoardSync!";
         var body = GenerateWelcomeTemplate(firstName, baseUrl);
-        
+
         return await SendEmailAsync(email, subject, body);
     }
 
@@ -68,12 +68,12 @@ public class EmailService : IEmailService
 
             using var client = new SmtpClient();
             await client.ConnectAsync(_emailSettings.SmtpServer, _emailSettings.SmtpPort, _emailSettings.EnableSsl);
-            
+
             if (!string.IsNullOrEmpty(_emailSettings.Username))
             {
                 await client.AuthenticateAsync(_emailSettings.Username, _emailSettings.Password);
             }
-            
+
             await client.SendAsync(message);
             await client.DisconnectAsync(true);
 
@@ -96,7 +96,7 @@ public class EmailService : IEmailService
                     <h2 style='color: #2c3e50;'>Confirm Your Email Address</h2>
                     <p>Thank you for registering with BoardSync! Please confirm your email address by clicking the button below:</p>
                     <div style='text-align: center; margin: 30px 0;'>
-                        <a href='{confirmationUrl}' 
+                        <a href='{confirmationUrl}'
                            style='background-color: #3498db; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block;'>
                            Confirm Email Address
                         </a>
@@ -120,7 +120,7 @@ public class EmailService : IEmailService
                     <h2 style='color: #2c3e50;'>Reset Your Password</h2>
                     <p>We received a request to reset your password for your BoardSync account. Click the button below to reset it:</p>
                     <div style='text-align: center; margin: 30px 0;'>
-                        <a href='{resetUrl}' 
+                        <a href='{resetUrl}'
                            style='background-color: #e74c3c; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block;'>
                            Reset Password
                         </a>
@@ -137,7 +137,7 @@ public class EmailService : IEmailService
 
     private static string GenerateWelcomeTemplate(string firstName, string baseUrl)
     {
-        var loginUrl = $"{baseUrl}/auth/login";
+        var loginUrl = $"{baseUrl}/api/auth/login";
         return $@"
             <html>
             <body style='font-family: Arial, sans-serif; line-height: 1.6; color: #333;'>
@@ -146,7 +146,7 @@ public class EmailService : IEmailService
                     <p>Your account has been successfully created and your email has been confirmed.</p>
                     <p>You can now start using BoardSync to manage your projects and collaborate with your team.</p>
                     <div style='text-align: center; margin: 30px 0;'>
-                        <a href='{loginUrl}' 
+                        <a href='{loginUrl}'
                            style='background-color: #27ae60; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block;'>
                            Get Started
                         </a>

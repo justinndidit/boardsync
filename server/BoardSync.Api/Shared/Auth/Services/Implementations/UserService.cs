@@ -101,6 +101,7 @@ public class UserService : IUserService
                 LastName = request.LastName,
                 DisplayName = request.DisplayName ?? $"{request.FirstName} {request.LastName}",
                 PasswordHash = _passwordService.HashPassword(request.Password),
+                IsActive = !_securitySettings.RequireEmailConfirmation,
                 IsEmailConfirmed = !_securitySettings.RequireEmailConfirmation,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow

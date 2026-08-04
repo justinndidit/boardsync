@@ -41,6 +41,7 @@ public class WorkItemService : IWorkItemService
         Guid createdBy,
         CancellationToken ct = default)
     {
+        Enum.TryParse<WorkItemType>(request.Type, ignoreCase: true, out WorkItemType workItemTypeParsed);
         if (!await _projectService.ExistsAsync(projectId, ct))
             throw new NotFoundException("Project", projectId);
 
@@ -49,7 +50,7 @@ public class WorkItemService : IWorkItemService
             var parent = await _repository.GetActiveInProjectAsync(request.ParentId.Value, projectId, ct)
                 ?? throw new NotFoundException("Parent work item", request.ParentId.Value);
 
-            ValidateHierarchy(parent.Type, request.Type);
+            ValidateHierarchy(parent.Type, workItemTypeParsed);
         }
 
         var item = new WorkItem
@@ -57,7 +58,7 @@ public class WorkItemService : IWorkItemService
             ProjectId = projectId,
             TeamId = request.TeamId,
             ParentId = request.ParentId,
-            Type = request.Type,
+            Type = workItemTypeParsed,
             State = WorkItemState.New,
             Priority = request.Priority,
             Title = request.Title.Trim(),

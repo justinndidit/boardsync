@@ -13,7 +13,7 @@ public class CreateWorkItemRequest
     public string? Description { get; init; }
 
     [Required]
-    public WorkItemType Type { get; init; }
+    public string Type { get; init; } = string.Empty;
 
     public WorkItemPriority Priority { get; init; } = WorkItemPriority.Medium;
 
