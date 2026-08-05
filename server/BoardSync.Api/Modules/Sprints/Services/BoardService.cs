@@ -231,6 +231,11 @@ public class BoardService : IBoardService
 
     private static BoardColumnDetailResponse MapColumnDetail(BoardColumn c) =>
         new(c.Id, c.BoardId, c.Name, c.MappedState, c.Position, c.WipLimit, c.CreatedAt);
+
+  public Task<BoardResponse> GetOrCreateForTeamAsync(Guid projectId, Guid createdBy, CancellationToken ct = default)
+  {
+    throw new NotImplementedException();
+  }
 }
   //  public Task<BoardResponse> GetOrCreateForPAsync(Guid projectId, Guid createdBy, CancellationToken ct = default)
    // {
