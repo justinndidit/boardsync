@@ -11,4 +11,5 @@ public interface ITeamService
     Task<TeamMemberResponse> AddMemberAsync(Guid teamId, Guid userId, Guid addedBy, CancellationToken ct = default);
     Task RemoveMemberAsync(Guid teamId, Guid userId, CancellationToken ct = default);
     Task<PagedResult<TeamMemberResponse>> GetMembersAsync(Guid teamId, PaginationQuery pagination, CancellationToken ct = default);
+    Task<bool> IsMember(Guid teamId, Guid userId, CancellationToken ct = default);
 }
