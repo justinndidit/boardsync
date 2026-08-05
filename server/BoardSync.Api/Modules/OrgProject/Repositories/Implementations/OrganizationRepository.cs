@@ -1,5 +1,6 @@
 using BoardSync.Api.Data;
 using BoardSync.Api.Modules.OrgProject.Domain.Models;
+using BoardSync.Api.Modules.OrgProject.Domain.DTOs;
 using BoardSync.Api.Modules.OrgProject.Repositories.Interfaces;
 using Microsoft.EntityFrameworkCore;
 

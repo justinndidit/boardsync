@@ -144,10 +144,19 @@ public class BoardSyncDbContext : DbContext
         modelBuilder.Entity<RoleAssignment>(entity =>
         {
             entity.ToTable("RoleAssignments", "iam");
+            entity.ToTable(t => t.HasCheckConstraint(
+                "CK_RoleAssignment_ExactlyOneScope",
+                @"(CASE WHEN ""OrganizationId"" IS NOT NULL THEN 1 ELSE 0 END +
+                CASE WHEN ""ProjectId"" IS NOT NULL THEN 1 ELSE 0 END +
+                CASE WHEN ""TeamId"" IS NOT NULL THEN 1 ELSE 0 END) = 1"
+            ));
             entity.HasKey(r => r.Id);
-            entity.HasIndex(r => new { r.UserId, r.Role, r.Scope, r.ScopeId }).IsUnique();
-            entity.HasIndex(r => new { r.Scope, r.ScopeId });
+            // entity.HasIndex(r => new { r.UserId, r.Role, r.Scope, r.TeamId, r.ProjectId, r.OrganizationId });
+            entity.HasIndex(r => new { r.Scope, r.ProjectId, r.TeamId, r.OrganizationId });
             entity.HasIndex(r => r.UserId);
+            entity.HasIndex(r => r.TeamId);
+            entity.HasIndex(r => r.ProjectId);
+            entity.HasIndex(r => r.OrganizationId);
 
             // Store enum as its name string (e.g. "OrgAdmin"), not the numeric value ("10").
             // ValueConverter ensures EF uses Enum.GetName / Enum.Parse rather than (int) cast.
@@ -162,6 +171,20 @@ public class BoardSyncDbContext : DbContext
                 .HasConversion(
                     v => v.ToString(),
                     v => (RoleScope)Enum.Parse(typeof(RoleScope), v));
+            entity.HasOne<Organization>()
+                .WithMany()
+                .HasForeignKey(r => r.OrganizationId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne<Project>()
+                .WithMany()
+                .HasForeignKey(r => r.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne<Team>()
+                .WithMany()
+                .HasForeignKey(r => r.TeamId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         // ----------------------------------------------------------------
@@ -209,17 +232,17 @@ public class BoardSyncDbContext : DbContext
             entity.Property(p => p.Name).IsRequired().HasMaxLength(100);
             entity.Property(p => p.Description).HasMaxLength(500);
 
-            entity.HasMany(p => p.Teams)
-                .WithOne(t => t.Project)
-                .HasForeignKey(t => t.ProjectId)
-                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(p => p.AssignedTeam)
+                .WithMany(t => t.AssignedProjects)
+                .HasForeignKey(p => p.AssignedTeamId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<Team>(entity =>
         {
             entity.ToTable("Teams", "org");
             entity.HasKey(t => t.Id);
-            entity.HasIndex(t => new { t.ProjectId, t.Name }).IsUnique();
+            entity.HasIndex(t => new { t.OrganizationId, t.Name }).IsUnique();
             entity.HasIndex(t => t.IsActive);
 
             entity.Property(t => t.Name).IsRequired().HasMaxLength(100);
@@ -228,6 +251,10 @@ public class BoardSyncDbContext : DbContext
             entity.HasMany(t => t.Members)
                 .WithOne(m => m.Team)
                 .HasForeignKey(m => m.TeamId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<Organization>()
+                .WithMany()
+                .HasForeignKey(t => t.OrganizationId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

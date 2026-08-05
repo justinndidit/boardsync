@@ -19,7 +19,7 @@ public record ProjectCreated(
 
 public record TeamCreated(
     Guid TeamId,
-    Guid ProjectId,
+    Guid OrganizationId,
     string Name,
     Guid CreatedByUserId
 ) : DomainEvent;
@@ -32,7 +32,7 @@ public record MemberAddedToOrg(
 
 public record MemberAddedToTeam(
     Guid TeamId,
-    Guid ProjectId,
+    Guid OrganizationId,
     Guid UserId,
     Guid AddedByUserId
 ) : DomainEvent;

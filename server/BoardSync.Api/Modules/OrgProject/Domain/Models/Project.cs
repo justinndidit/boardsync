@@ -7,8 +7,9 @@ namespace BoardSync.Api.Modules.OrgProject.Domain.Models;
 /// </summary>
 public class Project : BaseEntity
 {
-    public Guid OrganizationId { get; set; }
+    public Guid OrganizationId { get; set; } //project belong to organization
 
+    public Guid AssignedTeamId {get; set;}  // foreignkey linking project to assigned team
     /// <summary>Unique slug within the organization (used in URLs).</summary>
     public string Slug { get; set; } = string.Empty;
 
@@ -16,7 +17,6 @@ public class Project : BaseEntity
     public string Description { get; set; } = string.Empty;
     public bool IsActive { get; set; } = true;
 
-    // Navigation
     public virtual Organization Organization { get; set; } = null!;
-    public virtual ICollection<Team> Teams { get; set; } = new List<Team>();
+    public virtual Team AssignedTeam { get; set; } = null!;
 }

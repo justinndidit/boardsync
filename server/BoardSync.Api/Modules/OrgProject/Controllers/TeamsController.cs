@@ -33,16 +33,16 @@ public class TeamsController : ControllerBase
         _currentUser = currentUser;
     }
 
-    /// <summary>List all teams in a project.</summary>
-    [HttpGet("api/projects/{projectId:guid}/teams")]
-    [ProducesResponseType(typeof(ApiResponse<PagedResult<TeamResponse>>), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status403Forbidden)]
-    public async Task<IActionResult> GetForProject(Guid projectId, [FromQuery] PaginationQuery pagination, CancellationToken ct)
-    {
-        await RequireProjectRoleAsync(projectId, RoleType.Reader, ct);
-        var result = await _teamService.GetForProjectAsync(projectId, pagination, ct);
-        return Ok(new ApiResponse<PagedResult<TeamResponse>>(true, "Teams retrieved.", result));
-    }
+    // /// <summary>List all teams in a project.</summary>
+    // [HttpGet("api/projects/{projectId:guid}/teams")]
+    // [ProducesResponseType(typeof(ApiResponse<PagedResult<TeamResponse>>), StatusCodes.Status200OK)]
+    // [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    // public async Task<IActionResult> GetForProject(Guid projectId, [FromQuery] PaginationQuery pagination, CancellationToken ct)
+    // {
+    //     await RequireProjectRoleAsync(projectId, RoleType.Reader, ct);
+    //     var result = await _teamService.GetForProjectAsync(projectId, pagination, ct);
+    //     return Ok(new ApiResponse<PagedResult<TeamResponse>>(true, "Teams retrieved.", result));
+    // }
 
     /// <summary>Create a new team in a project. Requires ProjectAdmin.</summary>
     [HttpPost("api/projects/{projectId:guid}/teams")]

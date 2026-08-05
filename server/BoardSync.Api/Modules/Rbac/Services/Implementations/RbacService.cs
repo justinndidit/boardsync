@@ -24,20 +24,13 @@ public class RbacService : IRbacService
         Guid? assignedBy = null,
         CancellationToken ct = default)
     {
-        var existing = await _context.RoleAssignments.FirstOrDefaultAsync(
-            ra => ra.UserId == userId && ra.Role == role && ra.Scope == scope && ra.ScopeId == scopeId, ct);
+        var existing = await WhereScope(_context.RoleAssignments, scope, scopeId)
+            .FirstOrDefaultAsync(ra => ra.UserId == userId && ra.Role == role, ct);
 
         if (existing != null)
             return existing;
 
-        var assignment = new RoleAssignment
-        {
-            UserId = userId,
-            Role = role,
-            Scope = scope,
-            ScopeId = scopeId,
-            CreatedBy = assignedBy
-        };
+        var assignment = CreateAssignment(userId, role, scope, scopeId, assignedBy);
 
         _context.RoleAssignments.Add(assignment);
         await _context.SaveChangesAsync(ct);
@@ -50,8 +43,8 @@ public class RbacService : IRbacService
 
     public async Task RemoveRoleAsync(Guid userId, RoleType role, RoleScope scope, Guid scopeId, CancellationToken ct = default)
     {
-        var assignment = await _context.RoleAssignments.FirstOrDefaultAsync(
-            ra => ra.UserId == userId && ra.Role == role && ra.Scope == scope && ra.ScopeId == scopeId, ct);
+        var assignment = await WhereScope(_context.RoleAssignments, scope, scopeId)
+            .FirstOrDefaultAsync(ra => ra.UserId == userId && ra.Role == role, ct);
 
         if (assignment == null) return;
 
@@ -73,12 +66,11 @@ public class RbacService : IRbacService
         // then do the numeric privilege comparison in C#.
         // We cannot use (int)ra.Role in SQL because the column is stored as a
         // character varying (HasConversion<string>) and Postgres rejects integer casts on it.
-        var assignments = await _context.RoleAssignments
-            .Where(ra => ra.UserId == userId
-                         && ra.Scope == scope
-                         && ra.ScopeId == scopeId)
+        var assignments = await WhereScope(_context.RoleAssignments, scope, scopeId)
+            .Where(ra => ra.UserId == userId)
             .Select(ra => ra.Role)
             .ToListAsync(ct);
+
         // A role satisfies the requirement if its numeric value is <= minimumRole
         // (lower value = more privileged in the enum).
         //
@@ -88,8 +80,7 @@ public class RbacService : IRbacService
         // 'TeamMember' <= 'Reader' is false and 'Reader' <= 'TeamMember' is true, which both denies
         // team members read access and lets readers perform team-member writes.
         var satisfyingRoles = RolesSatisfying(minimumRole);
-
-        var directMatch = assignments.Any(role => (int)role <= (int)minimumRole);
+        var directMatch = assignments.Any(satisfyingRoles.Contains);
         if (directMatch) return true;
 
         // OrgAdmin implicitly satisfies any project/team scope check within that org.
@@ -111,14 +102,67 @@ public class RbacService : IRbacService
 
     public async Task<IReadOnlyList<RoleAssignment>> GetScopeRolesAsync(RoleScope scope, Guid scopeId, CancellationToken ct = default)
     {
-        return await _context.RoleAssignments
-            .Where(ra => ra.Scope == scope && ra.ScopeId == scopeId)
+        return await WhereScope(_context.RoleAssignments, scope, scopeId)
             .ToListAsync(ct);
     }
+
+    public async Task RemoveAllRolesAsync(Guid userId, RoleScope scope, Guid scopeId, CancellationToken ct = default)
+{
+    var assignments = await WhereScope(_context.RoleAssignments, scope, scopeId)
+        .Where(ra => ra.UserId == userId)
+        .ToListAsync(ct);
+
+    if (assignments.Count == 0) return;
+
+    _context.RoleAssignments.RemoveRange(assignments);
+    await _context.SaveChangesAsync(ct);
+
+    _logger.LogInformation("Removed {Count} role(s) from user {UserId} at {Scope}:{ScopeId}",
+        assignments.Count, userId, scope, scopeId);
+}
 
     // -------------------------------------------------------------------------
     // Private helpers
     // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Filters a RoleAssignment query to the given scope, comparing against
+    /// whichever of OrganizationId/ProjectId/TeamId matches the scope.
+    /// </summary>
+    private static IQueryable<RoleAssignment> WhereScope(
+        IQueryable<RoleAssignment> query, RoleScope scope, Guid scopeId) => scope switch
+    {
+        RoleScope.Organization => query.Where(ra => ra.OrganizationId == scopeId),
+        RoleScope.Project => query.Where(ra => ra.ProjectId == scopeId),
+        RoleScope.Team => query.Where(ra => ra.TeamId == scopeId),
+        _ => throw new ArgumentOutOfRangeException(nameof(scope), scope, "Unhandled RoleScope value.")
+    };
+
+    /// <summary>
+    /// Builds a RoleAssignment with exactly the scope column populated that
+    /// matches <paramref name="scope"/>, leaving the other two null.
+    /// </summary>
+    private static RoleAssignment CreateAssignment(
+        Guid userId, RoleType role, RoleScope scope, Guid scopeId, Guid? assignedBy)
+    {
+        var assignment = new RoleAssignment
+        {
+            UserId = userId,
+            Role = role,
+            Scope = scope,
+            CreatedBy = assignedBy
+        };
+
+        switch (scope)
+        {
+            case RoleScope.Organization: assignment.OrganizationId = scopeId; break;
+            case RoleScope.Project: assignment.ProjectId = scopeId; break;
+            case RoleScope.Team: assignment.TeamId = scopeId; break;
+            default: throw new ArgumentOutOfRangeException(nameof(scope), scope, "Unhandled RoleScope value.");
+        }
+
+        return assignment;
+    }
 
     /// <summary>
     /// Every role at least as privileged as <paramref name="minimumRole"/>. Lower enum value means
@@ -134,7 +178,7 @@ public class RbacService : IRbacService
         // Get all orgs where this user is OrgAdmin
         var orgAdminOrgIds = await _context.RoleAssignments
             .Where(ra => ra.UserId == userId && ra.Role == RoleType.OrgAdmin && ra.Scope == RoleScope.Organization)
-            .Select(ra => ra.ScopeId)
+            .Select(ra => ra.OrganizationId!.Value)
             .ToListAsync(ct);
 
         if (orgAdminOrgIds.Count == 0) return false;
@@ -148,8 +192,7 @@ public class RbacService : IRbacService
         if (scope == RoleScope.Team)
         {
             return await _context.Teams
-                .Include(t => t.Project)
-                .AnyAsync(t => t.Id == scopeId && orgAdminOrgIds.Contains(t.Project.OrganizationId), ct);
+                .AnyAsync(t => t.Id == scopeId && orgAdminOrgIds.Contains(t.OrganizationId), ct);
         }
 
         return false;

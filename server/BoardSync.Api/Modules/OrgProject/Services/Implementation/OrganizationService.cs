@@ -113,7 +113,7 @@ public class OrganizationService : IOrganizationService
         var assignments = await _rbac.GetUserRolesAsync(userId, ct);
         var roleMap = MostPrivilegedBy(
             assignments.Where(ra => ra.Scope == RoleScope.Organization),
-            ra => ra.ScopeId);
+            ra => ra.OrganizationId!.Value);
 
         var items = records.Select(o => new OrganizationSummaryResponse(
             o.Id, o.Slug, o.Name, o.AvatarUrl, o.Description, o.IsActive,
@@ -152,20 +152,22 @@ public class OrganizationService : IOrganizationService
         if (!user.Success || user.Data is null)
             throw new NotFoundException("User", userId);
 
-        if (!await _organizationRepo.IsMemberAsync(orgId, userId, ct))
+        await _organizationRepo.ExecuteInTransactionAsync(async token =>
         {
-            _organizationRepo.AddMembership(new OrganizationMembership
+            if (!await _organizationRepo.IsMemberAsync(orgId, userId, token))
             {
-                OrganizationId = orgId,
-                UserId = userId,
-                CreatedBy = addedBy
-            });
-            await _organizationRepo.SaveChangesAsync(ct);
-        }
+                _organizationRepo.AddMembership(new OrganizationMembership
+                {
+                    OrganizationId = orgId,
+                    UserId = userId,
+                    CreatedBy = addedBy
+                });
+                await _organizationRepo.SaveChangesAsync(token);
+            }
 
-        // Assign default Reader role if they don't already have one
-        if (!await _rbac.HasRoleAsync(userId, RoleType.Reader, RoleScope.Organization, orgId, ct))
-            await _rbac.AssignRoleAsync(userId, RoleType.Reader, RoleScope.Organization, orgId, addedBy, ct);
+            if (!await _rbac.HasRoleAsync(userId, RoleType.Reader, RoleScope.Organization, orgId, token))
+                await _rbac.AssignRoleAsync(userId, RoleType.Reader, RoleScope.Organization, orgId, addedBy, token);
+        }, ct);
 
         await _eventBus.PublishAsync(new MemberAddedToOrg(orgId, userId, addedBy), ct);
     }
@@ -175,8 +177,15 @@ public class OrganizationService : IOrganizationService
         var membership = await _organizationRepo.GetMembershipAsync(orgId, userId, ct);
         if (membership is null) return;
 
-        _organizationRepo.RemoveMembership(membership);
-        await _organizationRepo.SaveChangesAsync(ct);
+        await _organizationRepo.ExecuteInTransactionAsync(async token =>
+        {
+            _organizationRepo.RemoveMembership(membership);
+            await _organizationRepo.SaveChangesAsync(token);
+
+            await _rbac.RemoveAllRolesAsync(userId, RoleScope.Organization, orgId, token);
+        }, ct);
+
+        _logger.LogInformation("User {UserId} removed from organization {OrgId}", userId, orgId);
     }
 
     public Task<bool> IsMemberAsync(Guid orgId, Guid userId, CancellationToken ct = default) =>
@@ -214,7 +223,7 @@ public class OrganizationService : IOrganizationService
         var assignments = await _rbac.GetUserRolesAsync(userId, ct);
 
         var role = assignments
-            .Where(ra => ra.Scope == RoleScope.Organization && ra.ScopeId == orgId)
+            .Where(ra => ra.Scope == RoleScope.Organization && ra.OrganizationId == orgId)
             .OrderBy(ra => (int)ra.Role) // lowest value = most privileged
             .FirstOrDefault()?.Role;
 

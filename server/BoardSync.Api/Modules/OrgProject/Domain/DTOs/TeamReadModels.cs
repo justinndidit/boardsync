@@ -1,4 +1,4 @@
-namespace BoardSync.Api.Modules.OrgProject.Repositories;
+namespace BoardSync.Api.Modules.OrgProject.Domain.DTOs;
 
 /// <summary>
 /// Read models returned by the OrgProject repositories.
@@ -43,3 +43,4 @@ public record MemberRecord(
     string Email,
     string? ProfilePictureUrl,
     DateTime JoinedAt);
+

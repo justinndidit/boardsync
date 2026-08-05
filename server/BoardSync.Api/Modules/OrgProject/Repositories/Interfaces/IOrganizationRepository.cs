@@ -1,4 +1,5 @@
 using BoardSync.Api.Modules.OrgProject.Domain.Models;
+using BoardSync.Api.Modules.OrgProject.Domain.DTOs;
 
 namespace BoardSync.Api.Modules.OrgProject.Repositories.Interfaces;
 
