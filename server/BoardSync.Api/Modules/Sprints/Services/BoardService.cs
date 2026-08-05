@@ -22,8 +22,8 @@ public class BoardService : IBoardService
         Guid createdBy,
         CancellationToken ct = default)
     {
-        if (!await _context.Projects.AnyAsync(t => t.Id == projectId && t.IsActive, ct))
-            throw new NotFoundException("project", projectId);
+        if (!await _context.Projects.AnyAsync(p => p.Id == projectId && p.IsActive, ct))
+            throw new NotFoundException("Project", projectId);
 
         var board = await _context.Boards
             .Include(b => b.Columns)
@@ -148,9 +148,16 @@ public class BoardService : IBoardService
 
     private async Task<BoardResponse> BuildBoardResponseAsync(Board board, CancellationToken ct)
     {
-        // Find active sprint for this project
+        // A board is scoped to a project, but sprints are scoped to a team, so the board's
+        // cards come from the active sprint of the project's *assigned* team. Resolving that
+        // team here is what makes the project-scoped board and the team-scoped sprint meet.
+        var teamId = await _context.Projects
+            .Where(p => p.Id == board.ProjectId)
+            .Select(p => p.AssignedTeamId)
+            .FirstOrDefaultAsync(ct);
+
         var activeSprint = await _context.Sprints
-            .Where(s => s.  TeamId == board.ProjectId && s.Status == SprintStatus.Active)
+            .Where(s => s.TeamId == teamId && s.Status == SprintStatus.Active)
             .Select(s => (Guid?)s.Id)
             .FirstOrDefaultAsync(ct);
 
@@ -210,7 +217,7 @@ public class BoardService : IBoardService
             .ToList();
 
         return new BoardResponse(
-            board.Id, board.ProjectId, board.Name,
+            board.Id, board.ProjectId, teamId, board.Name,
             activeSprint, columns, board.CreatedAt);
     }
 
@@ -232,8 +239,3 @@ public class BoardService : IBoardService
     private static BoardColumnDetailResponse MapColumnDetail(BoardColumn c) =>
         new(c.Id, c.BoardId, c.Name, c.MappedState, c.Position, c.WipLimit, c.CreatedAt);
 }
-  //  public Task<BoardResponse> GetOrCreateForPAsync(Guid projectId, Guid createdBy, CancellationToken ct = default)
-   // {
-   //     throw new NotImplementedException();
- //   }
-//

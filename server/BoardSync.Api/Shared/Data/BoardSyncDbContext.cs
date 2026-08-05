@@ -151,7 +151,13 @@ public class BoardSyncDbContext : DbContext
                 CASE WHEN ""TeamId"" IS NOT NULL THEN 1 ELSE 0 END) = 1"
             ));
             entity.HasKey(r => r.Id);
-            // entity.HasIndex(r => new { r.UserId, r.Role, r.Scope, r.TeamId, r.ProjectId, r.OrganizationId });
+
+            // Uniqueness of (user, role, scope target) is enforced by three *partial* unique
+            // indexes created in raw SQL by the HardenRoleAssignmentAndOrgMembership migration
+            // (IX_RoleAssignments_Unique_Org / _Project / _Team, each filtered to
+            // "WHERE <scope column> IS NOT NULL"). They are deliberately not modelled here:
+            // a plain composite HasIndex over the three nullable columns would be useless,
+            // because Postgres treats NULLs as distinct and would accept unlimited duplicates.
             entity.HasIndex(r => new { r.Scope, r.ProjectId, r.TeamId, r.OrganizationId });
             entity.HasIndex(r => r.UserId);
             entity.HasIndex(r => r.TeamId);
@@ -302,7 +308,12 @@ public class BoardSyncDbContext : DbContext
         {
             entity.ToTable("Boards", "plan");
             entity.HasKey(b => b.Id);
-            entity.HasIndex(b => b.TeamId).IsUnique(); // one board per team
+            entity.HasIndex(b => b.ProjectId).IsUnique(); // one board per project
+
+            entity.HasOne<Project>()
+                .WithMany()
+                .HasForeignKey(b => b.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
 
             entity.Property(b => b.Name).IsRequired().HasMaxLength(100);
 

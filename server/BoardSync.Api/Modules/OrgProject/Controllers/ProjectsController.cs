@@ -91,6 +91,25 @@ public class ProjectsController : ControllerBase
         return Ok(new ApiResponse<ProjectResponse>(true, "Project updated.", project));
     }
 
+    /// <summary>
+    /// Reassign the project to a different team in the same organization. Requires ProjectAdmin.
+    /// The project's board follows the new team, so its cards come from that team's active sprint.
+    /// </summary>
+    [HttpPut("api/projects/{projectId:guid}/team")]
+    [ProducesResponseType(typeof(ApiResponse<ProjectResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> AssignTeam(
+        Guid projectId,
+        [FromBody] AssignProjectTeamRequest request,
+        CancellationToken ct)
+    {
+        await RequireProjectRoleAsync(projectId, RoleType.ProjectAdmin, ct);
+        var project = await _projectService.AssignTeamAsync(
+            projectId, request.AssignedTeamId, _currentUser.UserId, ct);
+        return Ok(new ApiResponse<ProjectResponse>(true, "Project team reassigned.", project));
+    }
+
     // ── Project-scope roles ───────────────────────────────────────────────────
 
     /// <summary>

@@ -20,8 +20,9 @@ public class TeamRepository : ITeamRepository
     public Task<Team?> GetActiveByIdAsync(Guid teamId, CancellationToken ct = default) =>
         _context.Teams.FirstOrDefaultAsync(t => t.Id == teamId && t.IsActive, ct);
 
-    public Task<Team?> GetByNameAsync(string name, CancellationToken ct = default) =>
-        _context.Teams.FirstOrDefaultAsync(t => t.Name == name, ct);
+    public Task<Team?> GetByNameInOrgAsync(Guid orgId, string name, CancellationToken ct = default) =>
+        _context.Teams.FirstOrDefaultAsync(
+            t => t.OrganizationId == orgId && t.Name == name && t.IsActive, ct);
 
     public async Task<(IReadOnlyList<TeamResponse> Items, int TotalCount)> GetActiveTeamsInOrgAsync(Guid orgId, PaginationQuery pagination, CancellationToken ct = default)
     {
@@ -42,6 +43,12 @@ public class TeamRepository : ITeamRepository
     public Task<bool> ExistsAsync(Guid teamId, CancellationToken ct = default) =>
         _context.Teams.AnyAsync(t => t.Id == teamId, ct);
 
+    public Task<bool> ExistsActiveInOrgAsync(Guid orgId, Guid teamId, CancellationToken ct = default) =>
+        _context.Teams.AnyAsync(t => t.Id == teamId && t.OrganizationId == orgId && t.IsActive, ct);
+
+    public Task<int> GetAssignedProjectCountAsync(Guid teamId, CancellationToken ct = default) =>
+        _context.Projects.CountAsync(p => p.AssignedTeamId == teamId && p.IsActive, ct);
+
     public Task<int> GetMemberCountAsync(Guid teamId, CancellationToken ct = default) =>
         _context.TeamMemberships.CountAsync(m => m.TeamId == teamId, ct);
 
@@ -52,21 +59,3 @@ public class TeamRepository : ITeamRepository
 
     public Task SaveChangesAsync(CancellationToken ct = default) => _context.SaveChangesAsync(ct);
 }
-
-    // public async Task<(IReadOnlyList<TeamSummaryRecord> Items, int TotalCount)> GetForProjectAsync(
-    //     Guid projectId, int skip, int take, CancellationToken ct = default)
-    // {
-    //     var query = _context.Teams.Where(t => t.ProjectId == projectId && t.IsActive);
-
-    //     var total = await query.CountAsync(ct);
-
-    //     var items = await query
-    //         .OrderBy(t => t.Name)
-    //         .Skip(skip)
-    //         .Take(take)
-    //         .Select(t => new TeamSummaryRecord(
-    //             t.Id, t.ProjectId, t.Name, t.Description, t.IsActive, t.Members.Count, t.CreatedAt))
-    //         .ToListAsync(ct);
-
-    //     return (items, total);
-    // }
