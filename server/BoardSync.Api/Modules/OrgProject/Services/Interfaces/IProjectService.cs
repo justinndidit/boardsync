@@ -15,4 +15,10 @@ public interface IProjectService
 
     Task<PagedResult<ProjectSummaryResponse>> GetForOrgAsync(Guid orgId, PaginationQuery pagination, CancellationToken ct = default);
     Task<ProjectResponse> UpdateAsync(Guid projectId, UpdateProjectRequest request, Guid updatedBy, CancellationToken ct = default);
+
+    /// <summary>
+    /// Points the project at a different team. The new team must be active and belong to the
+    /// same organization as the project.
+    /// </summary>
+    Task<ProjectResponse> AssignTeamAsync(Guid projectId, Guid teamId, Guid updatedBy, CancellationToken ct = default);
 }

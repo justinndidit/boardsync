@@ -16,6 +16,7 @@ public class ProjectService : IProjectService
 {
     private readonly IProjectRepository _projectRepo;
     private readonly IOrganizationRepository _organizationRepo;
+    private readonly ITeamRepository _teamRepo;
     private readonly IRbacService _rbac;
     private readonly IEventBus _eventBus;
     private readonly ILogger<ProjectService> _logger;
@@ -23,12 +24,14 @@ public class ProjectService : IProjectService
     public ProjectService(
         IProjectRepository projectRepository,
         IOrganizationRepository organizationRepository,
+        ITeamRepository teamRepository,
         IRbacService rbac,
         IEventBus eventBus,
         ILogger<ProjectService> logger)
     {
         _projectRepo = projectRepository;
         _organizationRepo = organizationRepository;
+        _teamRepo = teamRepository;
         _rbac = rbac;
         _eventBus = eventBus;
         _logger = logger;
@@ -43,6 +46,13 @@ public class ProjectService : IProjectService
         if (!await _organizationRepo.ExistsActiveAsync(orgId, ct))
             throw new NotFoundException("Organization", orgId);
 
+        // The assigned team is a required, restricting FK. Validating it here turns a would-be
+        // foreign-key violation (500) into a 404, and stops a project in one organization from
+        // being pointed at another organization's team.
+        if (!await _teamRepo.ExistsActiveInOrgAsync(orgId, request.AssignedTeamId, ct))
+            throw new NotFoundException(
+                $"Active team '{request.AssignedTeamId}' was not found in organization '{orgId}'.");
+
         var slug = Slug.From(request.Slug ?? request.Name);
 
         if (await _projectRepo.SlugExistsInOrganizationAsync(orgId, slug, ct))
@@ -51,6 +61,7 @@ public class ProjectService : IProjectService
         var project = new Project
         {
             OrganizationId = orgId,
+            AssignedTeamId = request.AssignedTeamId,
             Slug = slug,
             Name = request.Name.Trim(),
             Description = request.Description?.Trim() ?? string.Empty,
@@ -114,11 +125,36 @@ public class ProjectService : IProjectService
         return await MapToResponseAsync(project, ct);
     }
 
+    public async Task<ProjectResponse> AssignTeamAsync(
+        Guid projectId,
+        Guid teamId,
+        Guid updatedBy,
+        CancellationToken ct = default)
+    {
+        var project = await _projectRepo.GetActiveAsync(projectId, ct)
+            ?? throw new NotFoundException(nameof(Project), projectId);
+
+        if (!await _teamRepo.ExistsActiveInOrgAsync(project.OrganizationId, teamId, ct))
+            throw new NotFoundException(
+                $"Active team '{teamId}' was not found in organization '{project.OrganizationId}'.");
+
+        project.AssignedTeamId = teamId;
+        project.UpdatedAt = DateTime.UtcNow;
+        await _projectRepo.SaveChangesAsync(ct);
+
+        _logger.LogInformation("Project {ProjectId} reassigned to team {TeamId} by {UserId}",
+            projectId, teamId, updatedBy);
+
+        return await MapToResponseAsync(project, ct);
+    }
+
     // -------------------------------------------------------------------------
 
     private async Task<ProjectResponse> MapToResponseAsync(Project p, CancellationToken ct)
     {
-        // var teamCount = await _projectRepo.GetActiveTeamCountAsync(p.Id, ct);
-        return new(p.Id, p.OrganizationId, p.Slug, p.Name, p.Description, p.IsActive, 1, p.CreatedAt);
+        var team = await _teamRepo.GetActiveByIdAsync(p.AssignedTeamId, ct);
+
+        return new(p.Id, p.OrganizationId, p.Slug, p.Name, p.Description, p.IsActive,
+            p.AssignedTeamId, team?.Name ?? string.Empty, p.CreatedAt);
     }
 }

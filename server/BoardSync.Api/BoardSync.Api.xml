@@ -272,6 +272,12 @@
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.ProjectsController.Update(System.Guid,BoardSync.Api.Modules.OrgProject.Domain.DTOs.UpdateProjectRequest,System.Threading.CancellationToken)">
             <summary>Update project details. Requires ProjectAdmin.</summary>
         </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.ProjectsController.AssignTeam(System.Guid,BoardSync.Api.Modules.OrgProject.Domain.DTOs.AssignProjectTeamRequest,System.Threading.CancellationToken)">
+            <summary>
+            Reassign the project to a different team in the same organization. Requires ProjectAdmin.
+            The project's board follows the new team, so its cards come from that team's active sprint.
+            </summary>
+        </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.ProjectsController.GetRoles(System.Guid,System.Threading.CancellationToken)">
             <summary>
             List the project-scope role assignments for a project. Requires Reader.
@@ -307,11 +313,15 @@
         </member>
         <member name="T:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController">
             <summary>
-            Manage teams within a project.
+            Manage teams within an organization. Teams are owned by the organization, not by a
+            project — a project selects one existing team as its assigned team.
             </summary>
         </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController.GetForOrg(System.Guid,BoardSync.Api.Shared.Kernel.PaginationQuery,System.Threading.CancellationToken)">
+            <summary>List all active teams in an organization. Requires Reader on the organization.</summary>
+        </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController.Create(System.Guid,BoardSync.Api.Modules.OrgProject.Domain.DTOs.CreateTeamRequest,System.Threading.CancellationToken)">
-            <summary>Create a new team in a project. Requires ProjectAdmin.</summary>
+            <summary>Create a new team in an organization. Requires OrgAdmin.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController.GetById(System.Guid,System.Threading.CancellationToken)">
             <summary>Get a team by ID.</summary>
@@ -319,11 +329,24 @@
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController.Update(System.Guid,BoardSync.Api.Modules.OrgProject.Domain.DTOs.UpdateTeamRequest,System.Threading.CancellationToken)">
             <summary>Update team details. Requires ProjectAdmin.</summary>
         </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController.Deactivate(System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Archive a team. Requires ProjectAdmin. Fails with 400 if the team is still assigned
+            to active projects — reassign those projects first.
+            </summary>
+        </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController.GetMembers(System.Guid,BoardSync.Api.Shared.Kernel.PaginationQuery,System.Threading.CancellationToken)">
             <summary>Get team members.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController.AddMember(System.Guid,BoardSync.Api.Modules.OrgProject.Domain.DTOs.AddTeamMemberRequest,System.Threading.CancellationToken)">
             <summary>Add a member to a team. Requires ProjectAdmin.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController.IsMember(System.Guid,System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Check whether a user is a member of the team. Requires Reader.
+            Returns the membership flag rather than 404-ing on a non-member, so callers can
+            use it as a plain predicate.
+            </summary>
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController.RemoveMember(System.Guid,System.Guid,System.Threading.CancellationToken)">
             <summary>Remove a member from a team. Requires ProjectAdmin.</summary>
@@ -360,6 +383,27 @@
             Optional slug — auto-generated from Name if not provided.
             Must be lowercase alphanumeric + hyphens.
             </summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.OrgProject.Domain.DTOs.CreateProjectRequest.AssignedTeamId">
+            <summary>
+            The team that will own this project's work. Must be an active team in the same
+            organization. Create the team first — teams belong to the organization, not the project.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.OrgProject.Domain.DTOs.AssignProjectTeamRequest">
+            <summary>Reassign a project to a different team in the same organization.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.OrgProject.Domain.DTOs.ProjectResponse">
+            <remarks>
+            A project has exactly one assigned team (a team may serve several projects), so the
+            project carries the team's identity rather than a count of teams.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Domain.DTOs.ProjectResponse.#ctor(System.Guid,System.Guid,System.String,System.String,System.String,System.Boolean,System.Guid,System.String,System.DateTime)">
+            <remarks>
+            A project has exactly one assigned team (a team may serve several projects), so the
+            project carries the team's identity rather than a count of teams.
+            </remarks>
         </member>
         <member name="T:BoardSync.Api.Modules.OrgProject.Domain.DTOs.OrgMemberResponse">
             <summary>A member of an organization with their org-level role.</summary>
@@ -573,15 +617,38 @@
         <member name="M:BoardSync.Api.Modules.OrgProject.Repositories.Interfaces.ITeamRepository.GetActiveByIdAsync(System.Guid,System.Threading.CancellationToken)">
             <summary>Active team by ID, tracked for mutation, or null.</summary>
         </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Repositories.Interfaces.ITeamRepository.GetByNameInOrgAsync(System.Guid,System.String,System.Threading.CancellationToken)">
+            <summary>
+            Active team with the given name inside one organization, or null. Name uniqueness is
+            per-organization, so the org must be part of the lookup — a global name search would
+            let one organization's team names block another's.
+            </summary>
+        </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Repositories.Interfaces.ITeamRepository.ExistsAsync(System.Guid,System.Threading.CancellationToken)">
             <summary>
             Whether a team row exists at all, active or not. Used to distinguish "no such team" (404)
             from "team has no members" (empty page) when listing members.
             </summary>
         </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Repositories.Interfaces.ITeamRepository.ExistsActiveInOrgAsync(System.Guid,System.Guid,System.Threading.CancellationToken)">
+            <summary>Whether an active team with this ID belongs to the given organization.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Repositories.Interfaces.ITeamRepository.GetAssignedProjectCountAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Number of active projects currently assigned to this team.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Repositories.Interfaces.ITeamRepository.GetMemberCountAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Number of members on this team.</summary>
+        </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Services.Implementations.OrganizationService.MostPrivilegedBy(System.Collections.Generic.IEnumerable{BoardSync.Api.Modules.Rbac.Models.RoleAssignment},System.Func{BoardSync.Api.Modules.Rbac.Models.RoleAssignment,System.Guid})">
             <summary>
             Reduces role assignments to the single most-privileged role per key (lowest enum value wins).
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Services.Implementations.TeamService.MapToResponseAsync(BoardSync.Api.Modules.OrgProject.Domain.Models.Team,System.Threading.CancellationToken)">
+            <summary>
+            Maps a team to its response DTO. The member count is queried rather than read from
+            <c>t.Members</c> because teams are loaded without their membership collection, which
+            would otherwise report every team as having zero members.
             </summary>
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Services.Interfaces.IProjectService.ExistsAsync(System.Guid,System.Threading.CancellationToken)">
@@ -589,6 +656,28 @@
             Whether an active project exists. Exposed so other modules can validate a project
             reference without querying the OrgProject module's tables directly.
             </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Services.Interfaces.IProjectService.AssignTeamAsync(System.Guid,System.Guid,System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Points the project at a different team. The new team must be active and belong to the
+            same organization as the project.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Services.Interfaces.ITeamService.GetForOrgAsync(System.Guid,BoardSync.Api.Shared.Kernel.PaginationQuery,System.Threading.CancellationToken)">
+            <summary>
+            Active teams in an organization. Teams belong to the organization, not to a project —
+            a project selects one of these as its assigned team.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Services.Interfaces.ITeamService.DeactivateAsync(System.Guid,System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Soft-deletes a team by clearing its active flag. Teams are never hard-deleted because
+            projects reference them with a restricting foreign key; archiving a team that still has
+            projects assigned is rejected.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Services.Interfaces.ITeamService.IsMemberAsync(System.Guid,System.Guid,System.Threading.CancellationToken)">
+            <summary>Whether a user is currently a member of the team.</summary>
         </member>
         <member name="T:BoardSync.Api.Modules.Rbac.Models.RoleType">
             <summary>
@@ -680,15 +769,16 @@
         </member>
         <member name="T:BoardSync.Api.Modules.Sprints.Controllers.BoardsController">
             <summary>
-            Kanban board management scoped to a team.
-            The board is auto-created with four default columns on first access.
-            Read:             Reader+
-            Column management: ProjectAdmin+
+            Kanban board management scoped to a project — one board per project,
+            auto-created with four default columns on first access.
+            Cards are drawn from the active sprint of the project's assigned team.
+            Read:              Reader+ on the project
+            Column management: ProjectAdmin+ on the project
             </summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.Sprints.Controllers.BoardsController.GetForTeam(System.Guid,System.Threading.CancellationToken)">
+        <member name="M:BoardSync.Api.Modules.Sprints.Controllers.BoardsController.GetForProject(System.Guid,System.Threading.CancellationToken)">
             <summary>
-            Get (or auto-create) the board for a team, populated with active-sprint cards.
+            Get (or auto-create) the board for a project, populated with active-sprint cards.
             Requires Reader.
             </summary>
         </member>
@@ -710,9 +800,9 @@
         <member name="M:BoardSync.Api.Modules.Sprints.Controllers.BoardsController.ReorderColumns(System.Guid,BoardSync.Api.Modules.Sprints.DTOs.ReorderBoardColumnsRequest,System.Threading.CancellationToken)">
             <summary>Reorder columns by providing the desired left-to-right column ID sequence. Requires ProjectAdmin.</summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.Sprints.Controllers.BoardsController.RequireColumnTeamRoleAsync(System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType,System.Threading.CancellationToken)">
+        <member name="M:BoardSync.Api.Modules.Sprints.Controllers.BoardsController.RequireColumnProjectRoleAsync(System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType,System.Threading.CancellationToken)">
             <summary>
-            Resolves the teamId for a column (column → board → teamId) then checks the role.
+            Resolves the projectId for a column (column → board → projectId) then checks the role.
             Avoids an extra service call by querying the DB directly.
             </summary>
         </member>
@@ -801,9 +891,19 @@
         </member>
         <member name="T:BoardSync.Api.Modules.Sprints.DTOs.BoardResponse">
             <summary>Full board view — all columns with their active-sprint cards.</summary>
+            <remarks>
+            A board belongs to a project. Cards come from the active sprint of the project's
+            assigned team, so <see cref="P:BoardSync.Api.Modules.Sprints.DTOs.BoardResponse.TeamId"/> is the assigned team the sprint was resolved
+            through — it is not an independent scope.
+            </remarks>
         </member>
-        <member name="M:BoardSync.Api.Modules.Sprints.DTOs.BoardResponse.#ctor(System.Guid,System.Guid,System.String,System.Nullable{System.Guid},System.Collections.Generic.IReadOnlyList{BoardSync.Api.Modules.Sprints.DTOs.BoardColumnResponse},System.DateTime)">
+        <member name="M:BoardSync.Api.Modules.Sprints.DTOs.BoardResponse.#ctor(System.Guid,System.Guid,System.Guid,System.String,System.Nullable{System.Guid},System.Collections.Generic.IReadOnlyList{BoardSync.Api.Modules.Sprints.DTOs.BoardColumnResponse},System.DateTime)">
             <summary>Full board view — all columns with their active-sprint cards.</summary>
+            <remarks>
+            A board belongs to a project. Cards come from the active sprint of the project's
+            assigned team, so <see cref="P:BoardSync.Api.Modules.Sprints.DTOs.BoardResponse.TeamId"/> is the assigned team the sprint was resolved
+            through — it is not an independent scope.
+            </remarks>
         </member>
         <member name="T:BoardSync.Api.Modules.Sprints.DTOs.BoardColumnDetailResponse">
             <summary>A single column without card data — used by column-management endpoints.</summary>
@@ -852,8 +952,8 @@
         </member>
         <member name="T:BoardSync.Api.Modules.Sprints.Models.Board">
             <summary>
-            A Kanban/Scrum board scoped to a team.
-            One board per team, auto-created on first access with four default columns.
+            A Kanban/Scrum board scoped to a project.
+            One board per project, auto-created on first access with four default columns.
             </summary>
         </member>
         <member name="T:BoardSync.Api.Modules.Sprints.Models.BoardColumn">
@@ -906,8 +1006,8 @@
         <member name="M:BoardSync.Api.Modules.Sprints.Services.BoardService.BuildDefaultBoard(System.Guid,System.Guid)">
             <summary>Creates a board with the four default columns mapped to WorkItemState values.</summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.Sprints.Services.IBoardService.GetOrCreateForTeamAsync(System.Guid,System.Guid,System.Threading.CancellationToken)">
-            <summary>Get (or auto-create with default columns) the board for a team.</summary>
+        <member name="M:BoardSync.Api.Modules.Sprints.Services.IBoardService.GetOrCreateForProjectAsync(System.Guid,System.Guid,System.Threading.CancellationToken)">
+            <summary>Get (or auto-create with default columns) the board for a project.</summary>
         </member>
         <member name="T:BoardSync.Api.Modules.WorkItems.Controllers.WorkItemsController">
             <summary>
@@ -1201,6 +1301,18 @@
             <inheritdoc />
         </member>
         <member name="M:BoardSync.Api.Shared.Data.Migrations.HardenRoleAssignmentAndOrgMembership.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="T:BoardSync.Api.Shared.Data.Migrations.TieBoardsToProjects">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.TieBoardsToProjects.Up(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.TieBoardsToProjects.Down(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.TieBoardsToProjects.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
             <inheritdoc />
         </member>
         <member name="T:BoardSync.Api.Shared.Kernel.BaseEntity">

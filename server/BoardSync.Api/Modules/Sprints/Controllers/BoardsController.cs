@@ -13,10 +13,11 @@ using Microsoft.EntityFrameworkCore;
 namespace BoardSync.Api.Modules.Sprints.Controllers;
 
 /// <summary>
-/// Kanban board management scoped to a team.
-/// The board is auto-created with four default columns on first access.
-/// Read:             Reader+
-/// Column management: ProjectAdmin+
+/// Kanban board management scoped to a project — one board per project,
+/// auto-created with four default columns on first access.
+/// Cards are drawn from the active sprint of the project's assigned team.
+/// Read:              Reader+ on the project
+/// Column management: ProjectAdmin+ on the project
 /// </summary>
 [ApiController]
 [Authorize]
@@ -43,17 +44,17 @@ public class BoardsController : ControllerBase
     // ── Board ─────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Get (or auto-create) the board for a team, populated with active-sprint cards.
+    /// Get (or auto-create) the board for a project, populated with active-sprint cards.
     /// Requires Reader.
     /// </summary>
-    [HttpGet("api/project/{projectId:guid}/board")]
+    [HttpGet("api/projects/{projectId:guid}/board")]
     [ProducesResponseType(typeof(ApiResponse<BoardResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> GetForTeam(Guid projectId, CancellationToken ct)
+    public async Task<IActionResult> GetForProject(Guid projectId, CancellationToken ct)
     {
-        await RequireTeamRoleAsync(projectId, RoleType.Reader, ct);
-        var board = await _boardService.GetOrCreateForTeamAsync(projectId, _currentUser.UserId, ct);
+        await RequireProjectRoleAsync(projectId, RoleType.Reader, ct);
+        var board = await _boardService.GetOrCreateForProjectAsync(projectId, _currentUser.UserId, ct);
         return Ok(new ApiResponse<BoardResponse>(true, "Board retrieved.", board));
     }
 
@@ -65,7 +66,7 @@ public class BoardsController : ControllerBase
     public async Task<IActionResult> GetById(Guid boardId, CancellationToken ct)
     {
         var board = await _boardService.GetByIdAsync(boardId, ct);
-        await RequireTeamRoleAsync(board.TeamId, RoleType.Reader, ct);
+        await RequireProjectRoleAsync(board.ProjectId, RoleType.Reader, ct);
         return Ok(new ApiResponse<BoardResponse>(true, "Board retrieved.", board));
     }
 
@@ -81,7 +82,7 @@ public class BoardsController : ControllerBase
         CancellationToken ct)
     {
         var board = await _boardService.GetByIdAsync(boardId, ct);
-        await RequireTeamRoleAsync(board.TeamId, RoleType.ProjectAdmin, ct);
+        await RequireProjectRoleAsync(board.ProjectId, RoleType.ProjectAdmin, ct);
         var updated = await _boardService.UpdateAsync(boardId, request, _currentUser.UserId, ct);
         return Ok(new ApiResponse<BoardResponse>(true, "Board updated.", updated));
     }
@@ -100,7 +101,7 @@ public class BoardsController : ControllerBase
         CancellationToken ct)
     {
         var board = await _boardService.GetByIdAsync(boardId, ct);
-        await RequireTeamRoleAsync(board.TeamId, RoleType.ProjectAdmin, ct);
+        await RequireProjectRoleAsync(board.ProjectId, RoleType.ProjectAdmin, ct);
         var column = await _boardService.AddColumnAsync(boardId, request, _currentUser.UserId, ct);
         return StatusCode(StatusCodes.Status201Created,
             new ApiResponse<BoardColumnDetailResponse>(true, "Column added.", column));
@@ -117,7 +118,7 @@ public class BoardsController : ControllerBase
         [FromBody] UpdateBoardColumnRequest request,
         CancellationToken ct)
     {
-        await RequireColumnTeamRoleAsync(columnId, RoleType.ProjectAdmin, ct);
+        await RequireColumnProjectRoleAsync(columnId, RoleType.ProjectAdmin, ct);
         var updated = await _boardService.UpdateColumnAsync(columnId, request, _currentUser.UserId, ct);
         return Ok(new ApiResponse<BoardColumnDetailResponse>(true, "Column updated.", updated));
     }
@@ -129,7 +130,7 @@ public class BoardsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteColumn(Guid columnId, CancellationToken ct)
     {
-        await RequireColumnTeamRoleAsync(columnId, RoleType.ProjectAdmin, ct);
+        await RequireColumnProjectRoleAsync(columnId, RoleType.ProjectAdmin, ct);
         await _boardService.DeleteColumnAsync(columnId, ct);
         return NoContent();
     }
@@ -146,31 +147,31 @@ public class BoardsController : ControllerBase
         CancellationToken ct)
     {
         var board = await _boardService.GetByIdAsync(boardId, ct);
-        await RequireTeamRoleAsync(board.TeamId, RoleType.ProjectAdmin, ct);
+        await RequireProjectRoleAsync(board.ProjectId, RoleType.ProjectAdmin, ct);
         await _boardService.ReorderColumnsAsync(boardId, request, ct);
         return Ok(new ApiResponse(true, "Columns reordered."));
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private async Task RequireTeamRoleAsync(Guid teamId, RoleType minimum, CancellationToken ct)
+    private async Task RequireProjectRoleAsync(Guid projectId, RoleType minimum, CancellationToken ct)
     {
-        if (!await _rbac.HasRoleAsync(_currentUser.UserId, minimum, RoleScope.Team, teamId, ct))
+        if (!await _rbac.HasRoleAsync(_currentUser.UserId, minimum, RoleScope.Project, projectId, ct))
             throw new ForbiddenException();
     }
 
     /// <summary>
-    /// Resolves the teamId for a column (column → board → teamId) then checks the role.
+    /// Resolves the projectId for a column (column → board → projectId) then checks the role.
     /// Avoids an extra service call by querying the DB directly.
     /// </summary>
-    private async Task RequireColumnTeamRoleAsync(Guid columnId, RoleType minimum, CancellationToken ct)
+    private async Task RequireColumnProjectRoleAsync(Guid columnId, RoleType minimum, CancellationToken ct)
     {
-        var teamId = await _context.BoardColumns
+        var projectId = await _context.BoardColumns
             .Where(c => c.Id == columnId)
             .Select(c => (Guid?)c.Board.ProjectId)
             .FirstOrDefaultAsync(ct)
             ?? throw new NotFoundException("BoardColumn", columnId);
 
-        await RequireTeamRoleAsync(teamId, minimum, ct);
+        await RequireProjectRoleAsync(projectId, minimum, ct);
     }
 }

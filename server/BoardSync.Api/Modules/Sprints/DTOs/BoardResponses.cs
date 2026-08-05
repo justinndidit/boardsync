@@ -24,8 +24,14 @@ public record BoardColumnResponse(
 );
 
 /// <summary>Full board view — all columns with their active-sprint cards.</summary>
+/// <remarks>
+/// A board belongs to a project. Cards come from the active sprint of the project's
+/// assigned team, so <see cref="TeamId"/> is the assigned team the sprint was resolved
+/// through — it is not an independent scope.
+/// </remarks>
 public record BoardResponse(
     Guid Id,
+    Guid ProjectId,
     Guid TeamId,
     string Name,
     Guid? ActiveSprintId,

@@ -28,6 +28,10 @@ public record OrganizationSummaryResponse(
     string UserRole
 );
 
+/// <remarks>
+/// A project has exactly one assigned team (a team may serve several projects), so the
+/// project carries the team's identity rather than a count of teams.
+/// </remarks>
 public record ProjectResponse(
     Guid Id,
     Guid OrganizationId,
@@ -35,7 +39,8 @@ public record ProjectResponse(
     string Name,
     string Description,
     bool IsActive,
-    int TeamCount,
+    Guid AssignedTeamId,
+    string AssignedTeamName,
     DateTime CreatedAt
 );
 

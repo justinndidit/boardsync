@@ -58,7 +58,12 @@ public class WorkItemService : IWorkItemService
             ValidateHierarchy(parent.Type, workItemTypeParsed);
         }
 
-        if(!await _teamService.IsMember(request.TeamId, request.AssigneeId)) throw new InvalidOperationException("Assigned member does not belong to team");
+        // A work item is always assigned, and only to someone on the owning team.
+        // BusinessRuleException carries the reason through to the caller as a 422;
+        // InvalidOperationException would surface as a bare 400 "Invalid operation".
+        if (!await _teamService.IsMemberAsync(request.TeamId, request.AssigneeId, ct))
+            throw new BusinessRuleException(
+                $"User '{request.AssigneeId}' is not a member of team '{request.TeamId}' and cannot be assigned this work item.");
 
         var item = new WorkItem
         {

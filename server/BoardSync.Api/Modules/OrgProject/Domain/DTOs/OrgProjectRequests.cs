@@ -42,6 +42,13 @@ public class CreateProjectRequest
 
     [MaxLength(500)]
     public string? Description { get; init; }
+
+    /// <summary>
+    /// The team that will own this project's work. Must be an active team in the same
+    /// organization. Create the team first — teams belong to the organization, not the project.
+    /// </summary>
+    [Required]
+    public Guid AssignedTeamId { get; init; }
 }
 
 public class UpdateProjectRequest
@@ -51,6 +58,13 @@ public class UpdateProjectRequest
 
     [MaxLength(500)]
     public string? Description { get; init; }
+}
+
+/// <summary>Reassign a project to a different team in the same organization.</summary>
+public class AssignProjectTeamRequest
+{
+    [Required]
+    public Guid AssignedTeamId { get; init; }
 }
 
 public class CreateTeamRequest

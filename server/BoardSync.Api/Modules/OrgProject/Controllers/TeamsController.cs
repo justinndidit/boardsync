@@ -12,7 +12,8 @@ using Microsoft.AspNetCore.Mvc;
 namespace BoardSync.Api.Modules.OrgProject.Controllers;
 
 /// <summary>
-/// Manage teams within a project.
+/// Manage teams within an organization. Teams are owned by the organization, not by a
+/// project — a project selects one existing team as its assigned team.
 /// </summary>
 [ApiController]
 [Authorize]
@@ -33,25 +34,27 @@ public class TeamsController : ControllerBase
         _currentUser = currentUser;
     }
 
-    // /// <summary>List all teams in a project.</summary>
-    // [HttpGet("api/projects/{projectId:guid}/teams")]
-    // [ProducesResponseType(typeof(ApiResponse<PagedResult<TeamResponse>>), StatusCodes.Status200OK)]
-    // [ProducesResponseType(StatusCodes.Status403Forbidden)]
-    // public async Task<IActionResult> GetForProject(Guid projectId, [FromQuery] PaginationQuery pagination, CancellationToken ct)
-    // {
-    //     await RequireProjectRoleAsync(projectId, RoleType.Reader, ct);
-    //     var result = await _teamService.GetForProjectAsync(projectId, pagination, ct);
-    //     return Ok(new ApiResponse<PagedResult<TeamResponse>>(true, "Teams retrieved.", result));
-    // }
-
-    /// <summary>Create a new team in a project. Requires ProjectAdmin.</summary>
-    [HttpPost("api/projects/{projectId:guid}/teams")]
-    [ProducesResponseType(typeof(ApiResponse<TeamResponse>), StatusCodes.Status201Created)]
+    /// <summary>List all active teams in an organization. Requires Reader on the organization.</summary>
+    [HttpGet("api/orgs/{orgId:guid}/teams")]
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<TeamResponse>>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
-    public async Task<IActionResult> Create(Guid projectId, [FromBody] CreateTeamRequest request, CancellationToken ct)
+    public async Task<IActionResult> GetForOrg(Guid orgId, [FromQuery] PaginationQuery pagination, CancellationToken ct)
     {
-        await RequireProjectRoleAsync(projectId, RoleType.ProjectAdmin, ct);
-        var team = await _teamService.CreateAsync(projectId, request, _currentUser.UserId, ct);
+        await RequireOrgRoleAsync(orgId, RoleType.Reader, ct);
+        var result = await _teamService.GetForOrgAsync(orgId, pagination, ct);
+        return Ok(new ApiResponse<PagedResult<TeamResponse>>(true, "Teams retrieved.", result));
+    }
+
+    /// <summary>Create a new team in an organization. Requires OrgAdmin.</summary>
+    [HttpPost("api/orgs/{orgId:guid}/teams")]
+    [ProducesResponseType(typeof(ApiResponse<TeamResponse>), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> Create(Guid orgId, [FromBody] CreateTeamRequest request, CancellationToken ct)
+    {
+        await RequireOrgRoleAsync(orgId, RoleType.OrgAdmin, ct);
+        var team = await _teamService.CreateAsync(orgId, request, _currentUser.UserId, ct);
         return CreatedAtAction(nameof(GetById), new { teamId = team.Id },
             new ApiResponse<TeamResponse>(true, "Team created.", team));
     }
@@ -78,6 +81,22 @@ public class TeamsController : ControllerBase
         return Ok(new ApiResponse<TeamResponse>(true, "Team updated.", team));
     }
 
+    /// <summary>
+    /// Archive a team. Requires ProjectAdmin. Fails with 400 if the team is still assigned
+    /// to active projects — reassign those projects first.
+    /// </summary>
+    [HttpDelete("api/teams/{teamId:guid}")]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> Deactivate(Guid teamId, CancellationToken ct)
+    {
+        await RequireTeamRoleAsync(teamId, RoleType.ProjectAdmin, ct);
+        await _teamService.DeactivateAsync(teamId, _currentUser.UserId, ct);
+        return Ok(new ApiResponse(true, "Team archived."));
+    }
+
     /// <summary>Get team members.</summary>
     [HttpGet("api/teams/{teamId:guid}/members")]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<TeamMemberResponse>>), StatusCodes.Status200OK)]
@@ -101,6 +120,22 @@ public class TeamsController : ControllerBase
         return Ok(new ApiResponse<TeamMemberResponse>(true, "Member added.", member));
     }
 
+    /// <summary>
+    /// Check whether a user is a member of the team. Requires Reader.
+    /// Returns the membership flag rather than 404-ing on a non-member, so callers can
+    /// use it as a plain predicate.
+    /// </summary>
+    [HttpGet("api/teams/{teamId:guid}/members/{userId:guid}")]
+    [ProducesResponseType(typeof(ApiResponse<bool>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> IsMember(Guid teamId, Guid userId, CancellationToken ct)
+    {
+        await RequireTeamRoleAsync(teamId, RoleType.Reader, ct);
+        var isMember = await _teamService.IsMemberAsync(teamId, userId, ct);
+        return Ok(new ApiResponse<bool>(true, isMember ? "User is a team member." : "User is not a team member.", isMember));
+    }
+
     /// <summary>Remove a member from a team. Requires ProjectAdmin.</summary>
     [HttpDelete("api/teams/{teamId:guid}/members/{userId:guid}")]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status200OK)]
@@ -113,9 +148,9 @@ public class TeamsController : ControllerBase
     }
 
     // -------------------------------------------------------------------------
-    private async Task RequireProjectRoleAsync(Guid projectId, RoleType minimum, CancellationToken ct)
+    private async Task RequireOrgRoleAsync(Guid orgId, RoleType minimum, CancellationToken ct)
     {
-        if (!await _rbac.HasRoleAsync(_currentUser.UserId, minimum, RoleScope.Project, projectId, ct))
+        if (!await _rbac.HasRoleAsync(_currentUser.UserId, minimum, RoleScope.Organization, orgId, ct))
             throw new ForbiddenException();
     }
 

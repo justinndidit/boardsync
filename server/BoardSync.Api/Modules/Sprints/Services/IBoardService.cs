@@ -4,8 +4,8 @@ namespace BoardSync.Api.Modules.Sprints.Services;
 
 public interface IBoardService
 {
-    /// <summary>Get (or auto-create with default columns) the board for a team.</summary>
-    Task<BoardResponse> GetOrCreateForTeamAsync(Guid projectId, Guid createdBy, CancellationToken ct = default);
+    /// <summary>Get (or auto-create with default columns) the board for a project.</summary>
+    Task<BoardResponse> GetOrCreateForProjectAsync(Guid projectId, Guid createdBy, CancellationToken ct = default);
     Task<BoardResponse> GetByIdAsync(Guid boardId, CancellationToken ct = default);
     Task<BoardResponse> UpdateAsync(Guid boardId, UpdateBoardRequest request, Guid updatedBy, CancellationToken ct = default);
     Task<BoardColumnDetailResponse> AddColumnAsync(Guid boardId, CreateBoardColumnRequest request, Guid createdBy, CancellationToken ct = default);
