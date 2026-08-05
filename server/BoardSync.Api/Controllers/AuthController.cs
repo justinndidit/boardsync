@@ -409,7 +409,7 @@ public class AuthController : ControllerBase
 
         var assignments = await _rbac.GetUserRolesAsync(userId, ct);
         var roles = assignments
-            .Select(ra => new UserRoleResponse(ra.Role, ra.Scope, ra.ScopeId))
+            .Select(ra => new UserRoleResponse(ra.Role, ra.Scope, ra.OrganizationId, ra.ProjectId, ra.TeamId))
             .ToList();
 
         var profile = result.Data with { Roles = roles };
@@ -438,7 +438,7 @@ public class AuthController : ControllerBase
 
         var assignments = await _rbac.GetUserRolesAsync(userId, ct);
         var roles = assignments
-            .Select(ra => new UserRoleResponse(ra.Role, ra.Scope, ra.ScopeId))
+            .Select(ra => new UserRoleResponse(ra.Role, ra.Scope, ra.OrganizationId, ra.ProjectId, ra.TeamId))
             .ToList();
 
         var profile = result.Data with { Roles = roles };

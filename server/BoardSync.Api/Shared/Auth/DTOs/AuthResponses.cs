@@ -13,7 +13,9 @@ public record AuthResponse(
 public record UserRoleResponse(
     RoleType Role,
     RoleScope Scope,
-    Guid ScopeId
+    Guid? OrganizationId,
+    Guid? ProjectId,
+    Guid? TeamId
 );
 
 public record UserProfile(

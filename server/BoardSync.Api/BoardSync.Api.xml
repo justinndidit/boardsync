@@ -310,9 +310,6 @@
             Manage teams within a project.
             </summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController.GetForProject(System.Guid,BoardSync.Api.Shared.Kernel.PaginationQuery,System.Threading.CancellationToken)">
-            <summary>List all teams in a project.</summary>
-        </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController.Create(System.Guid,BoardSync.Api.Modules.OrgProject.Domain.DTOs.CreateTeamRequest,System.Threading.CancellationToken)">
             <summary>Create a new team in a project. Requires ProjectAdmin.</summary>
         </member>
@@ -400,6 +397,50 @@
         <member name="M:BoardSync.Api.Modules.OrgProject.Domain.DTOs.GlobalSearchResponse.#ctor(System.Collections.Generic.IReadOnlyList{BoardSync.Api.Modules.OrgProject.Domain.DTOs.SearchHit},System.Collections.Generic.IReadOnlyList{BoardSync.Api.Modules.OrgProject.Domain.DTOs.SearchHit},System.Collections.Generic.IReadOnlyList{BoardSync.Api.Modules.OrgProject.Domain.DTOs.SearchHit},System.Collections.Generic.IReadOnlyList{BoardSync.Api.Modules.OrgProject.Domain.DTOs.SearchHit})">
             <summary>Response envelope for GET /api/search?q=.</summary>
         </member>
+        <member name="T:BoardSync.Api.Modules.OrgProject.Domain.DTOs.OrganizationSummaryRecord">
+             <summary>
+             Read models returned by the OrgProject repositories.
+            
+             These exist for list/aggregate queries where returning an entity would force the caller to
+             load navigation collections purely to count them. They are projected in SQL and are not
+             tracked, so they must never be used for mutation — take the entity for that.
+             </summary>
+            <summary>An organization row plus its aggregate counts, for list projections.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Domain.DTOs.OrganizationSummaryRecord.#ctor(System.Guid,System.String,System.String,System.String,System.String,System.Boolean,System.Int32,System.Int32,System.DateTime)">
+             <summary>
+             Read models returned by the OrgProject repositories.
+            
+             These exist for list/aggregate queries where returning an entity would force the caller to
+             load navigation collections purely to count them. They are projected in SQL and are not
+             tracked, so they must never be used for mutation — take the entity for that.
+             </summary>
+            <summary>An organization row plus its aggregate counts, for list projections.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.OrgProject.Domain.DTOs.OrganizationCounts">
+            <summary>Aggregate counts for a single organization.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Domain.DTOs.OrganizationCounts.#ctor(System.Int32,System.Int32)">
+            <summary>Aggregate counts for a single organization.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.OrgProject.Domain.DTOs.TeamSummaryRecord">
+            <summary>A team row plus its member count.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Domain.DTOs.TeamSummaryRecord.#ctor(System.Guid,System.Guid,System.String,System.String,System.Boolean,System.Int32,System.DateTime)">
+            <summary>A team row plus its member count.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.OrgProject.Domain.DTOs.MemberRecord">
+            <summary>
+            A membership row joined to the member's user profile fields. The join to Users happens in SQL
+            so that member listings can be paged and ordered by display name without loading every row.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Domain.DTOs.MemberRecord.#ctor(System.Guid,System.String,System.String,System.String,System.DateTime)">
+            <summary>
+            A membership row joined to the member's user profile fields. The join to Users happens in SQL
+            so that member listings can be paged and ordered by display name without loading every row.
+            </summary>
+        </member>
         <member name="T:BoardSync.Api.Modules.OrgProject.Domain.Helpers.Slug">
             <summary>
             URL-friendly identifier generation. Shared by organizations and projects so both produce
@@ -435,13 +476,18 @@
         </member>
         <member name="T:BoardSync.Api.Modules.OrgProject.Domain.Models.Team">
             <summary>
-            A team within a project. Boards and iterations are scoped to a team.
+            A team within an organization. Can be assigned to multiple projects.
+            Boards and iterations are scoped to a team.
             </summary>
         </member>
         <member name="T:BoardSync.Api.Modules.OrgProject.Domain.Models.TeamMembership">
             <summary>
             Tracks that a user is a member of a team.
             </summary>
+            <remarks>
+            UserId references a User in a different module by convention (no direct
+            FK/navigation across module boundaries — enforced at the application layer).
+            </remarks>
         </member>
         <member name="T:BoardSync.Api.Modules.OrgProject.Repositories.Implementations.OrganizationRepository">
             <inheritdoc />
@@ -512,11 +558,11 @@
         <member name="M:BoardSync.Api.Modules.OrgProject.Repositories.Interfaces.IProjectRepository.SlugExistsInOrganizationAsync(System.Guid,System.String,System.Threading.CancellationToken)">
             <summary>Whether the slug is taken within the organization (slugs are unique per org, not globally).</summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.OrgProject.Repositories.Interfaces.IProjectRepository.GetActiveTeamCountAsync(System.Guid,System.Threading.CancellationToken)">
-            <summary>Number of active teams in the project.</summary>
-        </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Repositories.Interfaces.IProjectRepository.GetForOrganizationAsync(System.Guid,System.Int32,System.Int32,System.Threading.CancellationToken)">
             <summary>Active projects in an organization, ordered by name.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Repositories.Interfaces.ITeamMembershipRepository.GetMembersAsync(System.Guid,System.Int32,System.Int32,System.Threading.CancellationToken)">
+            <summary>Members of a team ordered by display name, joined to their user profiles.</summary>
         </member>
         <member name="T:BoardSync.Api.Modules.OrgProject.Repositories.Interfaces.ITeamRepository">
             <summary>
@@ -524,66 +570,13 @@
             <see cref="T:BoardSync.Api.Modules.OrgProject.Repositories.Interfaces.IOrganizationRepository"/> for the save semantics.
             </summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.OrgProject.Repositories.Interfaces.ITeamRepository.GetActiveAsync(System.Guid,System.Threading.CancellationToken)">
+        <member name="M:BoardSync.Api.Modules.OrgProject.Repositories.Interfaces.ITeamRepository.GetActiveByIdAsync(System.Guid,System.Threading.CancellationToken)">
             <summary>Active team by ID, tracked for mutation, or null.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Repositories.Interfaces.ITeamRepository.ExistsAsync(System.Guid,System.Threading.CancellationToken)">
             <summary>
             Whether a team row exists at all, active or not. Used to distinguish "no such team" (404)
             from "team has no members" (empty page) when listing members.
-            </summary>
-        </member>
-        <member name="M:BoardSync.Api.Modules.OrgProject.Repositories.Interfaces.ITeamRepository.NameExistsInProjectAsync(System.Guid,System.String,System.Threading.CancellationToken)">
-            <summary>Whether the name is taken within the project (names are unique per project).</summary>
-        </member>
-        <member name="M:BoardSync.Api.Modules.OrgProject.Repositories.Interfaces.ITeamRepository.GetForProjectAsync(System.Guid,System.Int32,System.Int32,System.Threading.CancellationToken)">
-            <summary>Active teams in a project, ordered by name, with member counts.</summary>
-        </member>
-        <member name="M:BoardSync.Api.Modules.OrgProject.Repositories.Interfaces.ITeamRepository.GetMembersAsync(System.Guid,System.Int32,System.Int32,System.Threading.CancellationToken)">
-            <summary>Members of a team ordered by display name, joined to their user profiles.</summary>
-        </member>
-        <member name="T:BoardSync.Api.Modules.OrgProject.Repositories.OrganizationSummaryRecord">
-             <summary>
-             Read models returned by the OrgProject repositories.
-            
-             These exist for list/aggregate queries where returning an entity would force the caller to
-             load navigation collections purely to count them. They are projected in SQL and are not
-             tracked, so they must never be used for mutation — take the entity for that.
-             </summary>
-            <summary>An organization row plus its aggregate counts, for list projections.</summary>
-        </member>
-        <member name="M:BoardSync.Api.Modules.OrgProject.Repositories.OrganizationSummaryRecord.#ctor(System.Guid,System.String,System.String,System.String,System.String,System.Boolean,System.Int32,System.Int32,System.DateTime)">
-             <summary>
-             Read models returned by the OrgProject repositories.
-            
-             These exist for list/aggregate queries where returning an entity would force the caller to
-             load navigation collections purely to count them. They are projected in SQL and are not
-             tracked, so they must never be used for mutation — take the entity for that.
-             </summary>
-            <summary>An organization row plus its aggregate counts, for list projections.</summary>
-        </member>
-        <member name="T:BoardSync.Api.Modules.OrgProject.Repositories.OrganizationCounts">
-            <summary>Aggregate counts for a single organization.</summary>
-        </member>
-        <member name="M:BoardSync.Api.Modules.OrgProject.Repositories.OrganizationCounts.#ctor(System.Int32,System.Int32)">
-            <summary>Aggregate counts for a single organization.</summary>
-        </member>
-        <member name="T:BoardSync.Api.Modules.OrgProject.Repositories.TeamSummaryRecord">
-            <summary>A team row plus its member count.</summary>
-        </member>
-        <member name="M:BoardSync.Api.Modules.OrgProject.Repositories.TeamSummaryRecord.#ctor(System.Guid,System.Guid,System.String,System.String,System.Boolean,System.Int32,System.DateTime)">
-            <summary>A team row plus its member count.</summary>
-        </member>
-        <member name="T:BoardSync.Api.Modules.OrgProject.Repositories.MemberRecord">
-            <summary>
-            A membership row joined to the member's user profile fields. The join to Users happens in SQL
-            so that member listings can be paged and ordered by display name without loading every row.
-            </summary>
-        </member>
-        <member name="M:BoardSync.Api.Modules.OrgProject.Repositories.MemberRecord.#ctor(System.Guid,System.String,System.String,System.String,System.DateTime)">
-            <summary>
-            A membership row joined to the member's user profile fields. The join to Users happens in SQL
-            so that member listings can be paged and ordered by display name without loading every row.
             </summary>
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Services.Implementations.OrganizationService.MostPrivilegedBy(System.Collections.Generic.IEnumerable{BoardSync.Api.Modules.Rbac.Models.RoleAssignment},System.Func{BoardSync.Api.Modules.Rbac.Models.RoleAssignment,System.Guid})">
@@ -637,12 +630,24 @@
         <member name="P:BoardSync.Api.Modules.Rbac.Models.RoleAssignment.Scope">
             <summary>Scope level at which this role applies.</summary>
         </member>
-        <member name="P:BoardSync.Api.Modules.Rbac.Models.RoleAssignment.ScopeId">
+        <member name="P:BoardSync.Api.Modules.Rbac.Models.RoleAssignment.OrganizationId">
             <summary>
             The resource ID for the scope.
             For Scope=Organization this is the OrgId,
             for Scope=Project this is the ProjectId,
             for Scope=Team this is the TeamId.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Services.Implementations.RbacService.WhereScope(System.Linq.IQueryable{BoardSync.Api.Modules.Rbac.Models.RoleAssignment},BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid)">
+            <summary>
+            Filters a RoleAssignment query to the given scope, comparing against
+            whichever of OrganizationId/ProjectId/TeamId matches the scope.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Services.Implementations.RbacService.CreateAssignment(System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType,BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid,System.Nullable{System.Guid})">
+            <summary>
+            Builds a RoleAssignment with exactly the scope column populated that
+            matches <paramref name="scope"/>, leaving the other two null.
             </summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Rbac.Services.Implementations.RbacService.RolesSatisfying(BoardSync.Api.Modules.Rbac.Models.RoleType)">
@@ -1123,7 +1128,7 @@
         <member name="T:BoardSync.Api.Shared.Auth.DTOs.UserRoleResponse">
             <summary>A single role assignment returned inside a user's profile.</summary>
         </member>
-        <member name="M:BoardSync.Api.Shared.Auth.DTOs.UserRoleResponse.#ctor(BoardSync.Api.Modules.Rbac.Models.RoleType,BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid)">
+        <member name="M:BoardSync.Api.Shared.Auth.DTOs.UserRoleResponse.#ctor(BoardSync.Api.Modules.Rbac.Models.RoleType,BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Nullable{System.Guid},System.Nullable{System.Guid},System.Nullable{System.Guid})">
             <summary>A single role assignment returned inside a user's profile.</summary>
         </member>
         <member name="P:BoardSync.Api.Shared.Auth.Models.RefreshToken.IsExpired">
@@ -1184,6 +1189,18 @@
             <inheritdoc />
         </member>
         <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase3_SprintsBoards.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="T:BoardSync.Api.Shared.Data.Migrations.HardenRoleAssignmentAndOrgMembership">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.HardenRoleAssignmentAndOrgMembership.Up(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.HardenRoleAssignmentAndOrgMembership.Down(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.HardenRoleAssignmentAndOrgMembership.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
             <inheritdoc />
         </member>
         <member name="T:BoardSync.Api.Shared.Kernel.BaseEntity">

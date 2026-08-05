@@ -18,6 +18,7 @@ public interface IRbacService
 
     /// <summary>Remove a specific role assignment.</summary>
     Task RemoveRoleAsync(Guid userId, RoleType role, RoleScope scope, Guid scopeId, CancellationToken ct = default);
+    Task RemoveAllRolesAsync(Guid userId, RoleScope scope, Guid scopeId, CancellationToken ct = default);
 
     /// <summary>
     /// Check whether a user holds at least <paramref name="minimumRole"/> at the given scope.
