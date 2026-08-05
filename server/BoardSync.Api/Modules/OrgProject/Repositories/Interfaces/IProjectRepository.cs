@@ -18,7 +18,7 @@ public interface IProjectRepository
     Task<bool> SlugExistsInOrganizationAsync(Guid organizationId, string slug, CancellationToken ct = default);
 
     /// <summary>Number of active teams in the project.</summary>
-    Task<int> GetActiveTeamCountAsync(Guid projectId, CancellationToken ct = default);
+    // Task<int> GetActiveTeamCountAsync(Guid projectId, CancellationToken ct = default);
 
     /// <summary>Active projects in an organization, ordered by name.</summary>
     Task<(IReadOnlyList<Project> Items, int TotalCount)> GetForOrganizationAsync(

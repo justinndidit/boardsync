@@ -209,10 +209,10 @@ public class BoardSyncDbContext : DbContext
             entity.Property(p => p.Name).IsRequired().HasMaxLength(100);
             entity.Property(p => p.Description).HasMaxLength(500);
 
-            entity.HasMany(p => p.Teams)
-                .WithOne(t => t.Project)
-                .HasForeignKey(t => t.ProjectId)
-                .OnDelete(DeleteBehavior.Cascade);
+        //     entity.HasMany(p => p.Teams)
+        //         .WithOne(t => t.Project)
+        //         .HasForeignKey(t => t.ProjectId)
+        //         .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<Team>(entity =>

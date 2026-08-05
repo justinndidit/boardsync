@@ -24,4 +24,7 @@ public class RoleAssignment : BaseEntity
     /// for Scope=Team this is the TeamId.
     /// </summary>
     public Guid ScopeId { get; set; }
+    public Guid? OrganizationId {get; set;}
+    public Guid? ProjectId {get; set;}
+    public Guid? TeamId {get; set;}
 }

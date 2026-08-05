@@ -118,7 +118,7 @@ public class ProjectService : IProjectService
 
     private async Task<ProjectResponse> MapToResponseAsync(Project p, CancellationToken ct)
     {
-        var teamCount = await _projectRepo.GetActiveTeamCountAsync(p.Id, ct);
-        return new(p.Id, p.OrganizationId, p.Slug, p.Name, p.Description, p.IsActive, teamCount, p.CreatedAt);
+        // var teamCount = await _projectRepo.GetActiveTeamCountAsync(p.Id, ct);
+        return new(p.Id, p.OrganizationId, p.Slug, p.Name, p.Description, p.IsActive, 1, p.CreatedAt);
     }
 }

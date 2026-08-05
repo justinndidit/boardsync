@@ -47,7 +47,7 @@ public record ProjectSummaryResponse(
 
 public record TeamResponse(
     Guid Id,
-    Guid ProjectId,
+    Guid OrganizationId,
     string Name,
     string Description,
     bool IsActive,

@@ -1,4 +1,5 @@
 using BoardSync.Api.Data;
+using BoardSync.Api.Modules.OrgProject.Domain.DTOs;
 using BoardSync.Api.Modules.OrgProject.Domain.Models;
 using BoardSync.Api.Modules.OrgProject.Repositories.Interfaces;
 using Microsoft.EntityFrameworkCore;
@@ -24,8 +25,8 @@ public class ProjectRepository : IProjectRepository
     public Task<bool> SlugExistsInOrganizationAsync(Guid organizationId, string slug, CancellationToken ct = default) =>
         _context.Projects.AnyAsync(p => p.OrganizationId == organizationId && p.Slug == slug, ct);
 
-    public Task<int> GetActiveTeamCountAsync(Guid projectId, CancellationToken ct = default) =>
-        _context.Teams.CountAsync(t => t.ProjectId == projectId && t.IsActive, ct);
+    // public Task<int> GetActiveTeamCountAsync(Guid projectId, CancellationToken ct = default) =>
+    //     _context.Teams.CountAsync(t => t.ProjectId == projectId && t.IsActive, ct);
 
     public async Task<(IReadOnlyList<Project> Items, int TotalCount)> GetForOrganizationAsync(
         Guid organizationId, int skip, int take, CancellationToken ct = default)
