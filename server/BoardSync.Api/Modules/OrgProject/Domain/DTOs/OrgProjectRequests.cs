@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace BoardSync.Api.Modules.OrgProject.DTOs;
+namespace BoardSync.Api.Modules.OrgProject.Domain.DTOs;
 
 public class CreateOrganizationRequest
 {

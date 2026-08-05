@@ -1,4 +1,4 @@
-using BoardSync.Api.Data;
+ using BoardSync.Api.Data;
 using BoardSync.Api.Modules.OrgProject.DTOs;
 using BoardSync.Api.Modules.OrgProject.Events;
 using BoardSync.Api.Modules.OrgProject.Models;
@@ -41,58 +41,37 @@ public class OrganizationService : IOrganizationService
         if (await _context.Organizations.AnyAsync(o => o.Slug == slug, ct))
             throw new ConflictException($"An organization with slug '{slug}' already exists.");
 
-        // EF Core's retry strategy cannot span multiple SaveChangesAsync calls unless
-        // we wrap the whole operation in ExecuteAsync — required when EnableRetryOnFailure is set.
-        var strategy = _context.Database.CreateExecutionStrategy();
-
-        Organization org = null!;
-
-        await strategy.ExecuteAsync(async () =>
+        var org = new Organization
         {
-            await using var tx = await _context.Database.BeginTransactionAsync(ct);
+            Slug = slug,
+            Name = request.Name.Trim(),
+            Description = request.Description?.Trim() ?? string.Empty,
+            CreatedBy = createdBy
+        };
 
-            org = new Organization
-            {
-                Slug = slug,
-                Name = request.Name.Trim(),
-                Description = request.Description?.Trim() ?? string.Empty,
-                CreatedBy = createdBy
-            };
+        _context.Organizations.Add(org);
+        await _context.SaveChangesAsync(ct);
 
-            _context.Organizations.Add(org);
-            await _context.SaveChangesAsync(ct);
+        // Creator becomes OrgAdmin automatically
+        await _rbac.AssignRoleAsync(createdBy, RoleType.OrgAdmin, RoleScope.Organization, org.Id, createdBy, ct);
 
-            // Creator becomes OrgAdmin automatically
-            var assignment = new RoleAssignment
-            {
-                UserId = createdBy,
-                Role = RoleType.OrgAdmin,
-                Scope = RoleScope.Organization,
-                ScopeId = org.Id,
-                CreatedBy = createdBy
-            };
-            _context.RoleAssignments.Add(assignment);
-
-            // Add to org membership
-            _context.OrganizationMemberships.Add(new OrganizationMembership
-            {
-                OrganizationId = org.Id,
-                UserId = createdBy,
-                CreatedBy = createdBy
-            });
-
-            await _context.SaveChangesAsync(ct);
-            await tx.CommitAsync(ct);
+        // Add to org membership
+        _context.OrganizationMemberships.Add(new OrganizationMembership
+        {
+            OrganizationId = org.Id,
+            UserId = createdBy,
+            CreatedBy = createdBy
         });
+        await _context.SaveChangesAsync(ct);
 
         await _eventBus.PublishAsync(new OrganizationCreated(org.Id, org.Name, org.Slug, createdBy), ct);
 
         _logger.LogInformation("Organization '{Name}' ({Id}) created by {UserId}", org.Name, org.Id, createdBy);
 
-        return await MapToResponseAsync(org, createdBy, ct);
+        return await MapToResponseAsync(org, ct);
     }
 
-    public async Task<OrganizationResponse> GetByIdAsync(Guid orgId, Guid requestingUserId, CancellationToken ct = default)
+    public async Task<OrganizationResponse> GetByIdAsync(Guid orgId, CancellationToken ct = default)
     {
         var org = await _context.Organizations
             .Include(o => o.Projects)
@@ -100,11 +79,10 @@ public class OrganizationService : IOrganizationService
             .FirstOrDefaultAsync(o => o.Id == orgId && o.IsActive, ct)
             ?? throw new NotFoundException(nameof(Organization), orgId);
 
-        var userRole = await ResolveUserRoleAsync(requestingUserId, orgId, ct);
-        return MapToResponse(org, userRole);
+        return MapToResponse(org);
     }
 
-    public async Task<OrganizationResponse> GetBySlugAsync(string slug, Guid requestingUserId, CancellationToken ct = default)
+    public async Task<OrganizationResponse> GetBySlugAsync(string slug, CancellationToken ct = default)
     {
         var org = await _context.Organizations
             .Include(o => o.Projects)
@@ -112,8 +90,7 @@ public class OrganizationService : IOrganizationService
             .FirstOrDefaultAsync(o => o.Slug == slug.ToLowerInvariant() && o.IsActive, ct)
             ?? throw new NotFoundException($"Organization with slug '{slug}' was not found.");
 
-        var userRole = await ResolveUserRoleAsync(requestingUserId, org.Id, ct);
-        return MapToResponse(org, userRole);
+        return MapToResponse(org);
     }
 
     public async Task<PagedResult<OrganizationSummaryResponse>> GetForUserAsync(
@@ -126,33 +103,11 @@ public class OrganizationService : IOrganizationService
             .OrderBy(o => o.Name);
 
         var total = await query.CountAsync(ct);
-        var orgs = await query
+        var items = await query
             .Skip(pagination.Skip)
             .Take(pagination.PageSize)
-            .Select(o => new
-            {
-                o.Id, o.Slug, o.Name, o.AvatarUrl, o.Description,
-                o.IsActive, o.CreatedAt,
-                MemberCount = o.Members.Count,
-                ProjectCount = o.Projects.Count(p => p.IsActive)
-            })
+            .Select(o => new OrganizationSummaryResponse(o.Id, o.Slug, o.Name, o.AvatarUrl))
             .ToListAsync(ct);
-
-        // Batch-load calling user's org-scope roles in one query
-        var orgIds = orgs.Select(o => o.Id).ToList();
-        var roleMap = await _context.RoleAssignments
-            .Where(ra => ra.UserId == userId
-                         && ra.Scope == RoleScope.Organization
-                         && orgIds.Contains(ra.ScopeId))
-            .ToDictionaryAsync(ra => ra.ScopeId, ra => ra.Role, ct);
-
-        var items = orgs.Select(o =>
-        {
-            var role = roleMap.TryGetValue(o.Id, out var r) ? r.ToString() : "None";
-            return new OrganizationSummaryResponse(
-                o.Id, o.Slug, o.Name, o.AvatarUrl, o.Description,
-                o.IsActive, o.MemberCount, o.ProjectCount, o.CreatedAt, role);
-        }).ToList();
 
         return new PagedResult<OrganizationSummaryResponse>(items, total, pagination.Page, pagination.PageSize);
     }
@@ -175,8 +130,7 @@ public class OrganizationService : IOrganizationService
         org.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync(ct);
-        var userRole = await ResolveUserRoleAsync(updatedBy, orgId, ct);
-        return MapToResponse(org, userRole);
+        return MapToResponse(org);
     }
 
     public async Task AddMemberAsync(Guid orgId, Guid userId, Guid addedBy, CancellationToken ct = default)
@@ -227,63 +181,6 @@ public class OrganizationService : IOrganizationService
             .AnyAsync(m => m.OrganizationId == orgId && m.UserId == userId, ct);
     }
 
-    public async Task<PagedResult<OrgMemberResponse>> GetMembersAsync(
-        Guid orgId,
-        PaginationQuery pagination,
-        CancellationToken ct = default)
-    {
-        if (!await _context.Organizations.AnyAsync(o => o.Id == orgId && o.IsActive, ct))
-            throw new NotFoundException(nameof(Organization), orgId);
-
-        var query = _context.OrganizationMemberships
-            .Where(m => m.OrganizationId == orgId)
-            .OrderBy(m => m.JoinedAt);
-
-        var total = await query.CountAsync(ct);
-
-        // Fetch memberships with user data in one query
-        var memberships = await query
-            .Skip(pagination.Skip)
-            .Take(pagination.PageSize)
-            .Join(_context.Users,
-                m => m.UserId,
-                u => u.Id,
-                (m, u) => new
-                {
-                    m.UserId,
-                    u.DisplayName,
-                    u.Email,
-                    u.ProfilePictureUrl,
-                    m.JoinedAt
-                })
-            .ToListAsync(ct);
-
-        // Batch-load org-scope role assignments for these members in one query,
-        // then pick the most-privileged role per user in memory (avoids (int) cast in SQL).
-        var userIds = memberships.Select(m => m.UserId).ToList();
-        var roleRows = await _context.RoleAssignments
-            .Where(ra => ra.Scope == RoleScope.Organization
-                         && ra.ScopeId == orgId
-                         && userIds.Contains(ra.UserId))
-            .Select(ra => new { ra.UserId, ra.Role })
-            .ToListAsync(ct);
-
-        var roleMap = roleRows
-            .GroupBy(ra => ra.UserId)
-            .ToDictionary(
-                g => g.Key,
-                g => g.OrderBy(ra => (int)ra.Role).First().Role);
-
-        var items = memberships.Select(m =>
-        {
-            var role = roleMap.TryGetValue(m.UserId, out var r) ? r.ToString() : "None";
-            return new OrgMemberResponse(
-                m.UserId, m.DisplayName, m.Email, m.ProfilePictureUrl, role, m.JoinedAt);
-        }).ToList();
-
-        return new PagedResult<OrgMemberResponse>(items, total, pagination.Page, pagination.PageSize);
-    }
-
     // -------------------------------------------------------------------------
     private static string NormalizeSlug(string input)
     {
@@ -292,33 +189,15 @@ public class OrganizationService : IOrganizationService
             .Trim('-');
     }
 
-    private static OrganizationResponse MapToResponse(Organization org, string userRole) =>
+    private static OrganizationResponse MapToResponse(Organization org) =>
         new(org.Id, org.Slug, org.Name, org.Description, org.AvatarUrl, org.IsActive,
-            org.Members.Count, org.Projects.Count, org.CreatedAt, userRole);
+            org.Members.Count, org.Projects.Count, org.CreatedAt);
 
-    private async Task<OrganizationResponse> MapToResponseAsync(Organization org, Guid requestingUserId, CancellationToken ct)
+    private async Task<OrganizationResponse> MapToResponseAsync(Organization org, CancellationToken ct)
     {
         var memberCount = await _context.OrganizationMemberships.CountAsync(m => m.OrganizationId == org.Id, ct);
         var projectCount = await _context.Projects.CountAsync(p => p.OrganizationId == org.Id && p.IsActive, ct);
-        var userRole = await ResolveUserRoleAsync(requestingUserId, org.Id, ct);
         return new(org.Id, org.Slug, org.Name, org.Description, org.AvatarUrl, org.IsActive,
-            memberCount, projectCount, org.CreatedAt, userRole);
-    }
-
-    private async Task<string> ResolveUserRoleAsync(Guid userId, Guid orgId, CancellationToken ct)
-    {
-        // Pull all role assignments for this user/org into memory, then pick the
-        // most-privileged one in C# — (int) cast cannot be translated against varchar column.
-        var roles = await _context.RoleAssignments
-            .Where(ra => ra.UserId == userId
-                         && ra.Scope == RoleScope.Organization
-                         && ra.ScopeId == orgId)
-            .Select(ra => ra.Role)
-            .ToListAsync(ct);
-
-        if (roles.Count == 0) return "None";
-
-        var best = roles.OrderBy(r => (int)r).First();
-        return best.ToString();
+            memberCount, projectCount, org.CreatedAt);
     }
 }

@@ -1,6 +1,6 @@
 using BoardSync.Api.Modules.Rbac.Models;
 
-namespace BoardSync.Api.Modules.Rbac.Services;
+namespace BoardSync.Api.Modules.Rbac.Services.Interfaces;
 
 public interface IRbacService
 {

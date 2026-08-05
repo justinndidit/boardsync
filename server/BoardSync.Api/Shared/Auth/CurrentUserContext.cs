@@ -22,10 +22,4 @@ public class CurrentUserContext : ICurrentUserContext
 
   public string Email =>
       _httpContextAccessor.HttpContext?.User?.FindFirstValue(ClaimTypes.Email) ?? string.Empty;
-
-  // Custom claim your application sets during login to handle multi-tenant workspaces
-  public Guid CurrentWorkspaceId =>
-      Guid.TryParse(_httpContextAccessor.HttpContext?.User?.FindFirstValue("workspace_id"), out var id)
-          ? id
-          : Guid.Empty;
 }

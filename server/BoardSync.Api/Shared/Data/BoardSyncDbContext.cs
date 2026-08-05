@@ -1,4 +1,4 @@
-using BoardSync.Api.Modules.OrgProject.Models;
+using BoardSync.Api.Modules.OrgProject.Domain.Models;
 using BoardSync.Api.Modules.Rbac.Models;
 using BoardSync.Api.Modules.Sprints.Models;
 using BoardSync.Api.Modules.WorkItems.Models;
@@ -302,36 +302,36 @@ public class BoardSyncDbContext : DbContext
         {
             entity.HasKey(u => u.Id);
             entity.HasIndex(u => u.Email).IsUnique();
-            
+
             entity.Property(u => u.Email)
                 .IsRequired()
                 .HasMaxLength(320); // RFC 5321 standard max email length
-                
+
             entity.Property(u => u.FirstName)
                 .IsRequired()
                 .HasMaxLength(50);
-                
+
             entity.Property(u => u.LastName)
                 .IsRequired()
                 .HasMaxLength(50);
-                
+
             entity.Property(u => u.DisplayName)
                 .IsRequired()
                 .HasMaxLength(100);
-                
+
             entity.Property(u => u.PasswordHash)
                 .IsRequired()
                 .HasMaxLength(255);
-                
+
             entity.Property(u => u.ProfilePictureUrl)
                 .HasMaxLength(2048);
-                
+
             entity.Property(u => u.EmailConfirmationToken)
                 .HasMaxLength(255);
-                
+
             entity.Property(u => u.PasswordResetToken)
                 .HasMaxLength(255);
-                
+
             entity.Property(u => u.RefreshToken)
                 .HasMaxLength(255);
 
@@ -352,21 +352,21 @@ public class BoardSyncDbContext : DbContext
         modelBuilder.Entity<RefreshToken>(entity =>
         {
             entity.HasKey(rt => rt.Id);
-            
+
             entity.Property(rt => rt.Token)
                 .IsRequired()
                 .HasMaxLength(255);
-                
+
             entity.Property(rt => rt.CreatedByIp)
                 .IsRequired()
                 .HasMaxLength(45); // IPv6 max length
-                
+
             entity.Property(rt => rt.RevokedByIp)
                 .HasMaxLength(45);
-                
+
             entity.Property(rt => rt.ReplacedByToken)
                 .HasMaxLength(255);
-                
+
             entity.Property(rt => rt.ReasonRevoked)
                 .HasMaxLength(255);
 

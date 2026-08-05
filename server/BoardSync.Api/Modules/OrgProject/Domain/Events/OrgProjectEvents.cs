@@ -1,6 +1,6 @@
 using BoardSync.Api.Shared.Kernel.Events;
 
-namespace BoardSync.Api.Modules.OrgProject.Events;
+namespace BoardSync.Api.Modules.OrgProject.Domain.Events;
 
 public record OrganizationCreated(
     Guid OrganizationId,

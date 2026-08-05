@@ -10,9 +10,9 @@ public interface IEventBus
     Task PublishAsync<TEvent>(TEvent domainEvent, CancellationToken cancellationToken = default)
         where TEvent : IDomainEvent;
 
-    /// <summary>Subscribe a handler for a specific event type.</summary>
-    void Subscribe<TEvent>(IEventHandler<TEvent> handler)
-        where TEvent : IDomainEvent;
+    // Subscription is DI registration: register an IEventHandler<TEvent> and the bus will resolve
+    // and invoke it. There is deliberately no Subscribe() method — the previous one was a no-op
+    // that silently did nothing when called.
 }
 
 /// <summary>

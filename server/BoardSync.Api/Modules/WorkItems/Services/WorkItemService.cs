@@ -1,7 +1,10 @@
-using BoardSync.Api.Data;
+using BoardSync.Api.Modules.OrgProject.Services.Interfaces;
 using BoardSync.Api.Modules.WorkItems.DTOs;
 using BoardSync.Api.Modules.WorkItems.Events;
 using BoardSync.Api.Modules.WorkItems.Models;
+using BoardSync.Api.Modules.WorkItems.Repository;
+using BoardSync.Api.Shared.Auth.Services;
+using BoardSync.Api.Shared.Auth.Services.Implementations;
 using BoardSync.Api.Shared.Kernel;
 using BoardSync.Api.Shared.Kernel.Events;
 using BoardSync.Api.Shared.Kernel.Exceptions;
@@ -11,16 +14,22 @@ namespace BoardSync.Api.Modules.WorkItems.Services;
 
 public class WorkItemService : IWorkItemService
 {
-    private readonly BoardSyncDbContext _context;
+    private readonly IWorkItemRepository _repository;
+    private readonly IProjectService _projectService;
+    private readonly ITeamService _teamService;
     private readonly IEventBus _eventBus;
     private readonly ILogger<WorkItemService> _logger;
 
     public WorkItemService(
-        BoardSyncDbContext context,
+        IWorkItemRepository repository,
+        IProjectService projectService,
+        ITeamService teamService,
         IEventBus eventBus,
         ILogger<WorkItemService> logger)
     {
-        _context = context;
+        _repository = repository;
+        _projectService = projectService;
+        _teamService = teamService;
         _eventBus = eventBus;
         _logger = logger;
     }
@@ -33,7 +42,8 @@ public class WorkItemService : IWorkItemService
         Guid createdBy,
         CancellationToken ct = default)
     {
-        if (!await _context.Projects.AnyAsync(p => p.Id == projectId && p.IsActive, ct))
+        Enum.TryParse<WorkItemType>(request.Type, ignoreCase: true, out WorkItemType workItemTypeParsed);
+        if (!await _projectService.ExistsAsync(projectId, ct))
             throw new NotFoundException("Project", projectId);
 
         if (request.ParentId.HasValue)
@@ -42,15 +52,17 @@ public class WorkItemService : IWorkItemService
                 .FirstOrDefaultAsync(w => w.Id == request.ParentId.Value && w.ProjectId == projectId && w.IsActive, ct)
                 ?? throw new NotFoundException("Parent work item", request.ParentId.Value);
 
-            ValidateHierarchy(parent.Type, request.Type);
+            ValidateHierarchy(parent.Type, workItemTypeParsed);
         }
+
+        if(!await _teamService.IsMember(request.TeamId, request.AssigneeId)) throw new InvalidOperationException("Assigned member does not belong to team");
 
         var item = new WorkItem
         {
             ProjectId = projectId,
             TeamId = request.TeamId,
             ParentId = request.ParentId,
-            Type = request.Type,
+            Type = workItemTypeParsed,
             State = WorkItemState.New,
             Priority = request.Priority,
             Title = request.Title.Trim(),
@@ -424,6 +436,16 @@ public class WorkItemService : IWorkItemService
             l.Target.Title, l.Target.Type, l.Target.State
         )).ToList();
     }
+
+    // ── Scope resolution ──────────────────────────────────────────────────────
+
+    public async Task<Guid> GetProjectIdForLinkAsync(Guid linkId, CancellationToken ct = default)
+        => await _repository.GetProjectIdForLinkAsync(linkId, ct)
+           ?? throw new NotFoundException("WorkItemLink", linkId);
+
+    public async Task<Guid> GetProjectIdForCommentAsync(Guid commentId, CancellationToken ct = default)
+        => await _repository.GetProjectIdForCommentAsync(commentId, ct)
+           ?? throw new NotFoundException("Comment", commentId);
 
     // ── Private helpers ───────────────────────────────────────────────────────
 

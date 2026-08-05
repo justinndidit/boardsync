@@ -177,6 +177,20 @@ public class WorkItemRepository : IWorkItemRepository
 
     public void RemoveLink(WorkItemLink link) => _context.WorkItemLinks.Remove(link);
 
+    // ── Scope resolution ──────────────────────────────────────────────────────
+
+    public Task<Guid?> GetProjectIdForLinkAsync(Guid linkId, CancellationToken ct = default) =>
+        _context.WorkItemLinks
+            .Where(l => l.Id == linkId)
+            .Select(l => (Guid?)l.Source.ProjectId)
+            .FirstOrDefaultAsync(ct);
+
+    public Task<Guid?> GetProjectIdForCommentAsync(Guid commentId, CancellationToken ct = default) =>
+        _context.WorkItemComments
+            .Where(c => c.Id == commentId)
+            .Select(c => (Guid?)c.WorkItem.ProjectId)
+            .FirstOrDefaultAsync(ct);
+
     // ── Unit of work ──────────────────────────────────────────────────────────
 
     public Task SaveChangesAsync(CancellationToken ct = default) => _context.SaveChangesAsync(ct);

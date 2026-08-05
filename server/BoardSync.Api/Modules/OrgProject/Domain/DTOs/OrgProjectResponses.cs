@@ -1,6 +1,6 @@
 using BoardSync.Api.Modules.Rbac.Models;
 
-namespace BoardSync.Api.Modules.OrgProject.DTOs;
+namespace BoardSync.Api.Modules.OrgProject.Domain.DTOs;
 
 public record OrganizationResponse(
     Guid Id,

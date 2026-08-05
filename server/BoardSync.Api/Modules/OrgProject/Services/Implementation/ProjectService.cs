@@ -1,30 +1,34 @@
-using BoardSync.Api.Data;
-using BoardSync.Api.Modules.OrgProject.DTOs;
-using BoardSync.Api.Modules.OrgProject.Events;
-using BoardSync.Api.Modules.OrgProject.Models;
+using BoardSync.Api.Modules.OrgProject.Domain.Helpers;
+using BoardSync.Api.Modules.OrgProject.Domain.DTOs;
+using BoardSync.Api.Modules.OrgProject.Domain.Events;
+using BoardSync.Api.Modules.OrgProject.Domain.Models;
+using BoardSync.Api.Modules.OrgProject.Repositories.Interfaces;
+using BoardSync.Api.Modules.OrgProject.Services.Interfaces;
 using BoardSync.Api.Modules.Rbac.Models;
-using BoardSync.Api.Modules.Rbac.Services;
+using BoardSync.Api.Modules.Rbac.Services.Interfaces;
 using BoardSync.Api.Shared.Kernel;
 using BoardSync.Api.Shared.Kernel.Events;
 using BoardSync.Api.Shared.Kernel.Exceptions;
-using Microsoft.EntityFrameworkCore;
 
-namespace BoardSync.Api.Modules.OrgProject.Services;
+namespace BoardSync.Api.Modules.OrgProject.Services.Implementations;
 
 public class ProjectService : IProjectService
 {
-    private readonly BoardSyncDbContext _context;
+    private readonly IProjectRepository _projectRepo;
+    private readonly IOrganizationRepository _organizationRepo;
     private readonly IRbacService _rbac;
     private readonly IEventBus _eventBus;
     private readonly ILogger<ProjectService> _logger;
 
     public ProjectService(
-        BoardSyncDbContext context,
+        IProjectRepository projectRepository,
+        IOrganizationRepository organizationRepository,
         IRbacService rbac,
         IEventBus eventBus,
         ILogger<ProjectService> logger)
     {
-        _context = context;
+        _projectRepo = projectRepository;
+        _organizationRepo = organizationRepository;
         _rbac = rbac;
         _eventBus = eventBus;
         _logger = logger;
@@ -36,12 +40,12 @@ public class ProjectService : IProjectService
         Guid createdBy,
         CancellationToken ct = default)
     {
-        if (!await _context.Organizations.AnyAsync(o => o.Id == orgId && o.IsActive, ct))
+        if (!await _organizationRepo.ExistsActiveAsync(orgId, ct))
             throw new NotFoundException("Organization", orgId);
 
-        var slug = NormalizeSlug(request.Slug ?? request.Name);
+        var slug = Slug.From(request.Slug ?? request.Name);
 
-        if (await _context.Projects.AnyAsync(p => p.OrganizationId == orgId && p.Slug == slug, ct))
+        if (await _projectRepo.SlugExistsInOrganizationAsync(orgId, slug, ct))
             throw new ConflictException($"A project with slug '{slug}' already exists in this organization.");
 
         var project = new Project
@@ -53,8 +57,8 @@ public class ProjectService : IProjectService
             CreatedBy = createdBy
         };
 
-        _context.Projects.Add(project);
-        await _context.SaveChangesAsync(ct);
+        _projectRepo.Add(project);
+        await _projectRepo.SaveChangesAsync(ct);
 
         // Creator becomes ProjectAdmin
         await _rbac.AssignRoleAsync(createdBy, RoleType.ProjectAdmin, RoleScope.Project, project.Id, createdBy, ct);
@@ -69,32 +73,26 @@ public class ProjectService : IProjectService
 
     public async Task<ProjectResponse> GetByIdAsync(Guid projectId, CancellationToken ct = default)
     {
-        var project = await _context.Projects
-            .Include(p => p.Teams)
-            .FirstOrDefaultAsync(p => p.Id == projectId && p.IsActive, ct)
+        var project = await _projectRepo.GetActiveAsync(projectId, ct)
             ?? throw new NotFoundException(nameof(Project), projectId);
 
-        return MapToResponse(project);
+        return await MapToResponseAsync(project, ct);
     }
 
     public Task<bool> ExistsAsync(Guid projectId, CancellationToken ct = default) =>
-        _context.Projects.AnyAsync(p => p.Id == projectId && p.IsActive, ct);
+        _projectRepo.ExistsActiveAsync(projectId, ct);
 
     public async Task<PagedResult<ProjectSummaryResponse>> GetForOrgAsync(
         Guid orgId,
         PaginationQuery pagination,
         CancellationToken ct = default)
     {
-        var query = _context.Projects
-            .Where(p => p.OrganizationId == orgId && p.IsActive)
-            .OrderBy(p => p.Name);
+        var (projects, total) = await _projectRepo.GetForOrganizationAsync(
+            orgId, pagination.Skip, pagination.PageSize, ct);
 
-        var total = await query.CountAsync(ct);
-        var items = await query
-            .Skip(pagination.Skip)
-            .Take(pagination.PageSize)
+        var items = projects
             .Select(p => new ProjectSummaryResponse(p.Id, p.Slug, p.Name))
-            .ToListAsync(ct);
+            .ToList();
 
         return new PagedResult<ProjectSummaryResponse>(items, total, pagination.Page, pagination.PageSize);
     }
@@ -105,32 +103,22 @@ public class ProjectService : IProjectService
         Guid updatedBy,
         CancellationToken ct = default)
     {
-        var project = await _context.Projects
-            .Include(p => p.Teams)
-            .FirstOrDefaultAsync(p => p.Id == projectId && p.IsActive, ct)
+        var project = await _projectRepo.GetActiveAsync(projectId, ct)
             ?? throw new NotFoundException(nameof(Project), projectId);
 
         project.Name = request.Name.Trim();
         project.Description = request.Description?.Trim() ?? project.Description;
         project.UpdatedAt = DateTime.UtcNow;
 
-        await _context.SaveChangesAsync(ct);
-        return MapToResponse(project);
+        await _projectRepo.SaveChangesAsync(ct);
+        return await MapToResponseAsync(project, ct);
     }
 
     // -------------------------------------------------------------------------
-    private static string NormalizeSlug(string input) =>
-        System.Text.RegularExpressions.Regex
-            .Replace(input.Trim().ToLowerInvariant(), @"[^a-z0-9]+", "-")
-            .Trim('-');
-
-    private static ProjectResponse MapToResponse(Project p) =>
-        new(p.Id, p.OrganizationId, p.Slug, p.Name, p.Description, p.IsActive,
-            p.Teams.Count(t => t.IsActive), p.CreatedAt);
 
     private async Task<ProjectResponse> MapToResponseAsync(Project p, CancellationToken ct)
     {
-        var teamCount = await _context.Teams.CountAsync(t => t.ProjectId == p.Id && t.IsActive, ct);
+        var teamCount = await _projectRepo.GetActiveTeamCountAsync(p.Id, ct);
         return new(p.Id, p.OrganizationId, p.Slug, p.Name, p.Description, p.IsActive, teamCount, p.CreatedAt);
     }
 }

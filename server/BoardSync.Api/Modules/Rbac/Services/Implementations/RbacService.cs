@@ -1,8 +1,9 @@
 using BoardSync.Api.Data;
 using BoardSync.Api.Modules.Rbac.Models;
+using BoardSync.Api.Modules.Rbac.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
 
-namespace BoardSync.Api.Modules.Rbac.Services;
+namespace BoardSync.Api.Modules.Rbac.Services.Implementations;
 
 public class RbacService : IRbacService
 {
@@ -78,6 +79,15 @@ public class RbacService : IRbacService
                          && ra.ScopeId == scopeId)
             .Select(ra => ra.Role)
             .ToListAsync(ct);
+        // A role satisfies the requirement if its numeric value is <= minimumRole
+        // (lower value = more privileged in the enum).
+        //
+        // The comparison MUST be resolved in C# and matched by identity. Role is persisted with
+        // HasConversion<string>() (see BoardSyncDbContext), so writing `(int)ra.Role <= (int)minimumRole`
+        // in the predicate silently drops the casts and asks the database to compare the *names*:
+        // 'TeamMember' <= 'Reader' is false and 'Reader' <= 'TeamMember' is true, which both denies
+        // team members read access and lets readers perform team-member writes.
+        var satisfyingRoles = RolesSatisfying(minimumRole);
 
         var directMatch = assignments.Any(role => (int)role <= (int)minimumRole);
         if (directMatch) return true;
@@ -109,6 +119,15 @@ public class RbacService : IRbacService
     // -------------------------------------------------------------------------
     // Private helpers
     // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Every role at least as privileged as <paramref name="minimumRole"/>. Lower enum value means
+    /// more privileged, so this is every role whose value is &lt;= the requirement.
+    /// </summary>
+    private static RoleType[] RolesSatisfying(RoleType minimumRole) =>
+        Enum.GetValues<RoleType>()
+            .Where(role => (int)role <= (int)minimumRole)
+            .ToArray();
 
     private async Task<bool> IsOrgAdminForScopeAsync(Guid userId, RoleScope scope, Guid scopeId, CancellationToken ct)
     {

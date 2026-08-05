@@ -58,12 +58,6 @@ public class AuthenticationService : IAuthenticationService
                 return new ApiResponse<(AuthResponse authResponse, string refreshToken)>(false, $"Account is locked. Try again in {lockTimeRemaining} minutes.");
             }
 
-            if (!user.IsActive)
-            {
-                _logger.LogWarning("Login attempt on inactive account: {Email}", request.Email);
-                return new ApiResponse<(AuthResponse authResponse, string refreshToken)>(false, "Account is inactive. Please contact support.");
-            }
-
             if (!_passwordService.VerifyPassword(request.Password, user.PasswordHash))
             {
                 await HandleFailedLoginAsync(user);
@@ -75,6 +69,12 @@ public class AuthenticationService : IAuthenticationService
             {
                 _logger.LogWarning("Login attempt with unconfirmed email: {Email}", request.Email);
                 return new ApiResponse<(AuthResponse authResponse, string refreshToken)>(false, "Please confirm your email before signing in");
+            }
+
+            if (!user.IsActive)
+            {
+                _logger.LogWarning("Login attempt on inactive account: {Email}", request.Email);
+                return new ApiResponse<(AuthResponse authResponse, string refreshToken)>(false, "Account is inactive. Please contact support.");
             }
 
             if (user.FailedLoginAttempts > 0 || user.IsLocked)

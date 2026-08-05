@@ -1,5 +1,5 @@
 using BoardSync.Api.Modules.Rbac.Models;
-using BoardSync.Api.Modules.Rbac.Services;
+using BoardSync.Api.Modules.Rbac.Services.Interfaces;
 using BoardSync.Api.Shared.Auth.Attributes;
 using BoardSync.Api.Shared.Auth.Configuration;
 using BoardSync.Api.Shared.Auth.DTOs;
@@ -26,6 +26,7 @@ public class AuthController : ControllerBase
     private readonly IEmailService _emailService;
     private readonly IRbacService _rbac;
     private readonly JwtSettings _jwtSettings;
+    private readonly EmailSettings _emailSettings;
     private readonly ILogger<AuthController> _logger;
 
     public AuthController(
@@ -34,6 +35,7 @@ public class AuthController : ControllerBase
         IEmailService emailService,
         IRbacService rbac,
         IOptions<JwtSettings> jwtSettings,
+        IOptions<EmailSettings> emailSettings,
         ILogger<AuthController> logger)
     {
         _authService = authService;
@@ -41,6 +43,7 @@ public class AuthController : ControllerBase
         _emailService = emailService;
         _rbac = rbac;
         _jwtSettings = jwtSettings.Value;
+        _emailSettings = emailSettings.Value;
         _logger = logger;
     }
 
@@ -108,7 +111,7 @@ public class AuthController : ControllerBase
             // Send welcome email if email confirmation is not required
             if (result.Data.IsEmailConfirmed)
             {
-                var baseUrl = Request.Headers.Origin.FirstOrDefault() ?? $"{Request.Scheme}://{Request.Host}";
+                var baseUrl = GetAppBaseUrl();
                 var welcomeResult = await _emailService.SendWelcomeEmailAsync(result.Data.Email, result.Data.FirstName, baseUrl);
                 if (!welcomeResult.Success)
                 {
@@ -119,7 +122,7 @@ public class AuthController : ControllerBase
             // Send confirmation email if required
             else
             {
-                var baseUrl = Request.Headers.Origin.FirstOrDefault() ?? $"{Request.Scheme}://{Request.Host}";
+                var baseUrl = GetAppBaseUrl();
                 var emailResult = await _userService.GenerateAndSendEmailConfirmationAsync(result.Data.Email, baseUrl);
 
                 if (!emailResult.Success)
@@ -253,11 +256,23 @@ public class AuthController : ControllerBase
     /// <summary>
     /// Reset user password using reset token
     /// </summary>
-    /// <param name="request">Password reset information including token</param>
+    /// <param name="email">Email address for the password reset request</param>
+    /// <param name="token">Password reset token sent to the user</param>
     /// <returns>Password reset confirmation</returns>
     /// <response code="200">Password reset successfully</response>
     /// <response code="400">Invalid token or validation errors</response>
     /// <response code="429">Too many password reset attempts</response>
+    [HttpGet("reset-password")]
+    [AllowAnonymous]
+    public IActionResult ResetPasswordGet([FromQuery] string email, [FromQuery] string token)
+    {
+        if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(token))
+            return Redirect("http://localhost:5173/auth/login?status=invalid");
+
+        var frontendUrl = $"http://localhost:5173/auth/login?email={Uri.EscapeDataString(email)}&token={Uri.EscapeDataString(token)}";
+        return Redirect(frontendUrl);
+    }
+
     [HttpPost("reset-password")]
     [AllowAnonymous]
     [EnableRateLimiting("password")]
@@ -279,10 +294,27 @@ public class AuthController : ControllerBase
     /// <summary>
     /// Confirm user email address using confirmation token
     /// </summary>
-    /// <param name="request">Email confirmation information</param>
+    /// <param name="email">Email address to confirm</param>
+    /// <param name="token">Confirmation token sent to the user</param>
     /// <returns>Email confirmation result</returns>
     /// <response code="200">Email confirmed successfully</response>
     /// <response code="400">Invalid token or email already confirmed</response>
+    [HttpGet("confirm-email")]
+    [AllowAnonymous]
+    public async Task<IActionResult> ConfirmEmailGet([FromQuery] string email, [FromQuery] string token)
+    {
+        if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(token))
+            return Redirect("http://localhost:5173/auth/login?status=invalid");
+
+        var result = await _userService.ConfirmEmailAsync(new ConfirmEmailRequest(email, token));
+
+        if (!result.Success)
+            return Redirect("http://localhost:5173/auth/login?status=invalid");
+
+        var frontendUrl = $"http://localhost:5173/auth/login?email={Uri.EscapeDataString(email)}&status=confirmed";
+        return Redirect(frontendUrl);
+    }
+
     [HttpPost("confirm-email")]
     [AllowAnonymous]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status200OK)]
@@ -300,7 +332,7 @@ public class AuthController : ControllerBase
         var userResult = await _userService.GetByEmailAsync(request.Email);
         if (userResult.Success && userResult.Data != null)
         {
-            var baseUrl = Request.Headers.Origin.FirstOrDefault() ?? $"{Request.Scheme}://{Request.Host}";
+            var baseUrl = GetAppBaseUrl();
             await _emailService.SendWelcomeEmailAsync(userResult.Data.Email, userResult.Data.FirstName, baseUrl);
         }
 
@@ -320,7 +352,7 @@ public class AuthController : ControllerBase
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> ResendConfirmation([FromBody] ResendConfirmationRequest request)
     {
-        var baseUrl = Request.Headers.Origin.FirstOrDefault() ?? $"{Request.Scheme}://{Request.Host}";
+        var baseUrl = GetAppBaseUrl();
         var result = await _userService.GenerateAndSendEmailConfirmationAsync(request.Email, baseUrl);
 
         if (!result.Success)
@@ -355,6 +387,33 @@ public class AuthController : ControllerBase
         }
 
         return Ok(result);
+    }
+
+    /// <summary>
+    /// Returns the currently authenticated user profile based on the server-validated bearer token.
+    /// </summary>
+    /// <returns>Authenticated user profile data with roles</returns>
+    /// <response code="200">Token is valid and user profile was returned</response>
+    /// <response code="401">Token is missing or invalid</response>
+    [HttpGet("me")]
+    [Authorize]
+    [ProducesResponseType(typeof(ApiResponse<UserProfile>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> Me(CancellationToken ct)
+    {
+        var userId = GetCurrentUserId();
+        var result = await _userService.GetByIdAsync(userId);
+
+        if (!result.Success || result.Data is null)
+            return NotFound(result);
+
+        var assignments = await _rbac.GetUserRolesAsync(userId, ct);
+        var roles = assignments
+            .Select(ra => new UserRoleResponse(ra.Role, ra.Scope, ra.ScopeId))
+            .ToList();
+
+        var profile = result.Data with { Roles = roles };
+        return Ok(new ApiResponse<UserProfile>(true, "Token is valid.", profile));
     }
 
     /// <summary>
@@ -431,6 +490,16 @@ public class AuthController : ControllerBase
     private string GetIpAddress()
     {
         return HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+    }
+
+    private string GetAppBaseUrl()
+    {
+        if (!string.IsNullOrWhiteSpace(_emailSettings.BaseUrl))
+        {
+            return _emailSettings.BaseUrl;
+        }
+
+        return $"{Request.Scheme}://{Request.Host}";
     }
 
     private Guid GetCurrentUserId()
