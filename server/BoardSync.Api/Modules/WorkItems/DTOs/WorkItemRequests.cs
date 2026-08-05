@@ -17,13 +17,14 @@ public class CreateWorkItemRequest
 
     public WorkItemPriority Priority { get; init; } = WorkItemPriority.Medium;
 
-    public Guid? AssigneeId { get; init; }
+    /// <summary>Required team member assined to task.</summary>
+    public Guid AssigneeId { get; init; }
 
     /// <summary>Parent work item ID for hierarchy (e.g., Epic → Feature → Story → Task).</summary>
     public Guid? ParentId { get; init; }
 
-    /// <summary>Optional team scope.</summary>
-    public Guid? TeamId { get; init; }
+    /// <summary>Team scope.</summary>
+    public Guid TeamId { get; init; }
 
     [Range(0, 1000)]
     public int? StoryPoints { get; init; }
