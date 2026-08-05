@@ -851,20 +851,6 @@
         <member name="T:BoardSync.Api.Modules.WorkItems.Repository.WorkItemRepository">
             <inheritdoc />
         </member>
-        <member name="T:BoardSync.Api.Modules.WorkItems.Services.WorkItemService">
-            <summary>
-            Business logic for the WorkItems module: validation, the state machine, the type
-            hierarchy, audit history and domain events. All persistence goes through
-            <see cref="T:BoardSync.Api.Modules.WorkItems.Repository.IWorkItemRepository"/>; project references go through <see cref="T:BoardSync.Api.Modules.OrgProject.Services.IProjectService"/>.
-            </summary>
-        </member>
-        <member name="M:BoardSync.Api.Modules.WorkItems.Services.WorkItemService.NormalizeTags(System.Collections.Generic.IEnumerable{System.String})">
-            <summary>
-            Trims, lower-cases and de-duplicates tag names, dropping blanks. Normalization must happen
-            before de-duplication so that casing variants collapse to the single row the unique
-            (WorkItemId, Name) index allows.
-            </summary>
-        </member>
         <member name="T:BoardSync.Api.Shared.Auth.Attributes.RequireAuthenticationAttribute">
             <summary>
             Requires the user to be authenticated
