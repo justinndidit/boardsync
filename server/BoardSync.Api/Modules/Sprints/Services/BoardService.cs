@@ -17,24 +17,24 @@ public class BoardService : IBoardService
         _logger = logger;
     }
 
-    public async Task<BoardResponse> GetOrCreateForTeamAsync(
-        Guid teamId,
+    public async Task<BoardResponse> GetOrCreateForProjectAsync(
+        Guid projectId,
         Guid createdBy,
         CancellationToken ct = default)
     {
-        if (!await _context.Teams.AnyAsync(t => t.Id == teamId && t.IsActive, ct))
-            throw new NotFoundException("Team", teamId);
+        if (!await _context.Projects.AnyAsync(t => t.Id == projectId && t.IsActive, ct))
+            throw new NotFoundException("project", projectId);
 
         var board = await _context.Boards
             .Include(b => b.Columns)
-            .FirstOrDefaultAsync(b => b.TeamId == teamId, ct);
+            .FirstOrDefaultAsync(b => b.ProjectId == projectId, ct);
 
         if (board is null)
         {
-            board = BuildDefaultBoard(teamId, createdBy);
+            board = BuildDefaultBoard(projectId, createdBy);
             _context.Boards.Add(board);
             await _context.SaveChangesAsync(ct);
-            _logger.LogInformation("Board auto-created for team {TeamId}", teamId);
+            _logger.LogInformation("Board auto-created for project {ProjectId}", projectId);
         }
 
         return await BuildBoardResponseAsync(board, ct);
@@ -148,9 +148,9 @@ public class BoardService : IBoardService
 
     private async Task<BoardResponse> BuildBoardResponseAsync(Board board, CancellationToken ct)
     {
-        // Find active sprint for this team
+        // Find active sprint for this project
         var activeSprint = await _context.Sprints
-            .Where(s => s.TeamId == board.TeamId && s.Status == SprintStatus.Active)
+            .Where(s => s.  TeamId == board.ProjectId && s.Status == SprintStatus.Active)
             .Select(s => (Guid?)s.Id)
             .FirstOrDefaultAsync(ct);
 
@@ -210,14 +210,14 @@ public class BoardService : IBoardService
             .ToList();
 
         return new BoardResponse(
-            board.Id, board.TeamId, board.Name,
+            board.Id, board.ProjectId, board.Name,
             activeSprint, columns, board.CreatedAt);
     }
 
     /// <summary>Creates a board with the four default columns mapped to WorkItemState values.</summary>
-    private static Board BuildDefaultBoard(Guid teamId, Guid createdBy) => new()
+    private static Board BuildDefaultBoard(Guid projectId, Guid createdBy) => new()
     {
-        TeamId    = teamId,
+        ProjectId    = projectId,
         Name      = "Board",
         CreatedBy = createdBy,
         Columns   = new List<BoardColumn>
@@ -231,4 +231,9 @@ public class BoardService : IBoardService
 
     private static BoardColumnDetailResponse MapColumnDetail(BoardColumn c) =>
         new(c.Id, c.BoardId, c.Name, c.MappedState, c.Position, c.WipLimit, c.CreatedAt);
+
+    public Task<BoardResponse> GetOrCreateForTeamAsync(Guid projectId, Guid createdBy, CancellationToken ct = default)
+    {
+       throw new NotImplementedException();
+     }
 }

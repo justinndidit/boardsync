@@ -53,7 +53,7 @@ public class BoardsController : ControllerBase
     public async Task<IActionResult> GetForTeam(Guid projectId, CancellationToken ct)
     {
         await RequireTeamRoleAsync(projectId, RoleType.Reader, ct);
-        var board = await _boardService.GetOrCreateForTeamAsync(projectId, _currentUser.UserId, ct);
+        var board = await _boardService.GetOrCreateForProjectAsync(projectId, _currentUser.UserId, ct);
         return Ok(new ApiResponse<BoardResponse>(true, "Board retrieved.", board));
     }
 
@@ -167,7 +167,7 @@ public class BoardsController : ControllerBase
     {
         var teamId = await _context.BoardColumns
             .Where(c => c.Id == columnId)
-            .Select(c => (Guid?)c.Board.TeamId)
+            .Select(c => (Guid?)c.Board.ProjectId)
             .FirstOrDefaultAsync(ct)
             ?? throw new NotFoundException("BoardColumn", columnId);
 

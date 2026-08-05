@@ -8,7 +8,7 @@ namespace BoardSync.Api.Modules.Sprints.Models;
 /// </summary>
 public class Board : BaseEntity
 {
-    public Guid TeamId { get; set; }
+    public Guid ProjectId { get; set; }
     public string Name { get; set; } = "Board";
 
     // Navigation
