@@ -46,14 +46,14 @@ public class BoardsController : ControllerBase
     /// Get (or auto-create) the board for a team, populated with active-sprint cards.
     /// Requires Reader.
     /// </summary>
-    [HttpGet("api/teams/{teamId:guid}/board")]
+    [HttpGet("api/project/{projectId:guid}/board")]
     [ProducesResponseType(typeof(ApiResponse<BoardResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> GetForTeam(Guid teamId, CancellationToken ct)
+    public async Task<IActionResult> GetForTeam(Guid projectId, CancellationToken ct)
     {
-        await RequireTeamRoleAsync(teamId, RoleType.Reader, ct);
-        var board = await _boardService.GetOrCreateForTeamAsync(teamId, _currentUser.UserId, ct);
+        await RequireTeamRoleAsync(projectId, RoleType.Reader, ct);
+        var board = await _boardService.GetOrCreateForTeamAsync(projectId, _currentUser.UserId, ct);
         return Ok(new ApiResponse<BoardResponse>(true, "Board retrieved.", board));
     }
 
@@ -167,7 +167,7 @@ public class BoardsController : ControllerBase
     {
         var teamId = await _context.BoardColumns
             .Where(c => c.Id == columnId)
-            .Select(c => (Guid?)c.Board.TeamId)
+            .Select(c => (Guid?)c.Board.ProjectId)
             .FirstOrDefaultAsync(ct)
             ?? throw new NotFoundException("BoardColumn", columnId);
 

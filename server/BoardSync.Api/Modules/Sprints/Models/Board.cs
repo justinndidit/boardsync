@@ -3,12 +3,12 @@ using BoardSync.Api.Shared.Kernel;
 namespace BoardSync.Api.Modules.Sprints.Models;
 
 /// <summary>
-/// A Kanban/Scrum board scoped to a team.
-/// One board per team, auto-created on first access with four default columns.
+/// A Kanban/Scrum board scoped to a project.
+/// One board per project, auto-created on first access with four default columns.
 /// </summary>
 public class Board : BaseEntity
 {
-    public Guid TeamId { get; set; }
+    public Guid ProjectId { get; set; }
     public string Name { get; set; } = "Board";
 
     // Navigation
