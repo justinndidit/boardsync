@@ -8,10 +8,14 @@ using BoardSync.Api.Shared.Auth.Services.Implementations;
 using BoardSync.Api.Shared.Kernel;
 using BoardSync.Api.Shared.Kernel.Events;
 using BoardSync.Api.Shared.Kernel.Exceptions;
-using Microsoft.EntityFrameworkCore;
 
 namespace BoardSync.Api.Modules.WorkItems.Services;
 
+/// <summary>
+/// Business logic for the WorkItems module: validation, the state machine, the type
+/// hierarchy, audit history and domain events. All persistence goes through
+/// <see cref="IWorkItemRepository"/>; project references go through <see cref="IProjectService"/>.
+/// </summary>
 public class WorkItemService : IWorkItemService
 {
     private readonly IWorkItemRepository _repository;
@@ -48,8 +52,7 @@ public class WorkItemService : IWorkItemService
 
         if (request.ParentId.HasValue)
         {
-            var parent = await _context.WorkItems
-                .FirstOrDefaultAsync(w => w.Id == request.ParentId.Value && w.ProjectId == projectId && w.IsActive, ct)
+            var parent = await _repository.GetActiveInProjectAsync(request.ParentId.Value, projectId, ct)
                 ?? throw new NotFoundException("Parent work item", request.ParentId.Value);
 
             ValidateHierarchy(parent.Type, workItemTypeParsed);
@@ -72,15 +75,16 @@ public class WorkItemService : IWorkItemService
             CreatedBy = createdBy
         };
 
-        _context.WorkItems.Add(item);
+        _repository.Add(item);
 
-        // Tags
-        foreach (var tag in request.Tags.Where(t => !string.IsNullOrWhiteSpace(t)).Distinct())
+        // Tags — normalize before de-duplicating, otherwise "Payments" and "payments"
+        // survive as two rows and violate the unique (WorkItemId, Name) index.
+        foreach (var tag in NormalizeTags(request.Tags))
         {
-            _context.WorkItemTags.Add(new WorkItemTag
+            _repository.AddTag(new WorkItemTag
             {
                 WorkItemId = item.Id,
-                Name = tag.Trim().ToLowerInvariant(),
+                Name = tag,
                 CreatedBy = createdBy
             });
         }
@@ -88,7 +92,7 @@ public class WorkItemService : IWorkItemService
         // Initial history entry
         AddHistory(item.Id, createdBy, "State", null, WorkItemState.New.ToString());
 
-        await _context.SaveChangesAsync(ct);
+        await _repository.SaveChangesAsync(ct);
 
         await _eventBus.PublishAsync(
             new WorkItemCreated(item.Id, projectId, item.Type, item.Title, createdBy), ct);
@@ -110,42 +114,13 @@ public class WorkItemService : IWorkItemService
         WorkItemFilterQuery filter,
         CancellationToken ct = default)
     {
-        var query = _context.WorkItems
-            .Include(w => w.Tags)
-            .Where(w => w.ProjectId == projectId && w.IsActive);
-
-        if (filter.Type.HasValue)
-            query = query.Where(w => w.Type == filter.Type.Value);
-
-        if (filter.State.HasValue)
-            query = query.Where(w => w.State == filter.State.Value);
-
-        if (filter.AssigneeId.HasValue)
-            query = query.Where(w => w.AssigneeId == filter.AssigneeId.Value);
-
-        if (filter.TeamId.HasValue)
-            query = query.Where(w => w.TeamId == filter.TeamId.Value);
-
-        if (!string.IsNullOrWhiteSpace(filter.Tag))
-            query = query.Where(w => w.Tags.Any(t => t.Name == filter.Tag.ToLowerInvariant()));
-
-        var total = await query.CountAsync(ct);
-
         var pageSize = Math.Clamp(filter.PageSize, 1, 100);
         var page = Math.Max(filter.Page, 1);
         var skip = (page - 1) * pageSize;
 
-        var items = await query
-            .OrderByDescending(w => w.CreatedAt)
-            .Skip(skip)
-            .Take(pageSize)
-            .ToListAsync(ct);
+        var (items, total) = await _repository.GetForProjectAsync(projectId, filter, skip, pageSize, ct);
 
-        var childCounts = await _context.WorkItems
-            .Where(w => w.ParentId != null && w.IsActive && items.Select(i => i.Id).Contains(w.ParentId.Value))
-            .GroupBy(w => w.ParentId!.Value)
-            .Select(g => new { ParentId = g.Key, Count = g.Count() })
-            .ToDictionaryAsync(x => x.ParentId, x => x.Count, ct);
+        var childCounts = await _repository.GetChildCountsAsync(items.Select(i => i.Id), ct);
 
         var summaries = items.Select(w => new WorkItemSummaryResponse(
             w.Id,
@@ -169,9 +144,7 @@ public class WorkItemService : IWorkItemService
         Guid updatedBy,
         CancellationToken ct = default)
     {
-        var item = await _context.WorkItems
-            .Include(w => w.Tags)
-            .FirstOrDefaultAsync(w => w.Id == workItemId && w.IsActive, ct)
+        var item = await _repository.GetActiveWithTagsAsync(workItemId, ct)
             ?? throw new NotFoundException("WorkItem", workItemId);
 
         // Track and record field changes
@@ -194,19 +167,15 @@ public class WorkItemService : IWorkItemService
 
         // Sync tags: remove old, add new
         var existingTags = item.Tags.ToList();
-        var newTagNames = request.Tags
-            .Where(t => !string.IsNullOrWhiteSpace(t))
-            .Select(t => t.Trim().ToLowerInvariant())
-            .Distinct()
-            .ToList();
+        var newTagNames = NormalizeTags(request.Tags);
 
         foreach (var removed in existingTags.Where(t => !newTagNames.Contains(t.Name)))
-            _context.WorkItemTags.Remove(removed);
+            _repository.RemoveTag(removed);
 
         foreach (var added in newTagNames.Where(n => existingTags.All(t => t.Name != n)))
-            _context.WorkItemTags.Add(new WorkItemTag { WorkItemId = item.Id, Name = added, CreatedBy = updatedBy });
+            _repository.AddTag(new WorkItemTag { WorkItemId = item.Id, Name = added, CreatedBy = updatedBy });
 
-        await _context.SaveChangesAsync(ct);
+        await _repository.SaveChangesAsync(ct);
 
         if (previousAssignee != request.AssigneeId)
         {
@@ -236,7 +205,7 @@ public class WorkItemService : IWorkItemService
         item.State = newState;
         item.UpdatedAt = DateTime.UtcNow;
 
-        await _context.SaveChangesAsync(ct);
+        await _repository.SaveChangesAsync(ct);
 
         await _eventBus.PublishAsync(
             new WorkItemStateChanged(item.Id, item.ProjectId, oldState, newState, updatedBy), ct);
@@ -252,7 +221,7 @@ public class WorkItemService : IWorkItemService
         item.IsActive = false;
         item.UpdatedAt = DateTime.UtcNow;
 
-        await _context.SaveChangesAsync(ct);
+        await _repository.SaveChangesAsync(ct);
 
         await _eventBus.PublishAsync(new WorkItemDeleted(item.Id, item.ProjectId, deletedBy), ct);
 
@@ -277,9 +246,9 @@ public class WorkItemService : IWorkItemService
             CreatedBy = authorId
         };
 
-        _context.WorkItemComments.Add(comment);
+        _repository.AddComment(comment);
         item.UpdatedAt = DateTime.UtcNow;
-        await _context.SaveChangesAsync(ct);
+        await _repository.SaveChangesAsync(ct);
 
         await _eventBus.PublishAsync(
             new WorkItemCommentAdded(comment.Id, workItemId, item.ProjectId, authorId), ct);
@@ -293,8 +262,7 @@ public class WorkItemService : IWorkItemService
         Guid updatedBy,
         CancellationToken ct = default)
     {
-        var comment = await _context.WorkItemComments
-            .FirstOrDefaultAsync(c => c.Id == commentId, ct)
+        var comment = await _repository.GetCommentAsync(commentId, ct)
             ?? throw new NotFoundException("Comment", commentId);
 
         if (comment.AuthorId != updatedBy)
@@ -304,21 +272,20 @@ public class WorkItemService : IWorkItemService
         comment.IsEdited = true;
         comment.UpdatedAt = DateTime.UtcNow;
 
-        await _context.SaveChangesAsync(ct);
+        await _repository.SaveChangesAsync(ct);
         return MapCommentToResponse(comment);
     }
 
     public async Task DeleteCommentAsync(Guid commentId, Guid deletedBy, CancellationToken ct = default)
     {
-        var comment = await _context.WorkItemComments
-            .FirstOrDefaultAsync(c => c.Id == commentId, ct)
+        var comment = await _repository.GetCommentAsync(commentId, ct)
             ?? throw new NotFoundException("Comment", commentId);
 
         if (comment.AuthorId != deletedBy)
             throw new ForbiddenException("Only the comment author can delete this comment.");
 
-        _context.WorkItemComments.Remove(comment);
-        await _context.SaveChangesAsync(ct);
+        _repository.RemoveComment(comment);
+        await _repository.SaveChangesAsync(ct);
     }
 
     public async Task<PagedResult<WorkItemCommentResponse>> GetCommentsAsync(
@@ -328,15 +295,8 @@ public class WorkItemService : IWorkItemService
     {
         _ = await GetWorkItemOrThrowAsync(workItemId, ct);
 
-        var query = _context.WorkItemComments
-            .Where(c => c.WorkItemId == workItemId)
-            .OrderBy(c => c.CreatedAt);
-
-        var total = await query.CountAsync(ct);
-        var items = await query
-            .Skip(pagination.Skip)
-            .Take(pagination.PageSize)
-            .ToListAsync(ct);
+        var (items, total) = await _repository.GetCommentsAsync(
+            workItemId, pagination.Skip, pagination.PageSize, ct);
 
         return new PagedResult<WorkItemCommentResponse>(
             items.Select(MapCommentToResponse).ToList(),
@@ -352,15 +312,8 @@ public class WorkItemService : IWorkItemService
     {
         _ = await GetWorkItemOrThrowAsync(workItemId, ct);
 
-        var query = _context.WorkItemHistory
-            .Where(h => h.WorkItemId == workItemId)
-            .OrderByDescending(h => h.CreatedAt);
-
-        var total = await query.CountAsync(ct);
-        var items = await query
-            .Skip(pagination.Skip)
-            .Take(pagination.PageSize)
-            .ToListAsync(ct);
+        var (items, total) = await _repository.GetHistoryAsync(
+            workItemId, pagination.Skip, pagination.PageSize, ct);
 
         return new PagedResult<WorkItemHistoryResponse>(
             items.Select(h => new WorkItemHistoryResponse(
@@ -378,17 +331,13 @@ public class WorkItemService : IWorkItemService
         CancellationToken ct = default)
     {
         var source = await GetWorkItemOrThrowAsync(workItemId, ct);
-        var target = await _context.WorkItems
-            .FirstOrDefaultAsync(w => w.Id == request.TargetId && w.IsActive, ct)
+        var target = await _repository.GetActiveAsync(request.TargetId, ct)
             ?? throw new NotFoundException("Target work item", request.TargetId);
 
         if (source.ProjectId != target.ProjectId)
             throw new BusinessRuleException("Cannot link work items from different projects.");
 
-        var duplicate = await _context.WorkItemLinks.AnyAsync(
-            l => l.SourceId == workItemId && l.TargetId == request.TargetId && l.LinkType == request.LinkType, ct);
-
-        if (duplicate)
+        if (await _repository.LinkExistsAsync(workItemId, request.TargetId, request.LinkType, ct))
             throw new ConflictException("This link already exists.");
 
         var link = new WorkItemLink
@@ -399,8 +348,8 @@ public class WorkItemService : IWorkItemService
             CreatedBy = createdBy
         };
 
-        _context.WorkItemLinks.Add(link);
-        await _context.SaveChangesAsync(ct);
+        _repository.AddLink(link);
+        await _repository.SaveChangesAsync(ct);
 
         await _eventBus.PublishAsync(
             new WorkItemLinked(workItemId, request.TargetId, request.LinkType, createdBy), ct);
@@ -412,12 +361,11 @@ public class WorkItemService : IWorkItemService
 
     public async Task RemoveLinkAsync(Guid linkId, Guid removedBy, CancellationToken ct = default)
     {
-        var link = await _context.WorkItemLinks
-            .FirstOrDefaultAsync(l => l.Id == linkId, ct)
+        var link = await _repository.GetLinkAsync(linkId, ct)
             ?? throw new NotFoundException("WorkItemLink", linkId);
 
-        _context.WorkItemLinks.Remove(link);
-        await _context.SaveChangesAsync(ct);
+        _repository.RemoveLink(link);
+        await _repository.SaveChangesAsync(ct);
     }
 
     public async Task<IReadOnlyList<WorkItemLinkResponse>> GetLinksAsync(
@@ -426,10 +374,7 @@ public class WorkItemService : IWorkItemService
     {
         _ = await GetWorkItemOrThrowAsync(workItemId, ct);
 
-        var links = await _context.WorkItemLinks
-            .Include(l => l.Target)
-            .Where(l => l.SourceId == workItemId)
-            .ToListAsync(ct);
+        var links = await _repository.GetLinksWithTargetAsync(workItemId, ct);
 
         return links.Select(l => new WorkItemLinkResponse(
             l.Id, l.SourceId, l.TargetId, l.LinkType,
@@ -450,7 +395,7 @@ public class WorkItemService : IWorkItemService
     // ── Private helpers ───────────────────────────────────────────────────────
 
     private async Task<WorkItem> GetWorkItemOrThrowAsync(Guid id, CancellationToken ct)
-        => await _context.WorkItems.FirstOrDefaultAsync(w => w.Id == id && w.IsActive, ct)
+        => await _repository.GetActiveAsync(id, ct)
            ?? throw new NotFoundException("WorkItem", id);
 
     private void TrackChange(WorkItem item, Guid changedBy, string field, string? oldValue, string? newValue)
@@ -461,7 +406,7 @@ public class WorkItemService : IWorkItemService
 
     private void AddHistory(Guid workItemId, Guid changedBy, string field, string? oldValue, string? newValue)
     {
-        _context.WorkItemHistory.Add(new WorkItemHistory
+        _repository.AddHistory(new WorkItemHistory
         {
             WorkItemId = workItemId,
             ChangedBy = changedBy,
@@ -471,6 +416,17 @@ public class WorkItemService : IWorkItemService
             CreatedBy = changedBy
         });
     }
+
+    /// <summary>
+    /// Trims, lower-cases and de-duplicates tag names, dropping blanks. Normalization must happen
+    /// before de-duplication so that casing variants collapse to the single row the unique
+    /// (WorkItemId, Name) index allows.
+    /// </summary>
+    private static List<string> NormalizeTags(IEnumerable<string> tags) =>
+        tags.Where(t => !string.IsNullOrWhiteSpace(t))
+            .Select(t => t.Trim().ToLowerInvariant())
+            .Distinct()
+            .ToList();
 
     private static void ValidateStateTransition(WorkItemState current, WorkItemState next)
     {
@@ -509,12 +465,11 @@ public class WorkItemService : IWorkItemService
 
     private async Task<WorkItemResponse> MapToResponseAsync(Guid workItemId, CancellationToken ct)
     {
-        var item = await _context.WorkItems
-            .Include(w => w.Tags)
-            .FirstAsync(w => w.Id == workItemId, ct);
+        var item = await _repository.GetWithTagsAsync(workItemId, ct)
+            ?? throw new NotFoundException("WorkItem", workItemId);
 
-        var commentCount = await _context.WorkItemComments.CountAsync(c => c.WorkItemId == workItemId, ct);
-        var childCount = await _context.WorkItems.CountAsync(w => w.ParentId == workItemId && w.IsActive, ct);
+        var commentCount = await _repository.GetCommentCountAsync(workItemId, ct);
+        var childCount = await _repository.GetChildCountAsync(workItemId, ct);
 
         return new WorkItemResponse(
             item.Id,
