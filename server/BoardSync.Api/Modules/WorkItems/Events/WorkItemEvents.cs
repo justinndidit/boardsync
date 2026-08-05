@@ -1,4 +1,4 @@
-using BoardSync.Api.Modules.WorkItems.Models;
+ using BoardSync.Api.Modules.WorkItems.Models;
 using BoardSync.Api.Shared.Kernel.Events;
 
 namespace BoardSync.Api.Modules.WorkItems.Events;
