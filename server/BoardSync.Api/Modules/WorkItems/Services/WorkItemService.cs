@@ -3,6 +3,8 @@ using BoardSync.Api.Modules.WorkItems.DTOs;
 using BoardSync.Api.Modules.WorkItems.Events;
 using BoardSync.Api.Modules.WorkItems.Models;
 using BoardSync.Api.Modules.WorkItems.Repository;
+using BoardSync.Api.Shared.Auth.Services;
+using BoardSync.Api.Shared.Auth.Services.Implementations;
 using BoardSync.Api.Shared.Kernel;
 using BoardSync.Api.Shared.Kernel.Events;
 using BoardSync.Api.Shared.Kernel.Exceptions;
@@ -18,17 +20,20 @@ public class WorkItemService : IWorkItemService
 {
     private readonly IWorkItemRepository _repository;
     private readonly IProjectService _projectService;
+    private readonly ITeamService _teamService;
     private readonly IEventBus _eventBus;
     private readonly ILogger<WorkItemService> _logger;
 
     public WorkItemService(
         IWorkItemRepository repository,
         IProjectService projectService,
+        ITeamService teamService,
         IEventBus eventBus,
         ILogger<WorkItemService> logger)
     {
         _repository = repository;
         _projectService = projectService;
+        _teamService = teamService;
         _eventBus = eventBus;
         _logger = logger;
     }
@@ -52,6 +57,8 @@ public class WorkItemService : IWorkItemService
 
             ValidateHierarchy(parent.Type, workItemTypeParsed);
         }
+
+        if(!await _teamService.IsMember(request.TeamId, request.AssigneeId)) throw new InvalidOperationException("Assigned member does not belong to team");
 
         var item = new WorkItem
         {

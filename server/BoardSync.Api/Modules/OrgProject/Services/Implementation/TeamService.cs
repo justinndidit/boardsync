@@ -195,4 +195,9 @@ public class TeamService : ITeamService
         var memberCount = await _teamRepo.GetMemberCountAsync(t.Id, ct);
         return new(t.Id, t.ProjectId, t.Name, t.Description, t.IsActive, memberCount, t.CreatedAt);
     }
+
+  public async Task<bool> IsMember(Guid teamId, Guid userId, CancellationToken ct = default)
+  {
+    return await _teamRepo.IsMemberAsync(teamId, userId);
+  }
 }

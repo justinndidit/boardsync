@@ -951,11 +951,14 @@
         <member name="M:BoardSync.Api.Modules.WorkItems.Controllers.WorkItemsController.RemoveLink(System.Guid,System.Threading.CancellationToken)">
             <summary>Remove a link between work items.</summary>
         </member>
+        <member name="P:BoardSync.Api.Modules.WorkItems.DTOs.CreateWorkItemRequest.AssigneeId">
+            <summary>Required team member assined to task.</summary>
+        </member>
         <member name="P:BoardSync.Api.Modules.WorkItems.DTOs.CreateWorkItemRequest.ParentId">
             <summary>Parent work item ID for hierarchy (e.g., Epic → Feature → Story → Task).</summary>
         </member>
         <member name="P:BoardSync.Api.Modules.WorkItems.DTOs.CreateWorkItemRequest.TeamId">
-            <summary>Optional team scope.</summary>
+            <summary>Team scope.</summary>
         </member>
         <member name="T:BoardSync.Api.Modules.WorkItems.Models.WorkItemType">
             <summary>
