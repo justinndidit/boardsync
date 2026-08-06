@@ -1,3 +1,4 @@
+using BoardSync.Api.Data;
 using BoardSync.Api.Modules.OrgProject.Domain.DTOs;
 using BoardSync.Api.Modules.OrgProject.Services.Interfaces;
 using BoardSync.Api.Modules.Rbac.Models;
@@ -8,6 +9,7 @@ using BoardSync.Api.Shared.Kernel;
 using BoardSync.Api.Shared.Kernel.Exceptions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using System.ComponentModel.DataAnnotations;
 
 namespace BoardSync.Api.Modules.OrgProject.Controllers;
@@ -31,15 +33,18 @@ public class OrganizationsController : ControllerBase
     private readonly IOrganizationService _orgService;
     private readonly IRbacService _rbac;
     private readonly ICurrentUserContext _currentUser;
+    private readonly BoardSyncDbContext _context;
 
     public OrganizationsController(
         IOrganizationService orgService,
         IRbacService rbac,
-        ICurrentUserContext currentUser)
+        ICurrentUserContext currentUser,
+        BoardSyncDbContext context)
     {
         _orgService = orgService;
         _rbac = rbac;
         _currentUser = currentUser;
+        _context = context;
     }
 
     /// <summary>Get all organizations the current user belongs to.</summary>
@@ -174,6 +179,62 @@ public class OrganizationsController : ControllerBase
         await _rbac.AssignRoleAsync(userId, request.Role, RoleScope.Organization, orgId, _currentUser.UserId, ct);
 
         return Ok(new ApiResponse(true, $"Role updated to {request.Role}."));
+    }
+
+    /// <summary>
+    /// Get recent activity for an organization (work item field changes across all projects).
+    /// Returns up to 50 entries ordered by most recent first. Requires Reader.
+    /// </summary>
+    [HttpGet("{orgId:guid}/activity")]
+    [ProducesResponseType(typeof(ApiResponse<IReadOnlyList<WorkspaceActivityResponse>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetActivity(Guid orgId, CancellationToken ct)
+    {
+        await RequireOrgRoleAsync(orgId, RoleType.Reader, ct);
+
+        // Resolve project IDs that belong to this org
+        var projectIds = await _context.Projects
+            .Where(p => p.OrganizationId == orgId && p.IsActive)
+            .Select(p => p.Id)
+            .ToListAsync(ct);
+
+        if (projectIds.Count == 0)
+            return Ok(new ApiResponse<IReadOnlyList<WorkspaceActivityResponse>>(
+                true, "No activity found.", new List<WorkspaceActivityResponse>()));
+
+        // Pull up to 50 most recent history entries for work items in those projects
+        var entries = await _context.WorkItemHistory
+            .Where(h => _context.WorkItems
+                .Where(w => projectIds.Contains(w.ProjectId))
+                .Select(w => w.Id)
+                .Contains(h.WorkItemId))
+            .OrderByDescending(h => h.CreatedAt)
+            .Take(50)
+            .Join(_context.WorkItems,
+                h => h.WorkItemId,
+                w => w.Id,
+                (h, w) => new { h, w })
+            .Join(_context.Projects,
+                x => x.w.ProjectId,
+                p => p.Id,
+                (x, p) => new { x.h, x.w, Project = p })
+            .Join(_context.Users,
+                x => x.h.ChangedBy,
+                u => u.Id,
+                (x, u) => new WorkspaceActivityResponse(
+                    x.h.Id,
+                    x.h.FieldName,
+                    x.w.Title,
+                    $"{x.h.FieldName} changed from '{x.h.OldValue ?? "—"}' to '{x.h.NewValue ?? "—"}'",
+                    u.DisplayName,
+                    string.Empty,   // org name not needed — caller already has it
+                    x.Project.Name,
+                    x.h.CreatedAt))
+            .ToListAsync(ct);
+
+        return Ok(new ApiResponse<IReadOnlyList<WorkspaceActivityResponse>>(
+            true, "Activity retrieved.", entries));
     }
 
     // -------------------------------------------------------------------------
