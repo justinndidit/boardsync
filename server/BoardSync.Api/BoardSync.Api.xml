@@ -242,6 +242,12 @@
             Valid roles: OrgAdmin, ProjectAdmin, TeamMember, Reader.
             </summary>
         </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.OrganizationsController.GetActivity(System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Get recent activity for an organization (work item field changes across all projects).
+            Returns up to 50 entries ordered by most recent first. Requires Reader.
+            </summary>
+        </member>
         <member name="T:BoardSync.Api.Modules.OrgProject.Controllers.UpdateMemberRoleRequest">
             <summary>Request body for updating a member's org-level role.</summary>
         </member>
