@@ -1,6 +1,7 @@
 using BoardSync.Api.Data;
 using BoardSync.Api.Modules.Rbac.Models;
 using BoardSync.Api.Modules.Rbac.Services.Interfaces;
+using BoardSync.Api.Modules.Sprints.Domain.Helpers;
 using BoardSync.Api.Modules.Sprints.DTOs;
 using BoardSync.Api.Modules.Sprints.Services;
 using BoardSync.Api.Shared.Auth;
@@ -28,17 +29,20 @@ public class BoardsController : ControllerBase
     private readonly IRbacService _rbac;
     private readonly ICurrentUserContext _currentUser;
     private readonly BoardSyncDbContext _context;
+    private readonly IAuthHelpers _authHelpers;
 
     public BoardsController(
         IBoardService boardService,
         IRbacService rbac,
         ICurrentUserContext currentUser,
+        IAuthHelpers authHelpers,
         BoardSyncDbContext context)
     {
         _boardService = boardService;
         _rbac = rbac;
         _currentUser = currentUser;
         _context = context;
+        _authHelpers = authHelpers;
     }
 
     // ── Board ─────────────────────────────────────────────────────────────────
@@ -53,7 +57,7 @@ public class BoardsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetForProject(Guid projectId, CancellationToken ct)
     {
-        await RequireProjectRoleAsync(projectId, RoleType.Reader, ct);
+        await _authHelpers.RequireProjectRoleAsync(projectId, RoleType.Reader, ct);
         var board = await _boardService.GetOrCreateForProjectAsync(projectId, _currentUser.UserId, ct);
         return Ok(new ApiResponse<BoardResponse>(true, "Board retrieved.", board));
     }
@@ -66,7 +70,7 @@ public class BoardsController : ControllerBase
     public async Task<IActionResult> GetById(Guid boardId, CancellationToken ct)
     {
         var board = await _boardService.GetByIdAsync(boardId, ct);
-        await RequireProjectRoleAsync(board.ProjectId, RoleType.Reader, ct);
+        await _authHelpers.RequireProjectRoleAsync(board.ProjectId, RoleType.Reader, ct);
         return Ok(new ApiResponse<BoardResponse>(true, "Board retrieved.", board));
     }
 
@@ -82,7 +86,7 @@ public class BoardsController : ControllerBase
         CancellationToken ct)
     {
         var board = await _boardService.GetByIdAsync(boardId, ct);
-        await RequireProjectRoleAsync(board.ProjectId, RoleType.ProjectAdmin, ct);
+        await _authHelpers.RequireProjectRoleAsync(board.ProjectId, RoleType.ProjectAdmin, ct);
         var updated = await _boardService.UpdateAsync(boardId, request, _currentUser.UserId, ct);
         return Ok(new ApiResponse<BoardResponse>(true, "Board updated.", updated));
     }
@@ -101,7 +105,7 @@ public class BoardsController : ControllerBase
         CancellationToken ct)
     {
         var board = await _boardService.GetByIdAsync(boardId, ct);
-        await RequireProjectRoleAsync(board.ProjectId, RoleType.ProjectAdmin, ct);
+        await _authHelpers.RequireProjectRoleAsync(board.ProjectId, RoleType.ProjectAdmin, ct);
         var column = await _boardService.AddColumnAsync(boardId, request, _currentUser.UserId, ct);
         return StatusCode(StatusCodes.Status201Created,
             new ApiResponse<BoardColumnDetailResponse>(true, "Column added.", column));
@@ -147,18 +151,12 @@ public class BoardsController : ControllerBase
         CancellationToken ct)
     {
         var board = await _boardService.GetByIdAsync(boardId, ct);
-        await RequireProjectRoleAsync(board.ProjectId, RoleType.ProjectAdmin, ct);
+        await _authHelpers.RequireProjectRoleAsync(board.ProjectId, RoleType.ProjectAdmin, ct);
         await _boardService.ReorderColumnsAsync(boardId, request, ct);
         return Ok(new ApiResponse(true, "Columns reordered."));
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private async Task RequireProjectRoleAsync(Guid projectId, RoleType minimum, CancellationToken ct)
-    {
-        if (!await _rbac.HasRoleAsync(_currentUser.UserId, minimum, RoleScope.Project, projectId, ct))
-            throw new ForbiddenException();
-    }
 
     /// <summary>
     /// Resolves the projectId for a column (column → board → projectId) then checks the role.
@@ -172,6 +170,6 @@ public class BoardsController : ControllerBase
             .FirstOrDefaultAsync(ct)
             ?? throw new NotFoundException("BoardColumn", columnId);
 
-        await RequireProjectRoleAsync(projectId, minimum, ct);
+        await _authHelpers.RequireProjectRoleAsync(projectId, minimum, ct);
     }
 }
