@@ -29,6 +29,7 @@ using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using System.Threading.RateLimiting;
+using BoardSync.Api.Modules.Sprints.Domain.Helpers;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -124,6 +125,7 @@ builder.Services.AddScoped<IWorkItemService, WorkItemService>();
 
 // Sprints / Boards Module
 builder.Services.AddScoped<ISprintService, SprintService>();
+builder.Services.AddScoped<IAuthHelpers, AuthHelpers>();
 builder.Services.AddScoped<IBoardService, BoardService>();
 
 // Add HTTP Context Accessor
