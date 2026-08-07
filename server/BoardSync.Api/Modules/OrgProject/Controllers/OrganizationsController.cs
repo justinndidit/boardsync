@@ -1,6 +1,6 @@
-using BoardSync.Api.Data;
+using BoardSync.Api.Modules.Activity.DTOs;
+using BoardSync.Api.Modules.Activity.Services;
 using BoardSync.Api.Modules.OrgProject.Domain.DTOs;
-using BoardSync.Api.Modules.OrgProject.Domain.Helpers;
 using BoardSync.Api.Modules.OrgProject.Services.Interfaces;
 using BoardSync.Api.Modules.Rbac.Models;
 using BoardSync.Api.Modules.Rbac.Services.Interfaces;
@@ -10,7 +10,6 @@ using BoardSync.Api.Shared.Kernel;
 using BoardSync.Api.Shared.Kernel.Exceptions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 using System.ComponentModel.DataAnnotations;
 
 namespace BoardSync.Api.Modules.OrgProject.Controllers;
@@ -34,18 +33,18 @@ public class OrganizationsController : ControllerBase
     private readonly IOrganizationService _orgService;
     private readonly IRbacService _rbac;
     private readonly ICurrentUserContext _currentUser;
-    private readonly BoardSyncDbContext _context;
+    private readonly IActivityQueryService _activity;
 
     public OrganizationsController(
         IOrganizationService orgService,
         IRbacService rbac,
         ICurrentUserContext currentUser,
-        BoardSyncDbContext context)
+        IActivityQueryService activity)
     {
         _orgService = orgService;
         _rbac = rbac;
         _currentUser = currentUser;
-        _context = context;
+        _activity = activity;
     }
 
     /// <summary>Get all organizations the current user belongs to.</summary>
@@ -133,7 +132,7 @@ public class OrganizationsController : ControllerBase
     public async Task<IActionResult> RemoveMember(Guid orgId, Guid userId, CancellationToken ct)
     {
         await RequireOrgRoleAsync(orgId, RoleType.OrgAdmin, ct);
-        await _orgService.RemoveMemberAsync(orgId, userId, ct);
+        await _orgService.RemoveMemberAsync(orgId, userId, _currentUser.UserId, ct);
         return Ok(new ApiResponse(true, "Member removed from organization."));
     }
 
@@ -166,32 +165,28 @@ public class OrganizationsController : ControllerBase
     }
 
     /// <summary>
-    /// Get recent activity for an organization (work item field changes across all projects).
-    /// Returns up to 50 entries ordered by most recent first. Requires Reader, which every
+    /// Everything that has happened in this organization, newest first: work item, project, team,
+    /// sprint and board changes, plus membership and role changes. Requires Reader, which every
     /// organization member holds — membership always carries at least that role.
     /// </summary>
     /// <remarks>
-    /// Shares its projection with <c>/api/workspace/activity</c> via <see cref="ActivityFeed"/>,
-    /// so both feeds return identically shaped <see cref="WorkspaceActivityResponse"/> entries.
+    /// Reads the same activity log as <c>/api/workspace/activity</c>; that endpoint simply spans
+    /// every organization the caller belongs to instead of one.
     /// </remarks>
     [HttpGet("{orgId:guid}/activity")]
-    [ProducesResponseType(typeof(ApiResponse<IReadOnlyList<WorkspaceActivityResponse>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<ActivityResponse>>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> GetActivity(Guid orgId, CancellationToken ct)
+    public async Task<IActionResult> GetActivity(
+        Guid orgId,
+        [FromQuery] PaginationQuery pagination,
+        CancellationToken ct)
     {
         await RequireOrgRoleAsync(orgId, RoleType.Reader, ct);
 
-        // Resolve project IDs that belong to this org
-        var projectIds = await _context.Projects
-            .Where(p => p.OrganizationId == orgId && p.IsActive)
-            .Select(p => p.Id)
-            .ToListAsync(ct);
+        var result = await _activity.GetForOrganizationsAsync([orgId], pagination, ct);
 
-        var entries = await ActivityFeed.BuildAsync(_context, projectIds, 50, ct);
-
-        return Ok(new ApiResponse<IReadOnlyList<WorkspaceActivityResponse>>(
-            true, entries.Count == 0 ? "No activity found." : "Activity retrieved.", entries));
+        return Ok(new ApiResponse<PagedResult<ActivityResponse>>(true, "Activity retrieved.", result));
     }
 
     private async Task RequireOrgRoleAsync(Guid orgId, RoleType minimum, CancellationToken ct)

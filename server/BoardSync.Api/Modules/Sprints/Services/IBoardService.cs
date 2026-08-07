@@ -10,6 +10,6 @@ public interface IBoardService
     Task<BoardResponse> UpdateAsync(Guid boardId, UpdateBoardRequest request, Guid updatedBy, CancellationToken ct = default);
     Task<BoardColumnDetailResponse> AddColumnAsync(Guid boardId, CreateBoardColumnRequest request, Guid createdBy, CancellationToken ct = default);
     Task<BoardColumnDetailResponse> UpdateColumnAsync(Guid columnId, UpdateBoardColumnRequest request, Guid updatedBy, CancellationToken ct = default);
-    Task DeleteColumnAsync(Guid columnId, CancellationToken ct = default);
+    Task DeleteColumnAsync(Guid columnId, Guid deletedBy, CancellationToken ct = default);
     Task ReorderColumnsAsync(Guid boardId, ReorderBoardColumnsRequest request, CancellationToken ct = default);
 }

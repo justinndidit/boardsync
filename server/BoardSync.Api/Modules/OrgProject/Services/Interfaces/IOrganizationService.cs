@@ -12,7 +12,7 @@ public interface IOrganizationService
     Task<PagedResult<OrganizationSummaryResponse>> GetForUserAsync(Guid userId, PaginationQuery pagination, CancellationToken ct = default);
     Task<OrganizationResponse> UpdateAsync(Guid orgId, UpdateOrganizationRequest request, Guid updatedBy, CancellationToken ct = default);
     Task AddMemberAsync(Guid orgId, Guid userId, Guid addedBy, CancellationToken ct = default);
-    Task RemoveMemberAsync(Guid orgId, Guid userId, CancellationToken ct = default);
+    Task RemoveMemberAsync(Guid orgId, Guid userId, Guid removedBy, CancellationToken ct = default);
 
     /// <summary>
     /// Replaces a member's organization-scope role with <paramref name="role"/>, as a single

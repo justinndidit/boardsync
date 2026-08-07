@@ -114,11 +114,29 @@ public class TeamService : ITeamService
         var team = await _teamRepo.GetActiveByIdAsync(teamId, ct)
             ?? throw new NotFoundException(nameof(Team), teamId);
 
-        team.Name = request.Name.Trim();
-        team.Description = request.Description?.Trim() ?? team.Description;
+        // Captured before the assignments below overwrite them, so the feed can report the
+        // before-and-after of each field rather than a bare "team updated".
+        var changes = new List<(string Field, string? Old, string? New)>();
+        var newName = request.Name.Trim();
+        var newDescription = request.Description?.Trim() ?? team.Description;
+
+        if (team.Name != newName)
+            changes.Add(("Name", team.Name, newName));
+        if (team.Description != newDescription)
+            changes.Add(("Description", team.Description, newDescription));
+
+        team.Name = newName;
+        team.Description = newDescription;
         team.UpdatedAt = DateTime.UtcNow;
 
         await _teamRepo.SaveChangesAsync(ct);
+
+        foreach (var (field, oldValue, newValue) in changes)
+        {
+            await _eventBus.PublishAsync(new TeamUpdated(
+                team.Id, team.OrganizationId, team.Name, field, oldValue, newValue, updatedBy), ct);
+        }
+
         return await MapToResponseAsync(team, ct);
     }
 
@@ -173,10 +191,14 @@ public class TeamService : ITeamService
             userId, user.Data.DisplayName, user.Data.Email, user.Data.ProfilePictureUrl, membership.JoinedAt);
     }
 
-    public async Task RemoveMemberAsync(Guid teamId, Guid userId, CancellationToken ct = default)
+    public async Task RemoveMemberAsync(Guid teamId, Guid userId, Guid removedBy, CancellationToken ct = default)
     {
         var membership = await _teamMembershipRepo.GetMembershipAsync(teamId, userId, ct);
         if (membership is null) return;
+
+        // Read the team before the removal — the event needs the owning organization, and an
+        // archived team still has to have its membership changes recorded.
+        var team = await _teamRepo.GetActiveByIdAsync(teamId, ct);
 
         // Drop the team-scope role along with the membership row. Leaving it behind would keep
         // granting the removed member TeamMember rights on this team's projects and sprints, which
@@ -189,7 +211,9 @@ public class TeamService : ITeamService
             await _rbac.RemoveAllRolesAsync(userId, RoleScope.Team, teamId, token);
         }, ct);
 
-        await _eventBus.PublishAsync(new MemberRemovedFromTeam(teamId, userId), ct);
+        if (team is not null)
+            await _eventBus.PublishAsync(
+                new MemberRemovedFromTeam(teamId, team.OrganizationId, userId, removedBy), ct);
     }
 
     public async Task<PagedResult<TeamMemberResponse>> GetMembersAsync(
@@ -227,6 +251,9 @@ public class TeamService : ITeamService
         team.IsActive = false;
         team.UpdatedAt = DateTime.UtcNow;
         await _teamRepo.SaveChangesAsync(ct);
+
+        await _eventBus.PublishAsync(
+            new TeamArchived(team.Id, team.OrganizationId, team.Name, deactivatedBy), ct);
 
         _logger.LogInformation("Team {TeamId} archived by {UserId}", teamId, deactivatedBy);
     }

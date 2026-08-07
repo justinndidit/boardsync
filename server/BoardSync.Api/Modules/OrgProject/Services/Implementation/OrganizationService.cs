@@ -131,12 +131,32 @@ public class OrganizationService : IOrganizationService
         var org = await _organizationRepo.GetActiveAsync(orgId, ct)
             ?? throw new NotFoundException(nameof(Organization), orgId);
 
-        org.Name = request.Name.Trim();
-        org.Description = request.Description?.Trim() ?? org.Description;
-        org.AvatarUrl = request.AvatarUrl ?? org.AvatarUrl;
+        // Captured before the assignments below overwrite them, so the feed reports each field's
+        // before-and-after the way the project, team and sprint feeds do.
+        var changes = new List<(string Field, string? Old, string? New)>();
+        var newName = request.Name.Trim();
+        var newDescription = request.Description?.Trim() ?? org.Description;
+        var newAvatarUrl = request.AvatarUrl ?? org.AvatarUrl;
+
+        if (org.Name != newName)
+            changes.Add(("Name", org.Name, newName));
+        if (org.Description != newDescription)
+            changes.Add(("Description", org.Description, newDescription));
+        if (org.AvatarUrl != newAvatarUrl)
+            changes.Add(("Avatar", org.AvatarUrl, newAvatarUrl));
+
+        org.Name = newName;
+        org.Description = newDescription;
+        org.AvatarUrl = newAvatarUrl;
         org.UpdatedAt = DateTime.UtcNow;
 
         await _organizationRepo.SaveChangesAsync(ct);
+
+        foreach (var (field, oldValue, newValue) in changes)
+        {
+            await _eventBus.PublishAsync(
+                new OrganizationUpdated(org.Id, org.Name, field, oldValue, newValue, updatedBy), ct);
+        }
 
         var counts = await _organizationRepo.GetCountsAsync(orgId, ct);
         var userRole = await ResolveUserRoleAsync(updatedBy, orgId, ct);
@@ -172,7 +192,7 @@ public class OrganizationService : IOrganizationService
         await _eventBus.PublishAsync(new MemberAddedToOrg(orgId, userId, addedBy), ct);
     }
 
-    public async Task RemoveMemberAsync(Guid orgId, Guid userId, CancellationToken ct = default)
+    public async Task RemoveMemberAsync(Guid orgId, Guid userId, Guid removedBy, CancellationToken ct = default)
     {
         var membership = await _organizationRepo.GetMembershipAsync(orgId, userId, ct);
         if (membership is null) return;
@@ -184,6 +204,8 @@ public class OrganizationService : IOrganizationService
 
             await _rbac.RemoveAllRolesAsync(userId, RoleScope.Organization, orgId, token);
         }, ct);
+
+        await _eventBus.PublishAsync(new MemberRemovedFromOrg(orgId, userId, removedBy), ct);
 
         _logger.LogInformation("User {UserId} removed from organization {OrgId}", userId, orgId);
     }
@@ -198,6 +220,8 @@ public class OrganizationService : IOrganizationService
         if (!await _organizationRepo.IsMemberAsync(orgId, userId, ct))
             throw new NotFoundException($"User {userId} is not a member of this organization.");
 
+        RoleType? previousRole = null;
+
         // Read the current roles, check the demotion guard and swap, all inside one transaction.
         // Doing the swap as two independent saves is what previously let a cancelled or failed
         // request strand a member with no org role at all, and let two concurrent updates each
@@ -206,6 +230,10 @@ public class OrganizationService : IOrganizationService
         {
             var orgRoles = await _rbac.GetScopeRolesAsync(RoleScope.Organization, orgId, token);
             var held = orgRoles.Where(ra => ra.UserId == userId).Select(ra => ra.Role).ToList();
+
+            // Most privileged wins when reporting what the member held, matching how the role is
+            // resolved everywhere else. Min is over the enum value, where lower means higher rank.
+            previousRole = held.Count == 0 ? null : held.Min();
 
             // Refuse to demote the last OrgAdmin — the organization would become unmanageable, and
             // OrgAdmin is the only role that can hand out organization roles in the first place.
@@ -220,6 +248,9 @@ public class OrganizationService : IOrganizationService
             await _rbac.RemoveAllRolesAsync(userId, RoleScope.Organization, orgId, token);
             await _rbac.AssignRoleAsync(userId, role, RoleScope.Organization, orgId, actingUserId, token);
         }, ct);
+
+        await _eventBus.PublishAsync(
+            new OrgMemberRoleChanged(orgId, userId, previousRole, role, actingUserId), ct);
 
         _logger.LogInformation("Org {OrgId} role for user {UserId} set to {Role} by {ActingUserId}",
             orgId, userId, role, actingUserId);

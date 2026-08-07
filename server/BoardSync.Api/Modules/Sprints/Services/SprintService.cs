@@ -1,8 +1,10 @@
 using BoardSync.Api.Data;
 using BoardSync.Api.Modules.Sprints.DTOs;
+using BoardSync.Api.Modules.Sprints.Events;
 using BoardSync.Api.Modules.Sprints.Models;
 using BoardSync.Api.Modules.WorkItems.Models;
 using BoardSync.Api.Shared.Kernel;
+using BoardSync.Api.Shared.Kernel.Events;
 using BoardSync.Api.Shared.Kernel.Exceptions;
 using Microsoft.EntityFrameworkCore;
 
@@ -11,11 +13,13 @@ namespace BoardSync.Api.Modules.Sprints.Services;
 public class SprintService : ISprintService
 {
     private readonly BoardSyncDbContext _context;
+    private readonly IEventBus _eventBus;
     private readonly ILogger<SprintService> _logger;
 
-    public SprintService(BoardSyncDbContext context, ILogger<SprintService> logger)
+    public SprintService(BoardSyncDbContext context, IEventBus eventBus, ILogger<SprintService> logger)
     {
         _context = context;
+        _eventBus = eventBus;
         _logger = logger;
     }
 
@@ -61,6 +65,9 @@ public class SprintService : ISprintService
 
         _context.Sprints.Add(sprint);
         await _context.SaveChangesAsync(ct);
+
+        await PublishAsync(sprint, orgId => new SprintCreated(
+            sprint.Id, sprint.TeamId, orgId, SprintName(sprint), createdBy), ct);
 
         _logger.LogInformation("Sprint {Number} created for team {TeamId} by {UserId}",
             sprint.Number, teamId, createdBy);
@@ -128,12 +135,29 @@ public class SprintService : ISprintService
         if (request.EndDate <= request.StartDate)
             throw new BusinessRuleException("End date must be after start date.");
 
-        sprint.Goal = request.Goal?.Trim();
+        var changes = new List<(string Field, string? Old, string? New)>();
+        var newGoal = request.Goal?.Trim();
+
+        if (sprint.Goal != newGoal)
+            changes.Add(("Goal", sprint.Goal, newGoal));
+        if (sprint.StartDate != request.StartDate)
+            changes.Add(("StartDate", sprint.StartDate.ToString("u"), request.StartDate.ToString("u")));
+        if (sprint.EndDate != request.EndDate)
+            changes.Add(("EndDate", sprint.EndDate.ToString("u"), request.EndDate.ToString("u")));
+
+        sprint.Goal = newGoal;
         sprint.StartDate = request.StartDate;
         sprint.EndDate = request.EndDate;
         sprint.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync(ct);
+
+        foreach (var (field, oldValue, newValue) in changes)
+        {
+            await PublishAsync(sprint, orgId => new SprintUpdated(
+                sprint.Id, sprint.TeamId, orgId, SprintName(sprint), field, oldValue, newValue, updatedBy), ct);
+        }
+
         return await BuildResponseAsync(sprintId, ct);
     }
 
@@ -159,9 +183,13 @@ public class SprintService : ISprintService
                     "Another sprint is already active for this team. Complete it before starting a new one.");
         }
 
+        var oldStatus = sprint.Status;
         sprint.Status = newStatus;
         sprint.UpdatedAt = DateTime.UtcNow;
         await _context.SaveChangesAsync(ct);
+
+        await PublishAsync(sprint, orgId => new SprintStatusChanged(
+            sprint.Id, sprint.TeamId, orgId, SprintName(sprint), oldStatus, newStatus, updatedBy), ct);
 
         _logger.LogInformation("Sprint {SprintId} → {Status} by {UserId}", sprintId, newStatus, updatedBy);
 
@@ -180,6 +208,9 @@ public class SprintService : ISprintService
 
         _context.Sprints.Remove(sprint);
         await _context.SaveChangesAsync(ct);
+
+        await PublishAsync(sprint, orgId => new SprintDeleted(
+            sprint.Id, sprint.TeamId, orgId, SprintName(sprint), deletedBy), ct);
 
         _logger.LogInformation("Sprint {SprintId} deleted by {UserId}", sprintId, deletedBy);
     }
@@ -222,20 +253,33 @@ public class SprintService : ISprintService
         _context.SprintWorkItems.Add(entry);
         await _context.SaveChangesAsync(ct);
 
+        await PublishAsync(sprint, orgId => new SprintWorkItemAdded(
+            sprint.Id, sprint.TeamId, orgId, SprintName(sprint),
+            workItem.Id, workItem.Title, addedBy), ct);
+
         return new SprintWorkItemResponse(
             workItem.Id, workItem.Title, workItem.Type,
             workItem.State, workItem.Priority,
             workItem.AssigneeId, workItem.StoryPoints, position);
     }
 
-    public async Task RemoveWorkItemAsync(Guid sprintId, Guid workItemId, CancellationToken ct = default)
+    public async Task RemoveWorkItemAsync(Guid sprintId, Guid workItemId, Guid removedBy, CancellationToken ct = default)
     {
         var entry = await _context.SprintWorkItems
             .FirstOrDefaultAsync(sw => sw.SprintId == sprintId && sw.WorkItemId == workItemId, ct)
             ?? throw new NotFoundException("SprintWorkItem", workItemId);
 
+        var sprint = await GetOrThrowAsync(sprintId, ct);
+        var title = await _context.WorkItems
+            .Where(w => w.Id == workItemId)
+            .Select(w => w.Title)
+            .FirstOrDefaultAsync(ct) ?? string.Empty;
+
         _context.SprintWorkItems.Remove(entry);
         await _context.SaveChangesAsync(ct);
+
+        await PublishAsync(sprint, orgId => new SprintWorkItemRemoved(
+            sprint.Id, sprint.TeamId, orgId, SprintName(sprint), workItemId, title, removedBy), ct);
     }
 
     public async Task<PagedResult<SprintWorkItemResponse>> GetWorkItemsAsync(
@@ -291,6 +335,29 @@ public class SprintService : ISprintService
     private async Task<Sprint> GetOrThrowAsync(Guid sprintId, CancellationToken ct)
         => await _context.Sprints.FirstOrDefaultAsync(s => s.Id == sprintId, ct)
            ?? throw new NotFoundException("Sprint", sprintId);
+
+    /// <summary>
+    /// Sprints hang off a team, but activity is filed by organization, so every sprint event needs
+    /// the team's owning organization looked up first. If the team has vanished there is nothing to
+    /// file the event under and it is skipped rather than published half-formed.
+    /// </summary>
+    private async Task PublishAsync<TEvent>(
+        Sprint sprint,
+        Func<Guid, TEvent> build,
+        CancellationToken ct) where TEvent : IDomainEvent
+    {
+        var orgId = await _context.Teams
+            .Where(t => t.Id == sprint.TeamId)
+            .Select(t => (Guid?)t.OrganizationId)
+            .FirstOrDefaultAsync(ct);
+
+        if (orgId is null) return;
+
+        await _eventBus.PublishAsync(build(orgId.Value), ct);
+    }
+
+    /// <summary>Display name for a sprint — they are numbered per team, not named.</summary>
+    private static string SprintName(Sprint sprint) => $"Sprint {sprint.Number}";
 
     private static void ValidateTransition(SprintStatus current, SprintStatus next)
     {
