@@ -66,17 +66,22 @@ public class TeamService : ITeamService
             CreatedBy = createdBy
         };
 
-        // Team and the creator's membership land in one save.
-        _teamRepo.Add(team);
-        _teamMembershipRepo.AddMembership(new TeamMembership
+        // Team, the creator's membership and the creator's TeamMember role must all land or none:
+        // the role saves through the RBAC module's own service, so it cannot be folded into the
+        // save above, and a team whose creator holds no role on it is not administrable.
+        await _teamRepo.ExecuteInTransactionAsync(async token =>
         {
-            TeamId = team.Id,
-            UserId = createdBy,
-            CreatedBy = createdBy
-        });
-        await _teamRepo.SaveChangesAsync(ct);
+            _teamRepo.Add(team);
+            _teamMembershipRepo.AddMembership(new TeamMembership
+            {
+                TeamId = team.Id,
+                UserId = createdBy,
+                CreatedBy = createdBy
+            });
+            await _teamRepo.SaveChangesAsync(token);
 
-        await _rbac.AssignRoleAsync(createdBy, RoleType.TeamMember, RoleScope.Team, team.Id, createdBy, ct);
+            await _rbac.AssignRoleAsync(createdBy, RoleType.TeamMember, RoleScope.Team, team.Id, createdBy, token);
+        }, ct);
 
         await _eventBus.PublishAsync(new TeamCreated(team.Id, orgId, team.Name, createdBy), ct);
 
@@ -130,6 +135,15 @@ public class TeamService : ITeamService
         if (!user.Success || user.Data is null)
             throw new NotFoundException("User", userId);
 
+        // The grantee must already belong to the owning organization, for the same reason a project
+        // role requires it: a team role must never be a back door into an org the user was never
+        // added to. It also keeps org membership the single source of truth for org-wide reads —
+        // the activity feed and dashboard are scoped by membership, so a team member who is not an
+        // org member would silently see nothing.
+        if (!await _organizationRepo.IsMemberAsync(team.OrganizationId, userId, ct))
+            throw new DomainException(
+                "User must be a member of the organization before being added to one of its teams.");
+
         var membership = await _teamMembershipRepo.GetMembershipAsync(teamId, userId, ct);
 
         if (membership is null)
@@ -141,10 +155,14 @@ public class TeamService : ITeamService
                 CreatedBy = addedBy
             };
 
-            _teamMembershipRepo.AddMembership(membership);
-            await _teamRepo.SaveChangesAsync(ct);
+            // Membership and role together — a member without the role is a member who cannot act.
+            await _teamRepo.ExecuteInTransactionAsync(async token =>
+            {
+                _teamMembershipRepo.AddMembership(membership);
+                await _teamRepo.SaveChangesAsync(token);
 
-            await _rbac.AssignRoleAsync(userId, RoleType.TeamMember, RoleScope.Team, teamId, addedBy, ct);
+                await _rbac.AssignRoleAsync(userId, RoleType.TeamMember, RoleScope.Team, teamId, addedBy, token);
+            }, ct);
 
             // Only announce a genuinely new membership — re-adding an existing member is a no-op
             // and must not emit a second event to subscribers.
@@ -160,8 +178,16 @@ public class TeamService : ITeamService
         var membership = await _teamMembershipRepo.GetMembershipAsync(teamId, userId, ct);
         if (membership is null) return;
 
-        _teamMembershipRepo.RemoveMembership(membership);
-        await _teamRepo.SaveChangesAsync(ct);
+        // Drop the team-scope role along with the membership row. Leaving it behind would keep
+        // granting the removed member TeamMember rights on this team's projects and sprints, which
+        // are gated on the role assignment rather than on the membership.
+        await _teamRepo.ExecuteInTransactionAsync(async token =>
+        {
+            _teamMembershipRepo.RemoveMembership(membership);
+            await _teamRepo.SaveChangesAsync(token);
+
+            await _rbac.RemoveAllRolesAsync(userId, RoleScope.Team, teamId, token);
+        }, ct);
 
         await _eventBus.PublishAsync(new MemberRemovedFromTeam(teamId, userId), ct);
     }

@@ -188,6 +188,43 @@ public class OrganizationService : IOrganizationService
         _logger.LogInformation("User {UserId} removed from organization {OrgId}", userId, orgId);
     }
 
+    public async Task SetMemberRoleAsync(
+        Guid orgId,
+        Guid userId,
+        RoleType role,
+        Guid actingUserId,
+        CancellationToken ct = default)
+    {
+        if (!await _organizationRepo.IsMemberAsync(orgId, userId, ct))
+            throw new NotFoundException($"User {userId} is not a member of this organization.");
+
+        // Read the current roles, check the demotion guard and swap, all inside one transaction.
+        // Doing the swap as two independent saves is what previously let a cancelled or failed
+        // request strand a member with no org role at all, and let two concurrent updates each
+        // remove one role and add another, leaving the member holding two.
+        await _organizationRepo.ExecuteInTransactionAsync(async token =>
+        {
+            var orgRoles = await _rbac.GetScopeRolesAsync(RoleScope.Organization, orgId, token);
+            var held = orgRoles.Where(ra => ra.UserId == userId).Select(ra => ra.Role).ToList();
+
+            // Refuse to demote the last OrgAdmin — the organization would become unmanageable, and
+            // OrgAdmin is the only role that can hand out organization roles in the first place.
+            if (held.Contains(RoleType.OrgAdmin) &&
+                role != RoleType.OrgAdmin &&
+                orgRoles.Count(ra => ra.Role == RoleType.OrgAdmin) == 1)
+                throw new DomainException("Cannot demote the last OrgAdmin of an organization.");
+
+            // Clear every org-scope role rather than just the one we happened to read first:
+            // nothing in the schema limits a user to a single role per organization, and leaving a
+            // stale one behind would keep granting the privileges we were asked to take away.
+            await _rbac.RemoveAllRolesAsync(userId, RoleScope.Organization, orgId, token);
+            await _rbac.AssignRoleAsync(userId, role, RoleScope.Organization, orgId, actingUserId, token);
+        }, ct);
+
+        _logger.LogInformation("Org {OrgId} role for user {UserId} set to {Role} by {ActingUserId}",
+            orgId, userId, role, actingUserId);
+    }
+
     public Task<bool> IsMemberAsync(Guid orgId, Guid userId, CancellationToken ct = default) =>
         _organizationRepo.IsMemberAsync(orgId, userId, ct);
 

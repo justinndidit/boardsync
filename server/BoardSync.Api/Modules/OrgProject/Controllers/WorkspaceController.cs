@@ -1,5 +1,6 @@
 using BoardSync.Api.Data;
 using BoardSync.Api.Modules.OrgProject.Domain.DTOs;
+using BoardSync.Api.Modules.OrgProject.Domain.Helpers;
 using BoardSync.Api.Modules.WorkItems.Models;
 using BoardSync.Api.Shared.Auth;
 using BoardSync.Api.Shared.Auth.DTOs;
@@ -152,56 +153,7 @@ public class WorkspaceController : ControllerBase
             .Select(p => p.Id)
             .ToListAsync(ct);
 
-        var history = await _context.WorkItemHistory
-            .Where(h => projectIds.Contains(h.WorkItem.ProjectId))
-            .OrderByDescending(h => h.CreatedAt)
-            .Take(30)
-            .Select(h => new
-            {
-                h.Id,
-                h.FieldName,
-                h.OldValue,
-                h.NewValue,
-                h.ChangedBy,
-                h.CreatedAt,
-                WorkItemTitle = h.WorkItem.Title,
-                WorkItemProjectId = h.WorkItem.ProjectId
-            })
-            .ToListAsync(ct);
-
-        // Resolve actor display names and project/org names in memory
-        var actorIds = history.Select(h => h.ChangedBy).Distinct().ToList();
-        var actorMap = await _context.Users
-            .Where(u => actorIds.Contains(u.Id))
-            .ToDictionaryAsync(u => u.Id, u => u.DisplayName, ct);
-
-        var histProjectIds = history.Select(h => h.WorkItemProjectId).Distinct().ToList();
-        var projectMap = await _context.Projects
-            .Where(p => histProjectIds.Contains(p.Id))
-            .Select(p => new { p.Id, ProjectName = p.Name, OrgName = p.Organization.Name })
-            .ToDictionaryAsync(p => p.Id, ct);
-
-        var result = history.Select(h =>
-        {
-            actorMap.TryGetValue(h.ChangedBy, out var actor);
-            projectMap.TryGetValue(h.WorkItemProjectId, out var proj);
-
-            var type = h.FieldName == "State" ? $"WorkItem{h.NewValue}" : "WorkItemUpdated";
-            var detail = h.OldValue != null
-                ? $"{h.FieldName}: {h.OldValue} → {h.NewValue}"
-                : $"{h.FieldName} set to {h.NewValue}";
-
-            return new WorkspaceActivityResponse(
-                h.Id,
-                type,
-                h.WorkItemTitle,
-                detail,
-                actor ?? "Unknown",
-                proj?.OrgName ?? string.Empty,
-                proj?.ProjectName ?? string.Empty,
-                h.CreatedAt
-            );
-        }).ToList();
+        var result = await ActivityFeed.BuildAsync(_context, projectIds, 30, ct);
 
         return Ok(new ApiResponse<IReadOnlyList<WorkspaceActivityResponse>>(true, "Activity retrieved.", result));
     }

@@ -245,8 +245,13 @@
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.OrganizationsController.GetActivity(System.Guid,System.Threading.CancellationToken)">
             <summary>
             Get recent activity for an organization (work item field changes across all projects).
-            Returns up to 50 entries ordered by most recent first. Requires Reader.
+            Returns up to 50 entries ordered by most recent first. Requires Reader, which every
+            organization member holds — membership always carries at least that role.
             </summary>
+            <remarks>
+            Shares its projection with <c>/api/workspace/activity</c> via <see cref="T:BoardSync.Api.Modules.OrgProject.Domain.Helpers.ActivityFeed"/>,
+            so both feeds return identically shaped <see cref="T:BoardSync.Api.Modules.OrgProject.Domain.DTOs.WorkspaceActivityResponse"/> entries.
+            </remarks>
         </member>
         <member name="T:BoardSync.Api.Modules.OrgProject.Controllers.UpdateMemberRoleRequest">
             <summary>Request body for updating a member's org-level role.</summary>
@@ -491,6 +496,32 @@
             so that member listings can be paged and ordered by display name without loading every row.
             </summary>
         </member>
+        <member name="T:BoardSync.Api.Modules.OrgProject.Domain.Helpers.ActivityFeed">
+             <summary>
+             Builds the work item activity feed shared by <c>/api/workspace/activity</c> and
+             <c>/api/orgs/{orgId}/activity</c>.
+            
+             The two endpoints differ only in how they pick the project set — everything downstream of that
+             must stay identical, because both return <see cref="T:BoardSync.Api.Modules.OrgProject.Domain.DTOs.WorkspaceActivityResponse"/> and the same
+             client component renders either feed. Building the projection in one place is what stops the
+             two shapes drifting apart.
+             </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Domain.Helpers.ActivityFeed.BuildAsync(BoardSync.Api.Data.BoardSyncDbContext,System.Collections.Generic.IReadOnlyCollection{System.Guid},System.Int32,System.Threading.CancellationToken)">
+            <summary>
+            The <paramref name="take"/> most recent work item history entries across
+            <paramref name="projectIds"/>, newest first.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Domain.Helpers.ActivityFeed.TypeFor(System.String,System.String)">
+            <summary>
+            Discriminator the client switches on to pick an icon. State transitions get their own type
+            per target state (e.g. "WorkItemActive"); every other field change is a plain update.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Domain.Helpers.ActivityFeed.DetailFor(System.String,System.String,System.String)">
+            <summary>Human-readable description of a single field change.</summary>
+        </member>
         <member name="T:BoardSync.Api.Modules.OrgProject.Domain.Helpers.Slug">
             <summary>
             URL-friendly identifier generation. Shared by organizations and projects so both produce
@@ -645,6 +676,9 @@
         <member name="M:BoardSync.Api.Modules.OrgProject.Repositories.Interfaces.ITeamRepository.GetMemberCountAsync(System.Guid,System.Threading.CancellationToken)">
             <summary>Number of members on this team.</summary>
         </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Repositories.Interfaces.ITeamRepository.ExecuteInTransactionAsync(System.Func{System.Threading.CancellationToken,System.Threading.Tasks.Task},System.Threading.CancellationToken)">
+            <inheritdoc cref="M:BoardSync.Api.Modules.OrgProject.Repositories.Interfaces.IOrganizationRepository.ExecuteInTransactionAsync(System.Func{System.Threading.CancellationToken,System.Threading.Tasks.Task},System.Threading.CancellationToken)" />
+        </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Services.Implementations.OrganizationService.MostPrivilegedBy(System.Collections.Generic.IEnumerable{BoardSync.Api.Modules.Rbac.Models.RoleAssignment},System.Func{BoardSync.Api.Modules.Rbac.Models.RoleAssignment,System.Guid})">
             <summary>
             Reduces role assignments to the single most-privileged role per key (lowest enum value wins).
@@ -655,6 +689,14 @@
             Maps a team to its response DTO. The member count is queried rather than read from
             <c>t.Members</c> because teams are loaded without their membership collection, which
             would otherwise report every team as having zero members.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Services.Interfaces.IOrganizationService.SetMemberRoleAsync(System.Guid,System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType,System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Replaces a member's organization-scope role with <paramref name="role"/>, as a single
+            transaction: the member is never left role-less part way through, because losing their last
+            org role would cut off everything membership is supposed to grant — the activity feed
+            included. Refuses to demote the organization's last OrgAdmin.
             </summary>
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Services.Interfaces.IProjectService.ExistsAsync(System.Guid,System.Threading.CancellationToken)">
