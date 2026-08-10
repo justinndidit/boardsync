@@ -17,4 +17,10 @@ public interface ISprintService
     Task RemoveWorkItemAsync(Guid sprintId, Guid workItemId, CancellationToken ct = default);
     Task<PagedResult<SprintWorkItemResponse>> GetWorkItemsAsync(Guid sprintId, PaginationQuery pagination, CancellationToken ct = default);
     Task ReorderWorkItemsAsync(Guid sprintId, ReorderSprintWorkItemsRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// Close an active sprint.
+    /// Marks it Completed and routes incomplete items to the backlog or a next sprint.
+    /// </summary>
+    Task<CloseSprintResponse> CloseAsync(Guid sprintId, CloseSprintRequest request, Guid closedBy, CancellationToken ct = default);
 }

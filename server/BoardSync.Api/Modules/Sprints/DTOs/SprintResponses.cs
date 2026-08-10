@@ -3,6 +3,16 @@ using BoardSync.Api.Modules.WorkItems.Models;
 
 namespace BoardSync.Api.Modules.Sprints.DTOs;
 
+/// <summary>Where incomplete sprint items are sent on close-out.</summary>
+public enum IncompleteItemsDestination
+{
+    /// <summary>Items are cleared from the sprint and returned to the project backlog.</summary>
+    ReturnToBacklog,
+
+    /// <summary>Items are moved into the specified next sprint.</summary>
+    MoveToNextSprint
+}
+
 /// <summary>Full sprint detail including velocity metrics.</summary>
 public record SprintResponse(
     Guid Id,
@@ -40,4 +50,13 @@ public record SprintWorkItemResponse(
     Guid? AssigneeId,
     int? StoryPoints,
     int Position
+);
+
+/// <summary>Summary returned after closing a sprint.</summary>
+public record CloseSprintResponse(
+    SprintResponse Sprint,
+    int CompletedItemCount,
+    int IncompleteItemCount,
+    IncompleteItemsDestination Destination,
+    Guid? NextSprintId
 );

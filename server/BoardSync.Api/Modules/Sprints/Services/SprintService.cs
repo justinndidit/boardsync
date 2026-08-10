@@ -1,4 +1,5 @@
 using BoardSync.Api.Data;
+using BoardSync.Api.Modules.Backlog.Services;
 using BoardSync.Api.Modules.Sprints.DTOs;
 using BoardSync.Api.Modules.Sprints.Models;
 using BoardSync.Api.Modules.WorkItems.Models;
@@ -11,11 +12,16 @@ namespace BoardSync.Api.Modules.Sprints.Services;
 public class SprintService : ISprintService
 {
     private readonly BoardSyncDbContext _context;
+    private readonly IBacklogService _backlogService;
     private readonly ILogger<SprintService> _logger;
 
-    public SprintService(BoardSyncDbContext context, ILogger<SprintService> logger)
+    public SprintService(
+        BoardSyncDbContext context,
+        IBacklogService backlogService,
+        ILogger<SprintService> logger)
     {
         _context = context;
+        _backlogService = backlogService;
         _logger = logger;
     }
 
@@ -305,6 +311,112 @@ public class SprintService : ISprintService
             throw new BusinessRuleException(
                 $"Cannot transition sprint from '{current}' to '{next}'. " +
                 "Allowed: Planning → Active → Completed.");
+    }
+
+    // ── Sprint close-out ──────────────────────────────────────────────────────
+
+    public async Task<CloseSprintResponse> CloseAsync(
+        Guid sprintId,
+        CloseSprintRequest request,
+        Guid closedBy,
+        CancellationToken ct = default)
+    {
+        var sprint = await GetOrThrowAsync(sprintId, ct);
+
+        if (sprint.Status != SprintStatus.Active)
+            throw new BusinessRuleException("Only Active sprints can be closed.");
+
+        if (request.IncompleteItemsDestination == IncompleteItemsDestination.MoveToNextSprint
+            && !request.NextSprintId.HasValue)
+            throw new BusinessRuleException(
+                "NextSprintId is required when IncompleteItemsDestination is MoveToNextSprint.");
+
+        // Find the project that owns these work items (via the first work item in the sprint)
+        var projectId = await _context.SprintWorkItems
+            .Where(sw => sw.SprintId == sprintId)
+            .Join(_context.WorkItems, sw => sw.WorkItemId, w => w.Id, (sw, w) => w.ProjectId)
+            .FirstOrDefaultAsync(ct);
+
+        // Separate completed vs incomplete items
+        var allSprintWorkItemIds = await _context.SprintWorkItems
+            .Where(sw => sw.SprintId == sprintId)
+            .Select(sw => sw.WorkItemId)
+            .ToListAsync(ct);
+
+        var completedStates = new[] { WorkItemState.Resolved, WorkItemState.Closed };
+
+        var completedIds = await _context.WorkItems
+            .Where(w => allSprintWorkItemIds.Contains(w.Id) && completedStates.Contains(w.State))
+            .Select(w => w.Id)
+            .ToListAsync(ct);
+
+        var incompleteIds = allSprintWorkItemIds.Except(completedIds).ToList();
+
+        // Route incomplete items
+        if (incompleteIds.Count > 0 && projectId != Guid.Empty)
+        {
+            if (request.IncompleteItemsDestination == IncompleteItemsDestination.ReturnToBacklog)
+            {
+                await _backlogService.ReturnToBacklogAsync(projectId,
+                    new Backlog.DTOs.ReturnToBacklogRequest { WorkItemIds = incompleteIds }, ct);
+            }
+            else
+            {
+                // Move to next sprint — validate it exists and is not completed
+                var nextSprint = await _context.Sprints
+                    .FirstOrDefaultAsync(s => s.Id == request.NextSprintId!.Value
+                        && s.Status != SprintStatus.Completed, ct)
+                    ?? throw new NotFoundException("Next sprint", request.NextSprintId!.Value);
+
+                var nextPosition = (await _context.SprintWorkItems
+                    .Where(sw => sw.SprintId == nextSprint.Id)
+                    .MaxAsync(sw => (int?)sw.Position, ct) ?? -1) + 1;
+
+                foreach (var workItemId in incompleteIds)
+                {
+                    // Update backlog entry sprint reference
+                    var backlogEntry = await _context.BacklogItems
+                        .FirstOrDefaultAsync(b => b.ProjectId == projectId && b.WorkItemId == workItemId, ct);
+                    if (backlogEntry is not null)
+                        backlogEntry.SprintId = nextSprint.Id;
+
+                    // Avoid duplicates in the next sprint
+                    var alreadyThere = await _context.SprintWorkItems
+                        .AnyAsync(sw => sw.SprintId == nextSprint.Id && sw.WorkItemId == workItemId, ct);
+
+                    if (!alreadyThere)
+                    {
+                        _context.SprintWorkItems.Add(new SprintWorkItem
+                        {
+                            SprintId   = nextSprint.Id,
+                            WorkItemId = workItemId,
+                            Position   = nextPosition++,
+                            CreatedBy  = closedBy
+                        });
+                    }
+                }
+
+                await _context.SaveChangesAsync(ct);
+            }
+        }
+
+        // Mark the sprint completed
+        sprint.Status    = SprintStatus.Completed;
+        sprint.UpdatedAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync(ct);
+
+        _logger.LogInformation(
+            "Sprint {SprintId} closed by {UserId}. Completed: {CompletedCount}, Incomplete: {IncompleteCount}",
+            sprintId, closedBy, completedIds.Count, incompleteIds.Count);
+
+        var sprintResponse = await BuildResponseAsync(sprintId, ct);
+
+        return new CloseSprintResponse(
+            sprintResponse,
+            completedIds.Count,
+            incompleteIds.Count,
+            request.IncompleteItemsDestination,
+            request.NextSprintId);
     }
 
     private async Task<SprintResponse> BuildResponseAsync(Guid sprintId, CancellationToken ct)

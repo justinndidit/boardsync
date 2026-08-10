@@ -54,3 +54,23 @@ public class ReorderSprintWorkItemsRequest
     [MinLength(1)]
     public List<Guid> WorkItemIds { get; init; } = new();
 }
+
+/// <summary>
+/// Options for closing a sprint.
+/// Incomplete items (not Resolved or Closed) will be handled according to
+/// <see cref="IncompleteItemsDestination"/>.
+/// </summary>
+public class CloseSprintRequest
+{
+    /// <summary>
+    /// Where to send work items that are not yet Resolved or Closed.
+    /// Defaults to ReturnToBacklog.
+    /// </summary>
+    public IncompleteItemsDestination IncompleteItemsDestination { get; init; }
+        = IncompleteItemsDestination.ReturnToBacklog;
+
+    /// <summary>
+    /// Required when <see cref="IncompleteItemsDestination"/> is MoveToNextSprint.
+    /// </summary>
+    public Guid? NextSprintId { get; init; }
+}

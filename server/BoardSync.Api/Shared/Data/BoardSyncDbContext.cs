@@ -1,3 +1,4 @@
+using BoardSync.Api.Modules.Backlog.Models;
 using BoardSync.Api.Modules.OrgProject.Domain.Models;
 using BoardSync.Api.Modules.Rbac.Models;
 using BoardSync.Api.Modules.Sprints.Models;
@@ -39,6 +40,9 @@ public class BoardSyncDbContext : DbContext
     public DbSet<SprintWorkItem> SprintWorkItems { get; set; } = null!;
     public DbSet<Board> Boards { get; set; } = null!;
     public DbSet<BoardColumn> BoardColumns { get; set; } = null!;
+
+    // ---- Backlog module ----
+    public DbSet<BacklogItem> BacklogItems { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -331,6 +335,20 @@ public class BoardSyncDbContext : DbContext
 
             entity.Property(c => c.Name).IsRequired().HasMaxLength(100);
             entity.Property(c => c.MappedState).IsRequired().HasMaxLength(20);
+        });
+
+        // ----------------------------------------------------------------
+        // Backlog Module — schema: plan
+        // ----------------------------------------------------------------
+        modelBuilder.Entity<BacklogItem>(entity =>
+        {
+            entity.ToTable("BacklogItems", "plan");
+            entity.HasKey(b => b.Id);
+            entity.HasIndex(b => b.ProjectId);
+            entity.HasIndex(b => b.WorkItemId);
+            entity.HasIndex(b => b.SprintId);
+            entity.HasIndex(b => new { b.ProjectId, b.WorkItemId }).IsUnique();
+            entity.HasIndex(b => new { b.ProjectId, b.Rank });
         });
 
         // ----------------------------------------------------------------
