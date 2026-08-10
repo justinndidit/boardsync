@@ -135,7 +135,7 @@ public class BoardsController : ControllerBase
     public async Task<IActionResult> DeleteColumn(Guid columnId, CancellationToken ct)
     {
         await RequireColumnProjectRoleAsync(columnId, RoleType.ProjectAdmin, ct);
-        await _boardService.DeleteColumnAsync(columnId, ct);
+        await _boardService.DeleteColumnAsync(columnId, _currentUser.UserId, ct);
         return NoContent();
     }
 

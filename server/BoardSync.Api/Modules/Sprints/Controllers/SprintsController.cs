@@ -219,7 +219,7 @@ public class SprintsController : ControllerBase
     {
         var sprint = await _sprintService.GetByIdAsync(sprintId, ct);
         await RequireTeamRoleAsync(sprint.TeamId, RoleType.TeamMember, ct);
-        await _sprintService.RemoveWorkItemAsync(sprintId, workItemId, ct);
+        await _sprintService.RemoveWorkItemAsync(sprintId, workItemId, _currentUser.UserId, ct);
         return NoContent();
     }
 

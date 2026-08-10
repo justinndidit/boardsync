@@ -99,18 +99,6 @@ public record WorkspaceNotificationResponse(
     DateTime CreatedAt
 );
 
-/// <summary>A single recent-activity entry for the workspace feed.</summary>
-public record WorkspaceActivityResponse(
-    Guid Id,
-    string Type,
-    string Title,
-    string? Detail,
-    string ActorName,
-    string Organization,
-    string Project,
-    DateTime OccurredAt
-);
-
 // ---------------------------------------------------------------------------
 // Search DTOs
 // ---------------------------------------------------------------------------

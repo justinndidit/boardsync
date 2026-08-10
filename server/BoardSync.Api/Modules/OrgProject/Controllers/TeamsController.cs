@@ -143,7 +143,7 @@ public class TeamsController : ControllerBase
     public async Task<IActionResult> RemoveMember(Guid teamId, Guid userId, CancellationToken ct)
     {
         await RequireTeamRoleAsync(teamId, RoleType.ProjectAdmin, ct);
-        await _teamService.RemoveMemberAsync(teamId, userId, ct);
+        await _teamService.RemoveMemberAsync(teamId, userId, _currentUser.UserId, ct);
         return Ok(new ApiResponse(true, "Member removed."));
     }
 

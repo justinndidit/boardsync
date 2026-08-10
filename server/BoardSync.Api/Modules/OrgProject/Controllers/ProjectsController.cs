@@ -1,10 +1,12 @@
 using BoardSync.Api.Modules.OrgProject.Domain.DTOs;
+using BoardSync.Api.Modules.OrgProject.Domain.Events;
 using BoardSync.Api.Modules.OrgProject.Services.Interfaces;
 using BoardSync.Api.Modules.Rbac.Models;
 using BoardSync.Api.Modules.Rbac.Services.Interfaces;
 using BoardSync.Api.Shared.Auth;
 using BoardSync.Api.Shared.Auth.DTOs;
 using BoardSync.Api.Shared.Kernel;
+using BoardSync.Api.Shared.Kernel.Events;
 using BoardSync.Api.Shared.Kernel.Exceptions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -31,17 +33,20 @@ public class ProjectsController : ControllerBase
     private readonly IOrganizationService _orgService;
     private readonly IRbacService _rbac;
     private readonly ICurrentUserContext _currentUser;
+    private readonly IEventBus _eventBus;
 
     public ProjectsController(
         IProjectService projectService,
         IOrganizationService orgService,
         IRbacService rbac,
-        ICurrentUserContext currentUser)
+        ICurrentUserContext currentUser,
+        IEventBus eventBus)
     {
         _projectService = projectService;
         _orgService = orgService;
         _rbac = rbac;
         _currentUser = currentUser;
+        _eventBus = eventBus;
     }
 
     /// <summary>List all projects in an organization.</summary>
@@ -172,6 +177,9 @@ public class ProjectsController : ControllerBase
         var assignment = await _rbac.AssignRoleAsync(
             request.UserId, request.Role, RoleScope.Project, projectId, _currentUser.UserId, ct);
 
+        await _eventBus.PublishAsync(new ProjectRoleChanged(
+            projectId, project.OrganizationId, project.Name, request.UserId, request.Role, _currentUser.UserId), ct);
+
         return Ok(new ApiResponse<ProjectRoleResponse>(true, $"Role updated to {request.Role}.",
             new ProjectRoleResponse(assignment.UserId, assignment.Role, assignment.CreatedAt)));
     }
@@ -202,6 +210,10 @@ public class ProjectsController : ControllerBase
 
         foreach (var role in held)
             await _rbac.RemoveRoleAsync(userId, role.Role, RoleScope.Project, projectId, ct);
+
+        var project = await _projectService.GetByIdAsync(projectId, ct);
+        await _eventBus.PublishAsync(new ProjectRoleChanged(
+            projectId, project.OrganizationId, project.Name, userId, null, _currentUser.UserId), ct);
 
         return Ok(new ApiResponse(true, "Project role revoked."));
     }

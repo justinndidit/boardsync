@@ -1,3 +1,4 @@
+using BoardSync.Api.Modules.Activity.Models;
 using BoardSync.Api.Modules.Backlog.Models;
 using BoardSync.Api.Modules.OrgProject.Domain.Models;
 using BoardSync.Api.Modules.Rbac.Models;
@@ -40,6 +41,9 @@ public class BoardSyncDbContext : DbContext
     public DbSet<SprintWorkItem> SprintWorkItems { get; set; } = null!;
     public DbSet<Board> Boards { get; set; } = null!;
     public DbSet<BoardColumn> BoardColumns { get; set; } = null!;
+
+    // ---- Activity module ----
+    public DbSet<ActivityLog> ActivityLogs { get; set; } = null!;
 
     // ---- Backlog module ----
     public DbSet<BacklogItem> BacklogItems { get; set; } = null!;
@@ -335,6 +339,48 @@ public class BoardSyncDbContext : DbContext
 
             entity.Property(c => c.Name).IsRequired().HasMaxLength(100);
             entity.Property(c => c.MappedState).IsRequired().HasMaxLength(20);
+        });
+
+        // ----------------------------------------------------------------
+        // Activity Module — schema: activity
+        // ----------------------------------------------------------------
+        modelBuilder.Entity<ActivityLog>(entity =>
+        {
+            entity.ToTable("ActivityLogs", "activity");
+            entity.HasKey(a => a.Id);
+
+            // Both feeds read "newest first within a set of organizations" and nothing else, so
+            // one composite index serves them: the org feed probes a single value, the workspace
+            // feed a small IN-list, and either way the sort comes out of the index.
+            entity.HasIndex(a => new { a.OrganizationId, a.OccurredAt })
+                .IsDescending(false, true);
+            entity.HasIndex(a => a.ProjectId);
+            entity.HasIndex(a => a.TeamId);
+            entity.HasIndex(a => a.EntityId);
+
+            entity.Property(a => a.EntityTitle).IsRequired().HasMaxLength(255);
+            entity.Property(a => a.FieldName).HasMaxLength(100);
+            entity.Property(a => a.OldValue).HasMaxLength(1000);
+            entity.Property(a => a.NewValue).HasMaxLength(1000);
+
+            // Stored as names for the same reason RoleAssignment.Role is — a readable audit table
+            // survives enum renumbering, and nothing compares these ordinally.
+            entity.Property(a => a.EntityType)
+                .IsRequired()
+                .HasMaxLength(30)
+                .HasConversion(
+                    v => v.ToString(),
+                    v => (ActivityEntityType)Enum.Parse(typeof(ActivityEntityType), v));
+
+            entity.Property(a => a.Verb)
+                .IsRequired()
+                .HasMaxLength(30)
+                .HasConversion(
+                    v => v.ToString(),
+                    v => (ActivityVerb)Enum.Parse(typeof(ActivityVerb), v));
+
+            // No foreign keys to the subject rows on purpose: activity outlives what it describes,
+            // and a cascade from a deleted project must not erase the record that it was deleted.
         });
 
         // ----------------------------------------------------------------

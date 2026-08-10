@@ -152,13 +152,16 @@ public class WorkItemService : IWorkItemService
         var item = await _repository.GetActiveWithTagsAsync(workItemId, ct)
             ?? throw new NotFoundException("WorkItem", workItemId);
 
-        // Track and record field changes
-        TrackChange(item, updatedBy, "Title", item.Title, request.Title.Trim());
-        TrackChange(item, updatedBy, "Description", item.Description, request.Description?.Trim());
-        TrackChange(item, updatedBy, "Priority", item.Priority.ToString(), request.Priority.ToString());
-        TrackChange(item, updatedBy, "AssigneeId", item.AssigneeId?.ToString(), request.AssigneeId?.ToString());
-        TrackChange(item, updatedBy, "StoryPoints", item.StoryPoints?.ToString(), request.StoryPoints?.ToString());
-        TrackChange(item, updatedBy, "TeamId", item.TeamId?.ToString(), request.TeamId?.ToString());
+        // Track and record field changes. TrackChange returns the changes it kept so they can be
+        // republished as events once the save succeeds — the activity feed is built from events,
+        // and history rows alone would leave work item edits missing from it.
+        var changes = new List<(string Field, string? Old, string? New)>();
+        TrackChange(changes, item, updatedBy, "Title", item.Title, request.Title.Trim());
+        TrackChange(changes, item, updatedBy, "Description", item.Description, request.Description?.Trim());
+        TrackChange(changes, item, updatedBy, "Priority", item.Priority.ToString(), request.Priority.ToString());
+        TrackChange(changes, item, updatedBy, "AssigneeId", item.AssigneeId?.ToString(), request.AssigneeId?.ToString());
+        TrackChange(changes, item, updatedBy, "StoryPoints", item.StoryPoints?.ToString(), request.StoryPoints?.ToString());
+        TrackChange(changes, item, updatedBy, "TeamId", item.TeamId?.ToString(), request.TeamId?.ToString());
 
         var previousAssignee = item.AssigneeId;
 
@@ -181,6 +184,13 @@ public class WorkItemService : IWorkItemService
             _repository.AddTag(new WorkItemTag { WorkItemId = item.Id, Name = added, CreatedBy = updatedBy });
 
         await _repository.SaveChangesAsync(ct);
+
+        // Assignment gets its own event, so it is not also reported as a generic field change.
+        foreach (var (field, oldValue, newValue) in changes.Where(c => c.Field != "AssigneeId"))
+        {
+            await _eventBus.PublishAsync(
+                new WorkItemUpdated(item.Id, item.ProjectId, field, oldValue, newValue, updatedBy), ct);
+        }
 
         if (previousAssignee != request.AssigneeId)
         {
@@ -403,10 +413,21 @@ public class WorkItemService : IWorkItemService
         => await _repository.GetActiveAsync(id, ct)
            ?? throw new NotFoundException("WorkItem", id);
 
-    private void TrackChange(WorkItem item, Guid changedBy, string field, string? oldValue, string? newValue)
+    /// <summary>
+    /// Records a field change in history and collects it into <paramref name="changes"/> for the
+    /// caller to publish once the save has committed. No-ops when the value did not actually move.
+    /// </summary>
+    private void TrackChange(
+        List<(string Field, string? Old, string? New)> changes,
+        WorkItem item,
+        Guid changedBy,
+        string field,
+        string? oldValue,
+        string? newValue)
     {
         if (oldValue == newValue) return;
         AddHistory(item.Id, changedBy, field, oldValue, newValue);
+        changes.Add((field, oldValue, newValue));
     }
 
     private void AddHistory(Guid workItemId, Guid changedBy, string field, string? oldValue, string? newValue)

@@ -42,4 +42,7 @@ public interface ITeamRepository
     void Delete(Team team);
 
     Task SaveChangesAsync(CancellationToken ct = default);
+
+    /// <inheritdoc cref="IOrganizationRepository.ExecuteInTransactionAsync" />
+    Task ExecuteInTransactionAsync(Func<CancellationToken, Task> operation, CancellationToken ct = default);
 }

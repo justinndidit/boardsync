@@ -1,6 +1,8 @@
 using BoardSync.Api.Data;
 using BoardSync.Api.Modules.Sprints.DTOs;
+using BoardSync.Api.Modules.Sprints.Events;
 using BoardSync.Api.Modules.Sprints.Models;
+using BoardSync.Api.Shared.Kernel.Events;
 using BoardSync.Api.Shared.Kernel.Exceptions;
 using Microsoft.EntityFrameworkCore;
 
@@ -9,11 +11,13 @@ namespace BoardSync.Api.Modules.Sprints.Services;
 public class BoardService : IBoardService
 {
     private readonly BoardSyncDbContext _context;
+    private readonly IEventBus _eventBus;
     private readonly ILogger<BoardService> _logger;
 
-    public BoardService(BoardSyncDbContext context, ILogger<BoardService> logger)
+    public BoardService(BoardSyncDbContext context, IEventBus eventBus, ILogger<BoardService> logger)
     {
         _context = context;
+        _eventBus = eventBus;
         _logger = logger;
     }
 
@@ -53,9 +57,15 @@ public class BoardService : IBoardService
         CancellationToken ct = default)
     {
         var board = await GetBoardOrThrowAsync(boardId, ct);
+        var previousName = board.Name;
+
         board.Name = request.Name.Trim();
         board.UpdatedAt = DateTime.UtcNow;
         await _context.SaveChangesAsync(ct);
+
+        if (previousName != board.Name)
+            await PublishAsync(board, "Name", previousName, board.Name, updatedBy, ct);
+
         return await BuildBoardResponseAsync(board, ct);
     }
 
@@ -65,7 +75,7 @@ public class BoardService : IBoardService
         Guid createdBy,
         CancellationToken ct = default)
     {
-        _ = await GetBoardOrThrowAsync(boardId, ct);
+        var board = await GetBoardOrThrowAsync(boardId, ct);
 
         // Default to appending at the end
         var position = request.Position ?? (
@@ -85,6 +95,9 @@ public class BoardService : IBoardService
 
         _context.BoardColumns.Add(column);
         await _context.SaveChangesAsync(ct);
+
+        await PublishAsync(board, "Column added", null, column.Name, createdBy, ct);
+
         return MapColumnDetail(column);
     }
 
@@ -95,6 +108,7 @@ public class BoardService : IBoardService
         CancellationToken ct = default)
     {
         var column = await GetColumnOrThrowAsync(columnId, ct);
+        var previousName = column.Name;
 
         column.Name        = request.Name.Trim();
         column.MappedState = request.MappedState.Trim();
@@ -103,14 +117,23 @@ public class BoardService : IBoardService
         column.UpdatedAt   = DateTime.UtcNow;
 
         await _context.SaveChangesAsync(ct);
+
+        var board = await GetBoardOrThrowAsync(column.BoardId, ct);
+        await PublishAsync(board, "Column updated", previousName, column.Name, updatedBy, ct);
+
         return MapColumnDetail(column);
     }
 
-    public async Task DeleteColumnAsync(Guid columnId, CancellationToken ct = default)
+    public async Task DeleteColumnAsync(Guid columnId, Guid deletedBy, CancellationToken ct = default)
     {
         var column = await GetColumnOrThrowAsync(columnId, ct);
+        var board = await GetBoardOrThrowAsync(column.BoardId, ct);
+        var name = column.Name;
+
         _context.BoardColumns.Remove(column);
         await _context.SaveChangesAsync(ct);
+
+        await PublishAsync(board, "Column removed", name, null, deletedBy, ct);
     }
 
     public async Task ReorderColumnsAsync(
@@ -135,6 +158,30 @@ public class BoardService : IBoardService
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Publishes a board change against the project's owning organization, which is what the
+    /// activity log files entries under. Skipped if the project has gone — there would be no
+    /// organization to attribute the change to.
+    /// </summary>
+    private async Task PublishAsync(
+        Board board,
+        string change,
+        string? oldValue,
+        string? newValue,
+        Guid changedBy,
+        CancellationToken ct)
+    {
+        var orgId = await _context.Projects
+            .Where(p => p.Id == board.ProjectId)
+            .Select(p => (Guid?)p.OrganizationId)
+            .FirstOrDefaultAsync(ct);
+
+        if (orgId is null) return;
+
+        await _eventBus.PublishAsync(new BoardChanged(
+            board.Id, board.ProjectId, orgId.Value, board.Name, change, oldValue, newValue, changedBy), ct);
+    }
 
     private async Task<Board> GetBoardOrThrowAsync(Guid boardId, CancellationToken ct)
         => await _context.Boards

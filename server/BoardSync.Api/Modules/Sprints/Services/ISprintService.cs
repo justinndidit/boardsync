@@ -14,7 +14,7 @@ public interface ISprintService
     Task<SprintResponse> UpdateStatusAsync(Guid sprintId, SprintStatus newStatus, Guid updatedBy, CancellationToken ct = default);
     Task DeleteAsync(Guid sprintId, Guid deletedBy, CancellationToken ct = default);
     Task<SprintWorkItemResponse> AddWorkItemAsync(Guid sprintId, AddSprintWorkItemRequest request, Guid addedBy, CancellationToken ct = default);
-    Task RemoveWorkItemAsync(Guid sprintId, Guid workItemId, CancellationToken ct = default);
+    Task RemoveWorkItemAsync(Guid sprintId, Guid workItemId, Guid removedBy, CancellationToken ct = default);
     Task<PagedResult<SprintWorkItemResponse>> GetWorkItemsAsync(Guid sprintId, PaginationQuery pagination, CancellationToken ct = default);
     Task ReorderWorkItemsAsync(Guid sprintId, ReorderSprintWorkItemsRequest request, CancellationToken ct = default);
 
