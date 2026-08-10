@@ -1,6 +1,7 @@
 using BoardSync.Api.Data;
 using BoardSync.Api.Extensions;
 using BoardSync.Api.Middleware;
+using BoardSync.Api.Modules.Activity;
 using BoardSync.Api.Modules.OrgProject.Repositories.Implementations;
 using BoardSync.Api.Modules.OrgProject.Repositories.Interfaces;
 using BoardSync.Api.Modules.OrgProject.Services.Implementations;
@@ -127,6 +128,9 @@ builder.Services.AddScoped<IWorkItemService, WorkItemService>();
 builder.Services.AddScoped<ISprintService, SprintService>();
 builder.Services.AddScoped<IAuthHelpers, AuthHelpers>();
 builder.Services.AddScoped<IBoardService, BoardService>();
+
+// Activity Module — subscribes to the other modules' domain events
+builder.Services.AddActivityModule();
 
 // Add HTTP Context Accessor
 builder.Services.AddHttpContextAccessor();

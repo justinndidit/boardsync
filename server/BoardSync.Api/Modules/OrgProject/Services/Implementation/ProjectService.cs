@@ -117,11 +117,29 @@ public class ProjectService : IProjectService
         var project = await _projectRepo.GetActiveAsync(projectId, ct)
             ?? throw new NotFoundException(nameof(Project), projectId);
 
-        project.Name = request.Name.Trim();
-        project.Description = request.Description?.Trim() ?? project.Description;
+        // Captured before the assignments below overwrite them — the activity feed reports what
+        // each field went from, not just that the project was touched.
+        var changes = new List<(string Field, string? Old, string? New)>();
+        var newName = request.Name.Trim();
+        var newDescription = request.Description?.Trim() ?? project.Description;
+
+        if (project.Name != newName)
+            changes.Add(("Name", project.Name, newName));
+        if (project.Description != newDescription)
+            changes.Add(("Description", project.Description, newDescription));
+
+        project.Name = newName;
+        project.Description = newDescription;
         project.UpdatedAt = DateTime.UtcNow;
 
         await _projectRepo.SaveChangesAsync(ct);
+
+        foreach (var (field, oldValue, newValue) in changes)
+        {
+            await _eventBus.PublishAsync(new ProjectUpdated(
+                project.Id, project.OrganizationId, project.Name, field, oldValue, newValue, updatedBy), ct);
+        }
+
         return await MapToResponseAsync(project, ct);
     }
 
@@ -138,9 +156,14 @@ public class ProjectService : IProjectService
             throw new NotFoundException(
                 $"Active team '{teamId}' was not found in organization '{project.OrganizationId}'.");
 
+        var previousTeamId = project.AssignedTeamId;
+
         project.AssignedTeamId = teamId;
         project.UpdatedAt = DateTime.UtcNow;
         await _projectRepo.SaveChangesAsync(ct);
+
+        await _eventBus.PublishAsync(new ProjectTeamAssigned(
+            project.Id, project.OrganizationId, project.Name, previousTeamId, teamId, updatedBy), ct);
 
         _logger.LogInformation("Project {ProjectId} reassigned to team {TeamId} by {UserId}",
             projectId, teamId, updatedBy);

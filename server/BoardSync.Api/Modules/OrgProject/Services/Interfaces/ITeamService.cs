@@ -23,7 +23,7 @@ public interface ITeamService
     Task DeactivateAsync(Guid teamId, Guid deactivatedBy, CancellationToken ct = default);
 
     Task<TeamMemberResponse> AddMemberAsync(Guid teamId, Guid userId, Guid addedBy, CancellationToken ct = default);
-    Task RemoveMemberAsync(Guid teamId, Guid userId, CancellationToken ct = default);
+    Task RemoveMemberAsync(Guid teamId, Guid userId, Guid removedBy, CancellationToken ct = default);
     Task<PagedResult<TeamMemberResponse>> GetMembersAsync(Guid teamId, PaginationQuery pagination, CancellationToken ct = default);
 
     /// <summary>Whether a user is currently a member of the team.</summary>

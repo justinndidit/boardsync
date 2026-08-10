@@ -58,4 +58,16 @@ public class TeamRepository : ITeamRepository
         _context.Teams.Remove(team);
 
     public Task SaveChangesAsync(CancellationToken ct = default) => _context.SaveChangesAsync(ct);
+
+    public async Task ExecuteInTransactionAsync(Func<CancellationToken, Task> operation, CancellationToken ct = default)
+    {
+        var strategy = _context.Database.CreateExecutionStrategy();
+
+        await strategy.ExecuteAsync(async () =>
+        {
+            await using var tx = await _context.Database.BeginTransactionAsync(ct);
+            await operation(ct);
+            await tx.CommitAsync(ct);
+        });
+    }
 }

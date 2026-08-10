@@ -201,6 +201,158 @@
         <member name="F:BoardSync.Api.Middleware.GlobalExceptionHandlingMiddleware.ForeignKeyViolation">
             <summary>PostgreSQL SQLSTATE 23503 — foreign_key_violation.</summary>
         </member>
+        <member name="M:BoardSync.Api.Modules.Activity.ActivityModuleExtensions.AddActivityModule(Microsoft.Extensions.DependencyInjection.IServiceCollection)">
+            <summary>
+            Registers the activity log's reader, writer and event subscribers.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Activity.DTOs.ActivityResponse">
+            <summary>
+            One entry in an activity feed. Identical for <c>/api/orgs/{orgId}/activity</c> and
+            <c>/api/workspace/activity</c> — the two differ only in which organizations they cover.
+            </summary>
+            <remarks>
+            <c>Type</c> is the client-facing discriminator, formatted "<c>EntityType.Verb</c>" (e.g.
+            "WorkItem.StateChanged", "Team.MemberAdded") — switch on it to pick an icon; the
+            <c>EntityType</c> and <c>Verb</c> fields carry the same information in structured form.
+            <c>EntityId</c> identifies the subject so the client can link straight to it, <c>Title</c> is
+            the subject's name as it read when the action happened, and <c>Detail</c> is the rendered
+            description of the change, e.g. "State: New → Active".
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Activity.DTOs.ActivityResponse.#ctor(System.Guid,System.String,BoardSync.Api.Modules.Activity.Models.ActivityEntityType,BoardSync.Api.Modules.Activity.Models.ActivityVerb,System.Guid,System.String,System.String,System.Guid,System.String,System.Guid,System.String,System.Nullable{System.Guid},System.String,System.Nullable{System.Guid},System.String,System.DateTime)">
+            <summary>
+            One entry in an activity feed. Identical for <c>/api/orgs/{orgId}/activity</c> and
+            <c>/api/workspace/activity</c> — the two differ only in which organizations they cover.
+            </summary>
+            <remarks>
+            <c>Type</c> is the client-facing discriminator, formatted "<c>EntityType.Verb</c>" (e.g.
+            "WorkItem.StateChanged", "Team.MemberAdded") — switch on it to pick an icon; the
+            <c>EntityType</c> and <c>Verb</c> fields carry the same information in structured form.
+            <c>EntityId</c> identifies the subject so the client can link straight to it, <c>Title</c> is
+            the subject's name as it read when the action happened, and <c>Detail</c> is the rendered
+            description of the change, e.g. "State: New → Active".
+            </remarks>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Activity.Handlers.ActivityEventHandlers">
+            <summary>
+            Turns domain events from every module into activity log rows. These are the event bus's
+            subscribers — the raising modules know nothing about the activity log.
+            </summary>
+            <remarks>
+            Recording is best-effort by construction: <see cref="T:BoardSync.Api.Shared.Kernel.Events.InMemoryEventBus"/> resolves handlers in a
+            fresh scope after the originating transaction has committed, and swallows whatever they throw.
+            A dropped row costs a line in the feed and nothing else, which is the right trade for never
+            failing a user's write because the audit trail was unavailable.
+            </remarks>
+            <summary>
+            Work item, sprint and board subscribers. Split from the OrgProject half of the class purely
+            for file length — see <see cref="T:BoardSync.Api.Modules.Activity.Handlers.ActivityEventHandlers"/> for the recording contract.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Activity.Handlers.ActivityEventHandlers.Truncate(System.String,System.Int32)">
+            <summary>
+            Clips a value to what the column accepts. Descriptions and comment bodies are unbounded at
+            the source, and an over-long value must cost a truncated feed line, not a lost row.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Activity.Handlers.ActivityEventHandlers.ProjectScopeAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Owning organization of a project, or null if the project has since been hard-deleted — in
+            which case there is no organization to file the entry under and it is dropped.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Activity.Models.ActivityEntityType">
+            <summary>
+            The kind of thing an activity entry is about.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Activity.Models.ActivityVerb">
+            <summary>
+            What happened to the entity. Kept deliberately small — anything that does not map to one of
+            these is a <see cref="F:BoardSync.Api.Modules.Activity.Models.ActivityVerb.Updated"/> with the changed field carried in
+            <see cref="P:BoardSync.Api.Modules.Activity.Models.ActivityLog.FieldName"/>.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Activity.Models.ActivityLog">
+             <summary>
+             One thing that happened inside an organization — the single source for both activity feeds.
+            
+             Rows are append-only and are written by the handlers in the Activity module in response to
+             domain events, never by the modules that raise them. Every row carries
+             <see cref="P:BoardSync.Api.Modules.Activity.Models.ActivityLog.OrganizationId"/> even when the subject is a project or team, because both feeds
+             filter on it: the organization feed by one id, the workspace feed by every organization the
+             caller belongs to.
+             </summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.Activity.Models.ActivityLog.OrganizationId">
+            <summary>Organization the activity belongs to. Always set — this is what the feeds filter on.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.Activity.Models.ActivityLog.ProjectId">
+            <summary>Owning project, when the subject sits inside one.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.Activity.Models.ActivityLog.TeamId">
+            <summary>Owning team, when the subject sits inside one.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.Activity.Models.ActivityLog.ActorId">
+            <summary>User who performed the action.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.Activity.Models.ActivityLog.EntityId">
+            <summary>Id of the subject (work item, project, team, …).</summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.Activity.Models.ActivityLog.EntityTitle">
+            <summary>
+            Display name of the subject as it read at the time. Snapshotted rather than joined, so a
+            later rename — or a delete — does not rewrite or blank out history.
+            </summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.Activity.Models.ActivityLog.FieldName">
+            <summary>Field that changed, for <see cref="F:BoardSync.Api.Modules.Activity.Models.ActivityVerb.Updated"/> entries.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.Activity.Models.ActivityLog.OccurredAt">
+            <summary>
+            When the action happened, taken from the domain event rather than from insert time —
+            handlers run after the originating transaction commits, so the two can differ.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Activity.Services.ActivityRecorder">
+            <inheritdoc />
+        </member>
+        <member name="T:BoardSync.Api.Modules.Activity.Services.ActivityQueryService">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Modules.Activity.Services.ActivityQueryService.ProjectAsync(System.Collections.Generic.List{BoardSync.Api.Modules.Activity.Models.ActivityLog},System.Threading.CancellationToken)">
+            <summary>
+            Resolves the names that are looked up rather than snapshotted — actor, organization,
+            project and team all rename freely, so the feed shows what they are called now. The
+            subject's own title is not among them; that one is snapshotted on the row so deleted
+            entities still read correctly.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Activity.Services.ActivityQueryService.DetailFor(BoardSync.Api.Modules.Activity.Models.ActivityLog)">
+            <summary>
+            Renders the one-line description shown under an entry. Blank strings are folded into null
+            first, so a field going from empty to set reads "Description: rewrite" rather than
+            "Description:  → rewrite".
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Activity.Services.IActivityRecorder">
+            <summary>
+            Append-only writer for the activity log. Called from the Activity module's event handlers;
+            the modules that raise the events never touch this.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Activity.Services.IActivityQueryService">
+            <summary>
+            Read side of the activity log, shared by both feeds.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Activity.Services.IActivityQueryService.GetForOrganizationsAsync(System.Collections.Generic.IReadOnlyCollection{System.Guid},BoardSync.Api.Shared.Kernel.PaginationQuery,System.Threading.CancellationToken)">
+            <summary>
+            Activity across the given organizations, newest first. Pass one id for an organization
+            feed, or every organization the caller belongs to for the workspace feed.
+            </summary>
+        </member>
         <member name="T:BoardSync.Api.Modules.OrgProject.Controllers.OrganizationsController">
             <summary>
             Manage organizations (top-level tenant containers).
@@ -242,11 +394,16 @@
             Valid roles: OrgAdmin, ProjectAdmin, TeamMember, Reader.
             </summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.OrganizationsController.GetActivity(System.Guid,System.Threading.CancellationToken)">
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.OrganizationsController.GetActivity(System.Guid,BoardSync.Api.Shared.Kernel.PaginationQuery,System.Threading.CancellationToken)">
             <summary>
-            Get recent activity for an organization (work item field changes across all projects).
-            Returns up to 50 entries ordered by most recent first. Requires Reader.
+            Everything that has happened in this organization, newest first: work item, project, team,
+            sprint and board changes, plus membership and role changes. Requires Reader, which every
+            organization member holds — membership always carries at least that role.
             </summary>
+            <remarks>
+            Reads the same activity log as <c>/api/workspace/activity</c>; that endpoint simply spans
+            every organization the caller belongs to instead of one.
+            </remarks>
         </member>
         <member name="T:BoardSync.Api.Modules.OrgProject.Controllers.UpdateMemberRoleRequest">
             <summary>Request body for updating a member's org-level role.</summary>
@@ -377,12 +534,16 @@
             ordered by most recent first.
             </summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.WorkspaceController.GetActivity(System.Threading.CancellationToken)">
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.WorkspaceController.GetActivity(BoardSync.Api.Shared.Kernel.PaginationQuery,System.Threading.CancellationToken)">
             <summary>
-            Recent activity feed for the current user's workspace cards.
-            Returns the 30 most recent work item history entries across all accessible projects,
-            formatted as human-readable activity entries.
+            Everything that has happened across every organization the caller belongs to, newest first:
+            work item, project, team, sprint and board changes, plus membership and role changes.
             </summary>
+            <remarks>
+            Identical in shape to <c>/api/orgs/{orgId}/activity</c> — the only difference is that this
+            one spans all the caller's organizations rather than one, so entries carry the organization
+            they came from.
+            </remarks>
         </member>
         <member name="P:BoardSync.Api.Modules.OrgProject.Domain.DTOs.CreateOrganizationRequest.Slug">
             <summary>
@@ -428,12 +589,6 @@
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Domain.DTOs.WorkspaceNotificationResponse.#ctor(System.Guid,System.String,System.String,System.String,System.DateTime)">
             <summary>A single notification entry for the workspace bell.</summary>
-        </member>
-        <member name="T:BoardSync.Api.Modules.OrgProject.Domain.DTOs.WorkspaceActivityResponse">
-            <summary>A single recent-activity entry for the workspace feed.</summary>
-        </member>
-        <member name="M:BoardSync.Api.Modules.OrgProject.Domain.DTOs.WorkspaceActivityResponse.#ctor(System.Guid,System.String,System.String,System.String,System.String,System.String,System.String,System.DateTime)">
-            <summary>A single recent-activity entry for the workspace feed.</summary>
         </member>
         <member name="T:BoardSync.Api.Modules.OrgProject.Domain.DTOs.SearchHit">
             <summary>Slim hit returned inside a global search result.</summary>
@@ -645,6 +800,9 @@
         <member name="M:BoardSync.Api.Modules.OrgProject.Repositories.Interfaces.ITeamRepository.GetMemberCountAsync(System.Guid,System.Threading.CancellationToken)">
             <summary>Number of members on this team.</summary>
         </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Repositories.Interfaces.ITeamRepository.ExecuteInTransactionAsync(System.Func{System.Threading.CancellationToken,System.Threading.Tasks.Task},System.Threading.CancellationToken)">
+            <inheritdoc cref="M:BoardSync.Api.Modules.OrgProject.Repositories.Interfaces.IOrganizationRepository.ExecuteInTransactionAsync(System.Func{System.Threading.CancellationToken,System.Threading.Tasks.Task},System.Threading.CancellationToken)" />
+        </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Services.Implementations.OrganizationService.MostPrivilegedBy(System.Collections.Generic.IEnumerable{BoardSync.Api.Modules.Rbac.Models.RoleAssignment},System.Func{BoardSync.Api.Modules.Rbac.Models.RoleAssignment,System.Guid})">
             <summary>
             Reduces role assignments to the single most-privileged role per key (lowest enum value wins).
@@ -655,6 +813,14 @@
             Maps a team to its response DTO. The member count is queried rather than read from
             <c>t.Members</c> because teams are loaded without their membership collection, which
             would otherwise report every team as having zero members.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Services.Interfaces.IOrganizationService.SetMemberRoleAsync(System.Guid,System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType,System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Replaces a member's organization-scope role with <paramref name="role"/>, as a single
+            transaction: the member is never left role-less part way through, because losing their last
+            org role would cut off everything membership is supposed to grant — the activity feed
+            included. Refuses to demote the organization's last OrgAdmin.
             </summary>
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Services.Interfaces.IProjectService.ExistsAsync(System.Guid,System.Threading.CancellationToken)">
@@ -956,6 +1122,18 @@
         <member name="M:BoardSync.Api.Modules.Sprints.DTOs.SprintWorkItemResponse.#ctor(System.Guid,System.String,BoardSync.Api.Modules.WorkItems.Models.WorkItemType,BoardSync.Api.Modules.WorkItems.Models.WorkItemState,BoardSync.Api.Modules.WorkItems.Models.WorkItemPriority,System.Nullable{System.Guid},System.Nullable{System.Int32},System.Int32)">
             <summary>A single work item entry within a sprint backlog.</summary>
         </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.Events.BoardChanged">
+            <summary>
+            Any change to a board or one of its columns. Boards are small enough that a single event with
+            a <paramref name="Change"/> label beats one event type per column operation.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Events.BoardChanged.#ctor(System.Guid,System.Guid,System.Guid,System.String,System.String,System.String,System.String,System.Guid)">
+            <summary>
+            Any change to a board or one of its columns. Boards are small enough that a single event with
+            a <paramref name="Change"/> label beats one event type per column operation.
+            </summary>
+        </member>
         <member name="T:BoardSync.Api.Modules.Sprints.Models.Board">
             <summary>
             A Kanban/Scrum board scoped to a project.
@@ -1009,11 +1187,28 @@
         <member name="P:BoardSync.Api.Modules.Sprints.Models.SprintWorkItem.Position">
             <summary>Display position within the sprint backlog (0-based).</summary>
         </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Services.BoardService.PublishAsync(BoardSync.Api.Modules.Sprints.Models.Board,System.String,System.String,System.String,System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Publishes a board change against the project's owning organization, which is what the
+            activity log files entries under. Skipped if the project has gone — there would be no
+            organization to attribute the change to.
+            </summary>
+        </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Services.BoardService.BuildDefaultBoard(System.Guid,System.Guid)">
             <summary>Creates a board with the four default columns mapped to WorkItemState values.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Services.IBoardService.GetOrCreateForProjectAsync(System.Guid,System.Guid,System.Threading.CancellationToken)">
             <summary>Get (or auto-create with default columns) the board for a project.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Services.SprintService.PublishAsync``1(BoardSync.Api.Modules.Sprints.Models.Sprint,System.Func{System.Guid,``0},System.Threading.CancellationToken)">
+            <summary>
+            Sprints hang off a team, but activity is filed by organization, so every sprint event needs
+            the team's owning organization looked up first. If the team has vanished there is nothing to
+            file the event under and it is skipped rather than published half-formed.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Services.SprintService.SprintName(BoardSync.Api.Modules.Sprints.Models.Sprint)">
+            <summary>Display name for a sprint — they are numbered per team, not named.</summary>
         </member>
         <member name="T:BoardSync.Api.Modules.WorkItems.Controllers.WorkItemsController">
             <summary>
@@ -1209,6 +1404,12 @@
             <see cref="T:BoardSync.Api.Modules.WorkItems.Repository.IWorkItemRepository"/>; project references go through <see cref="T:BoardSync.Api.Modules.OrgProject.Services.Interfaces.IProjectService"/>.
             </summary>
         </member>
+        <member name="M:BoardSync.Api.Modules.WorkItems.Services.WorkItemService.TrackChange(System.Collections.Generic.List{System.ValueTuple{System.String,System.String,System.String}},BoardSync.Api.Modules.WorkItems.Models.WorkItem,System.Guid,System.String,System.String,System.String)">
+            <summary>
+            Records a field change in history and collects it into <paramref name="changes"/> for the
+            caller to publish once the save has committed. No-ops when the value did not actually move.
+            </summary>
+        </member>
         <member name="M:BoardSync.Api.Modules.WorkItems.Services.WorkItemService.NormalizeTags(System.Collections.Generic.IEnumerable{System.String})">
             <summary>
             Trims, lower-cases and de-duplicates tag names, dropping blanks. Normalization must happen
@@ -1319,6 +1520,18 @@
             <inheritdoc />
         </member>
         <member name="M:BoardSync.Api.Shared.Data.Migrations.TieBoardsToProjects.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="T:BoardSync.Api.Shared.Data.Migrations.ActivityLog">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.ActivityLog.Up(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.ActivityLog.Down(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.ActivityLog.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
             <inheritdoc />
         </member>
         <member name="T:BoardSync.Api.Shared.Kernel.BaseEntity">

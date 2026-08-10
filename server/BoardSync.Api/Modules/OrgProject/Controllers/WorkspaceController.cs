@@ -1,8 +1,11 @@
 using BoardSync.Api.Data;
+using BoardSync.Api.Modules.Activity.DTOs;
+using BoardSync.Api.Modules.Activity.Services;
 using BoardSync.Api.Modules.OrgProject.Domain.DTOs;
 using BoardSync.Api.Modules.WorkItems.Models;
 using BoardSync.Api.Shared.Auth;
 using BoardSync.Api.Shared.Auth.DTOs;
+using BoardSync.Api.Shared.Kernel;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -21,11 +24,16 @@ public class WorkspaceController : ControllerBase
 {
     private readonly BoardSyncDbContext _context;
     private readonly ICurrentUserContext _currentUser;
+    private readonly IActivityQueryService _activity;
 
-    public WorkspaceController(BoardSyncDbContext context, ICurrentUserContext currentUser)
+    public WorkspaceController(
+        BoardSyncDbContext context,
+        ICurrentUserContext currentUser,
+        IActivityQueryService activity)
     {
         _context = context;
         _currentUser = currentUser;
+        _activity = activity;
     }
 
     /// <summary>
@@ -132,77 +140,25 @@ public class WorkspaceController : ControllerBase
     }
 
     /// <summary>
-    /// Recent activity feed for the current user's workspace cards.
-    /// Returns the 30 most recent work item history entries across all accessible projects,
-    /// formatted as human-readable activity entries.
+    /// Everything that has happened across every organization the caller belongs to, newest first:
+    /// work item, project, team, sprint and board changes, plus membership and role changes.
     /// </summary>
+    /// <remarks>
+    /// Identical in shape to <c>/api/orgs/{orgId}/activity</c> — the only difference is that this
+    /// one spans all the caller's organizations rather than one, so entries carry the organization
+    /// they came from.
+    /// </remarks>
     [HttpGet("activity")]
-    [ProducesResponseType(typeof(ApiResponse<IReadOnlyList<WorkspaceActivityResponse>>), StatusCodes.Status200OK)]
-    public async Task<IActionResult> GetActivity(CancellationToken ct)
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<ActivityResponse>>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetActivity([FromQuery] PaginationQuery pagination, CancellationToken ct)
     {
-        var userId = _currentUser.UserId;
-
         var orgIds = await _context.OrganizationMemberships
-            .Where(m => m.UserId == userId)
+            .Where(m => m.UserId == _currentUser.UserId)
             .Select(m => m.OrganizationId)
             .ToListAsync(ct);
 
-        var projectIds = await _context.Projects
-            .Where(p => orgIds.Contains(p.OrganizationId) && p.IsActive)
-            .Select(p => p.Id)
-            .ToListAsync(ct);
+        var result = await _activity.GetForOrganizationsAsync(orgIds, pagination, ct);
 
-        var history = await _context.WorkItemHistory
-            .Where(h => projectIds.Contains(h.WorkItem.ProjectId))
-            .OrderByDescending(h => h.CreatedAt)
-            .Take(30)
-            .Select(h => new
-            {
-                h.Id,
-                h.FieldName,
-                h.OldValue,
-                h.NewValue,
-                h.ChangedBy,
-                h.CreatedAt,
-                WorkItemTitle = h.WorkItem.Title,
-                WorkItemProjectId = h.WorkItem.ProjectId
-            })
-            .ToListAsync(ct);
-
-        // Resolve actor display names and project/org names in memory
-        var actorIds = history.Select(h => h.ChangedBy).Distinct().ToList();
-        var actorMap = await _context.Users
-            .Where(u => actorIds.Contains(u.Id))
-            .ToDictionaryAsync(u => u.Id, u => u.DisplayName, ct);
-
-        var histProjectIds = history.Select(h => h.WorkItemProjectId).Distinct().ToList();
-        var projectMap = await _context.Projects
-            .Where(p => histProjectIds.Contains(p.Id))
-            .Select(p => new { p.Id, ProjectName = p.Name, OrgName = p.Organization.Name })
-            .ToDictionaryAsync(p => p.Id, ct);
-
-        var result = history.Select(h =>
-        {
-            actorMap.TryGetValue(h.ChangedBy, out var actor);
-            projectMap.TryGetValue(h.WorkItemProjectId, out var proj);
-
-            var type = h.FieldName == "State" ? $"WorkItem{h.NewValue}" : "WorkItemUpdated";
-            var detail = h.OldValue != null
-                ? $"{h.FieldName}: {h.OldValue} → {h.NewValue}"
-                : $"{h.FieldName} set to {h.NewValue}";
-
-            return new WorkspaceActivityResponse(
-                h.Id,
-                type,
-                h.WorkItemTitle,
-                detail,
-                actor ?? "Unknown",
-                proj?.OrgName ?? string.Empty,
-                proj?.ProjectName ?? string.Empty,
-                h.CreatedAt
-            );
-        }).ToList();
-
-        return Ok(new ApiResponse<IReadOnlyList<WorkspaceActivityResponse>>(true, "Activity retrieved.", result));
+        return Ok(new ApiResponse<PagedResult<ActivityResponse>>(true, "Activity retrieved.", result));
     }
 }
