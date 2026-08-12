@@ -1,16 +1,15 @@
-using BoardSync.Api.Data;
 using BoardSync.Api.Shared.Auth.Configuration;
 using BoardSync.Api.Shared.Auth.DTOs;
 using BoardSync.Api.Shared.Auth.Models;
+using BoardSync.Api.Shared.Auth.Repositories;
 using BoardSync.Api.Shared.Auth.Services;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
 namespace BoardSync.Api.Shared.Auth.Services.Implementations;
 
 public class UserService : IUserService
 {
-    private readonly BoardSyncDbContext _context;
+    private readonly IUserRepository _users;
     private readonly IPasswordService _passwordService;
     private readonly ITokenService _tokenService;
     private readonly IEmailService _emailService;
@@ -18,14 +17,14 @@ public class UserService : IUserService
     private readonly ILogger<UserService> _logger;
 
     public UserService(
-        BoardSyncDbContext context,
+        IUserRepository users,
         IPasswordService passwordService,
         ITokenService tokenService,
         IEmailService emailService,
         IOptions<SecuritySettings> securitySettings,
         ILogger<UserService> logger)
     {
-        _context = context;
+        _users = users;
         _passwordService = passwordService;
         _tokenService = tokenService;
         _emailService = emailService;
@@ -37,7 +36,7 @@ public class UserService : IUserService
     {
         try
         {
-            var user = await _context.Users.FindAsync(userId);
+            var user = await _users.GetByIdAsync(userId);
             if (user == null)
             {
                 return new ApiResponse<UserProfile>(false, "User not found");
@@ -58,7 +57,7 @@ public class UserService : IUserService
         try
         {
             var normalizedEmail = email.Trim().ToLowerInvariant();
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == normalizedEmail);
+            var user = await _users.GetByEmailAsync(normalizedEmail);
             if (user == null)
             {
                 return new ApiResponse<UserProfile>(false, "User not found");
@@ -107,8 +106,8 @@ public class UserService : IUserService
                 UpdatedAt = DateTime.UtcNow
             };
 
-            _context.Users.Add(user);
-            await _context.SaveChangesAsync();
+            _users.Add(user);
+            await _users.SaveChangesAsync();
 
             _logger.LogInformation("User created successfully: {Email}", user.Email);
 
@@ -126,7 +125,7 @@ public class UserService : IUserService
     {
         try
         {
-            var user = await _context.Users.FindAsync(userId);
+            var user = await _users.GetByIdAsync(userId);
             if (user == null)
             {
                 return new ApiResponse<UserProfile>(false, "User not found");
@@ -138,7 +137,7 @@ public class UserService : IUserService
             user.ProfilePictureUrl = request.ProfilePictureUrl ?? string.Empty;
             user.UpdatedAt = DateTime.UtcNow;
 
-            await _context.SaveChangesAsync();
+            await _users.SaveChangesAsync();
 
             _logger.LogInformation("User profile updated successfully: {UserId}", userId);
 
@@ -156,14 +155,14 @@ public class UserService : IUserService
     {
         try
         {
-            var user = await _context.Users.FindAsync(userId);
+            var user = await _users.GetByIdAsync(userId);
             if (user == null)
             {
                 return new ApiResponse(false, "User not found");
             }
 
-            _context.Users.Remove(user);
-            await _context.SaveChangesAsync();
+            _users.Remove(user);
+            await _users.SaveChangesAsync();
 
             _logger.LogInformation("User deleted successfully: {UserId}", userId);
             return new ApiResponse(true, "User deleted successfully");
@@ -179,7 +178,7 @@ public class UserService : IUserService
     {
         try
         {
-            var user = await _context.Users.FindAsync(userId);
+            var user = await _users.GetByIdAsync(userId);
             if (user == null)
             {
                 return new ApiResponse(false, "User not found");
@@ -203,14 +202,14 @@ public class UserService : IUserService
             user.PasswordHash = _passwordService.HashPassword(request.NewPassword);
             user.UpdatedAt = DateTime.UtcNow;
 
-            var refreshTokens = await _context.RefreshTokens.Where(rt => rt.UserId == userId).WhereActive().ToListAsync();
+            var refreshTokens = await _users.GetActiveRefreshTokensAsync(userId);
             foreach (var token in refreshTokens)
             {
                 token.Revoked = DateTime.UtcNow;
                 token.ReasonRevoked = "Password changed";
             }
 
-            await _context.SaveChangesAsync();
+            await _users.SaveChangesAsync();
 
             _logger.LogInformation("Password changed successfully for user: {UserId}", userId);
             return new ApiResponse(true, "Password changed successfully");
@@ -225,13 +224,13 @@ public class UserService : IUserService
     public async Task<bool> ExistsAsync(string email)
     {
         var normalizedEmail = email.Trim().ToLowerInvariant();
-        return await _context.Users.AnyAsync(u => u.Email == normalizedEmail);
+        return await _users.EmailExistsAsync(normalizedEmail);
     }
 
     public async Task<bool> IsEmailConfirmedAsync(string email)
     {
         var normalizedEmail = email.Trim().ToLowerInvariant();
-        var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == normalizedEmail);
+        var user = await _users.GetByEmailAsync(normalizedEmail);
         return user?.IsEmailConfirmed ?? false;
     }
 
@@ -240,7 +239,7 @@ public class UserService : IUserService
         try
         {
             var normalizedEmail = request.Email.Trim().ToLowerInvariant();
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == normalizedEmail);
+            var user = await _users.GetByEmailAsync(normalizedEmail);
             if (user == null)
             {
                 return new ApiResponse(false, "User not found");
@@ -268,7 +267,7 @@ public class UserService : IUserService
             user.EmailConfirmationTokenExpires = null;
             user.UpdatedAt = DateTime.UtcNow;
 
-            await _context.SaveChangesAsync();
+            await _users.SaveChangesAsync();
 
             _logger.LogInformation("Email confirmed successfully for user: {Email}", user.Email);
             return new ApiResponse(true, "Email confirmed successfully");
@@ -285,7 +284,7 @@ public class UserService : IUserService
         try
         {
             var normalizedEmail = email.Trim().ToLowerInvariant();
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == normalizedEmail);
+            var user = await _users.GetByEmailAsync(normalizedEmail);
             if (user == null)
             {
                 return new ApiResponse(false, "User not found");
@@ -301,7 +300,7 @@ public class UserService : IUserService
             user.EmailConfirmationTokenExpires = DateTime.UtcNow.AddHours(_securitySettings.EmailConfirmationTokenExpirationHours);
             user.UpdatedAt = DateTime.UtcNow;
 
-            await _context.SaveChangesAsync();
+            await _users.SaveChangesAsync();
 
             _logger.LogInformation("Email confirmation token generated for user: {Email}", normalizedEmail);
             return new ApiResponse(true, "Email confirmation token generated");
@@ -318,7 +317,7 @@ public class UserService : IUserService
         try
         {
             var normalizedEmail = email.Trim().ToLowerInvariant();
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == normalizedEmail);
+            var user = await _users.GetByEmailAsync(normalizedEmail);
             if (user == null)
             {
                 return new ApiResponse<string>(false, "User not found");
@@ -334,7 +333,7 @@ public class UserService : IUserService
             user.EmailConfirmationTokenExpires = DateTime.UtcNow.AddHours(_securitySettings.EmailConfirmationTokenExpirationHours);
             user.UpdatedAt = DateTime.UtcNow;
 
-            await _context.SaveChangesAsync();
+            await _users.SaveChangesAsync();
 
             var emailResult = await _emailService.SendEmailConfirmationAsync(normalizedEmail, rawToken, baseUrl);
             if (!emailResult.Success)

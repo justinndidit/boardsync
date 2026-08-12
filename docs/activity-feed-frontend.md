@@ -133,6 +133,7 @@ interface PagedResult<T> {
   totalPages: number;
   hasNextPage: boolean;
   hasPreviousPage: boolean;
+  nextCursor: string | null;       // see §3.1 — ignore it and nothing changes
 }
 ```
 
@@ -153,6 +154,33 @@ the same row could appear on two pages while another was skipped. Verified: 3 pa
 
 Suggested sizes: `pageSize=10` for a dashboard card, `pageSize=50` with infinite scroll for a
 full activity page.
+
+### 3.1 Cursor paging (optional, and better for infinite scroll)
+
+Every response now also carries `nextCursor`. Pass it back as `?cursor=` — with `?pageSize=` if you
+want a size other than 20 — and you get the next page:
+
+```
+GET /api/orgs/{orgId}/activity?pageSize=50
+GET /api/orgs/{orgId}/activity?pageSize=50&cursor=MTY5ODc2NTQzMjEwOjdkMWY0YjBjOWEyZTRjMzFiOGQ1NmUwZjFhMmIzYzRk
+```
+
+`?page` is unaffected and keeps working exactly as documented above. Nothing about the existing
+contract changed — if you ignore `nextCursor`, you will not notice this section exists.
+
+Two reasons to prefer it for an infinite-scroll feed:
+
+- **It does not slow down as you scroll.** `?page=40` makes the database walk and discard the 780
+  rows before the ones you asked for. A cursor seeks straight to the position.
+- **It does not skip or repeat entries.** The activity feed is written to while you are reading it.
+  With offsets, a new entry arriving between two requests shifts everything down by one, so the row
+  at the old boundary appears twice — or is missed entirely if one is deleted. A cursor is anchored
+  to a row, not to a count, so new arrivals at the top cannot disturb it.
+
+`nextCursor` is `null` when the page came back short, which means you have reached the end — stop
+requesting. Treat the value as opaque: it encodes `(occurredAt, id)` today, and that is an
+implementation detail that may change. A malformed cursor is ignored rather than rejected, and you
+get the first page back.
 
 ---
 
@@ -288,6 +316,7 @@ the `type` vocabularies are different.
 
 - [ ] `res.data` → `res.data.items` on both activity endpoints
 - [ ] Add `?page` / `?pageSize`; wire up `hasNextPage` / `totalCount`
+- [ ] For infinite scroll, page with `nextCursor` instead of `?page` (§3.1)
 - [ ] Replace the old `type` switch with the `§4` vocabulary, with a passthrough default
 - [ ] Handle `detail === null`
 - [ ] Handle `projectId` / `teamId` / `project` / `team` being null

@@ -31,6 +31,10 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:8080
+      # This stack has no separate migration step, so the single api container applies the schema
+      # itself. A real deployment should leave this off and run migrations from the release
+      # pipeline instead — see docs/scaling-realtime-caching.md §6.1.
+      Database__AutoMigrate: "true"
       ConnectionStrings__DefaultConnection: Host=postgres;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD};Pooling=true;Minimum Pool Size=10;Maximum Pool Size=100
       AllowedOrigins__0: ${APP_ORIGIN}
       JwtSettings__Secret: ${JWT_SECRET}

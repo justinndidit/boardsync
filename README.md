@@ -131,6 +131,21 @@ RFC 7807 problem details via the global exception handler.
   `JwtSettings__Secret` environment variable; `appsettings.Development.json` carries a dev-only value.
 - `AllowedOrigins` must be set explicitly in production — startup throws if it is empty.
 
+## 4a) Operational Settings
+
+| Setting | Default | Why you would change it |
+| --- | --- | --- |
+| `Database:AutoMigrate` | `true` outside Production, `false` in Production | Applies pending migrations at startup, under a Postgres advisory lock so concurrent instances cannot race. Leave off in real deployments and run `dotnet ef database update` as a release step; the local prod-like compose stack sets it to `true` because it has no separate migration step. |
+| `Database:MaxPoolSize` | `20` | Per *instance*, so the ceiling that matters is this × instance count against Postgres `max_connections` (100 by default). Raise only with `max_connections` raised to match, or put pgbouncer in front. |
+| `Database:MinPoolSize` | `2` | Connections held open when idle. |
+| `Telemetry:OtlpEndpoint` | unset | OTLP collector address, e.g. `http://localhost:4317`. Unset means OpenTelemetry is not registered at all — no spans built, nothing exported. `OTEL_EXPORTER_OTLP_ENDPOINT` works too. |
+| `Telemetry:ServiceName` | `boardsync-api` | `service.name` on exported traces and metrics. |
+
+With a collector configured you get per-endpoint `http.server.request.duration` (bucketed by route),
+`db.client.operation.duration`, connection pool saturation
+(`db.client.connection.count` / `.max`), and .NET runtime counters. Health probes are excluded from
+traces but still counted in metrics.
+
 ## 5) Production-Like Local Setup (Docker)
 
 ### Create runtime env file
@@ -167,11 +182,15 @@ make prod-down
 - Restrict CORS (`AllowedOrigins`) to exact trusted domains.
 - Set `ForwardedHeaders:KnownProxies`/`:KnownNetworks` when running behind a proxy.
 - Point `EmailSettings` at a real SMTP provider (dev uses MailHog).
-- Add centralized logging and metrics (OpenTelemetry + dashboard).
+- Point `Telemetry:OtlpEndpoint` at a collector — instrumentation is in place but exports nothing
+  until it is set.
 - Configure readiness/liveness probing using `/healthz`.
 - Enable CI checks for build, lint, and test before deployment.
-- Consider running EF migrations as a controlled release step rather than relying on startup
-  auto-migration.
+- Run EF migrations as a release step. `Database:AutoMigrate` already defaults to off in Production;
+  keep it that way so a failed migration stops the rollout instead of surfacing as crash-looping
+  replicas.
+- Keep `Database:MaxPoolSize` × instance count below Postgres `max_connections`, or front the
+  database with pgbouncer.
 
 ## 7) Relevant Configuration Files
 

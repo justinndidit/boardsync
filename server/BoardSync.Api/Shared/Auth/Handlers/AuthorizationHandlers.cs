@@ -1,7 +1,6 @@
-using BoardSync.Api.Data;
+using BoardSync.Api.Shared.Auth.Repositories;
 using BoardSync.Api.Shared.Auth.Services;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 
 namespace BoardSync.Api.Shared.Auth.Handlers;
@@ -31,11 +30,11 @@ public class ActiveUserRequirement : IAuthorizationRequirement { }
 
 public class ActiveUserHandler : AuthorizationHandler<ActiveUserRequirement>
 {
-    private readonly BoardSyncDbContext _context;
+    private readonly IUserRepository _users;
 
-    public ActiveUserHandler(BoardSyncDbContext context)
+    public ActiveUserHandler(IUserRepository users)
     {
-        _context = context;
+        _users = users;
     }
 
     protected override async Task HandleRequirementAsync(
@@ -46,11 +45,7 @@ public class ActiveUserHandler : AuthorizationHandler<ActiveUserRequirement>
 
         if (userIdClaim != null && Guid.TryParse(userIdClaim.Value, out var userId))
         {
-            var now = DateTime.UtcNow;
-            var isEligible = await _context.Users.AnyAsync(u =>
-                u.Id == userId &&
-                u.IsActive &&
-                (!u.IsLocked || (u.LockedUntil.HasValue && u.LockedUntil.Value <= now)));
+            var isEligible = await _users.IsEligibleForAccessAsync(userId);
 
             if (isEligible)
             {
