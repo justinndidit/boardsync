@@ -1295,6 +1295,12 @@
         <member name="M:BoardSync.Api.Modules.Sprints.DTOs.SprintWorkItemResponse.#ctor(System.Guid,System.String,BoardSync.Api.Modules.WorkItems.Models.WorkItemType,BoardSync.Api.Modules.WorkItems.Models.WorkItemState,BoardSync.Api.Modules.WorkItems.Models.WorkItemPriority,System.Nullable{System.Guid},System.Nullable{System.Int32},System.Int32)">
             <summary>A single work item entry within a sprint backlog.</summary>
         </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.DTOs.CloseSprintResponse">
+            <summary>Summary returned after closing a sprint.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.DTOs.CloseSprintResponse.#ctor(BoardSync.Api.Modules.Sprints.DTOs.SprintResponse,System.Int32,System.Int32,BoardSync.Api.Modules.Sprints.DTOs.IncompleteItemsDestination,System.Nullable{System.Guid})">
+            <summary>Summary returned after closing a sprint.</summary>
+        </member>
         <member name="T:BoardSync.Api.Modules.Sprints.Events.BoardChanged">
             <summary>
             Any change to a board or one of its columns. Boards are small enough that a single event with
@@ -1306,12 +1312,6 @@
             Any change to a board or one of its columns. Boards are small enough that a single event with
             a <paramref name="Change"/> label beats one event type per column operation.
             </summary>
-        </member>
-        <member name="T:BoardSync.Api.Modules.Sprints.DTOs.CloseSprintResponse">
-            <summary>Summary returned after closing a sprint.</summary>
-        </member>
-        <member name="M:BoardSync.Api.Modules.Sprints.DTOs.CloseSprintResponse.#ctor(BoardSync.Api.Modules.Sprints.DTOs.SprintResponse,System.Int32,System.Int32,BoardSync.Api.Modules.Sprints.DTOs.IncompleteItemsDestination,System.Nullable{System.Guid})">
-            <summary>Summary returned after closing a sprint.</summary>
         </member>
         <member name="T:BoardSync.Api.Modules.Sprints.Models.Board">
             <summary>
@@ -1379,6 +1379,12 @@
         <member name="M:BoardSync.Api.Modules.Sprints.Services.IBoardService.GetOrCreateForProjectAsync(System.Guid,System.Guid,System.Threading.CancellationToken)">
             <summary>Get (or auto-create with default columns) the board for a project.</summary>
         </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Services.ISprintService.CloseAsync(System.Guid,BoardSync.Api.Modules.Sprints.DTOs.CloseSprintRequest,System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Close an active sprint.
+            Marks it Completed and routes incomplete items to the backlog or a next sprint.
+            </summary>
+        </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Services.SprintService.PublishAsync``1(BoardSync.Api.Modules.Sprints.Models.Sprint,System.Func{System.Guid,``0},System.Threading.CancellationToken)">
             <summary>
             Sprints hang off a team, but activity is filed by organization, so every sprint event needs
@@ -1388,12 +1394,6 @@
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Services.SprintService.SprintName(BoardSync.Api.Modules.Sprints.Models.Sprint)">
             <summary>Display name for a sprint — they are numbered per team, not named.</summary>
-        </member>
-        <member name="M:BoardSync.Api.Modules.Sprints.Services.ISprintService.CloseAsync(System.Guid,BoardSync.Api.Modules.Sprints.DTOs.CloseSprintRequest,System.Guid,System.Threading.CancellationToken)">
-            <summary>
-            Close an active sprint.
-            Marks it Completed and routes incomplete items to the backlog or a next sprint.
-            </summary>
         </member>
         <member name="T:BoardSync.Api.Modules.WorkItems.Controllers.WorkItemsController">
             <summary>
@@ -1717,6 +1717,30 @@
             <inheritdoc />
         </member>
         <member name="M:BoardSync.Api.Shared.Data.Migrations.ActivityLog.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="T:BoardSync.Api.Shared.Data.Migrations.AddSprintsAndBoards">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.AddSprintsAndBoards.Up(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.AddSprintsAndBoards.Down(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.AddSprintsAndBoards.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="T:BoardSync.Api.Shared.Data.Migrations.AddSprintsAndBoardss">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.AddSprintsAndBoardss.Up(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.AddSprintsAndBoardss.Down(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.AddSprintsAndBoardss.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
             <inheritdoc />
         </member>
         <member name="T:BoardSync.Api.Shared.Kernel.BaseEntity">
