@@ -2,11 +2,18 @@ using BoardSync.Api.Data;
 using BoardSync.Api.Extensions;
 using BoardSync.Api.Middleware;
 using BoardSync.Api.Modules.Activity;
+using BoardSync.Api.Modules.Notifications;
+using BoardSync.Api.Modules.Search.Repositories;
+using BoardSync.Api.Modules.Search.Services;
 using BoardSync.Api.Modules.OrgProject.Repositories.Implementations;
 using BoardSync.Api.Modules.OrgProject.Repositories.Interfaces;
 using BoardSync.Api.Modules.OrgProject.Services.Implementations;
 using BoardSync.Api.Modules.OrgProject.Services.Interfaces;
+using BoardSync.Api.Modules.Sprints.Repositories.Implementations;
+using BoardSync.Api.Modules.Sprints.Repositories.Interfaces;
 using BoardSync.Api.Modules.Sprints.Services;
+using BoardSync.Api.Modules.Rbac.Repositories.Implementations;
+using BoardSync.Api.Modules.Rbac.Repositories.Interfaces;
 using BoardSync.Api.Modules.Rbac.Services.Interfaces;
 using BoardSync.Api.Modules.Rbac.Services.Implementations;
 using BoardSync.Api.Modules.WorkItems.Repository;
@@ -15,6 +22,7 @@ using BoardSync.Api.Shared.Auth;
 using BoardSync.Api.Shared.Auth.Configuration;
 using BoardSync.Api.Shared.Auth.DTOs;
 using BoardSync.Api.Shared.Auth.Handlers;
+using BoardSync.Api.Shared.Auth.Repositories;
 using BoardSync.Api.Shared.Auth.Services;
 using BoardSync.Api.Shared.Auth.Services.Implementations;
 using BoardSync.Api.Shared.Kernel.Configuration;
@@ -58,6 +66,9 @@ builder.Services.AddControllers()
 builder.Services.AddProblemDetails();
 builder.Services.AddHealthChecks();
 
+// Traces and metrics. No-op unless an OTLP endpoint is configured.
+builder.AddBoardSyncTelemetry();
+
 // Add OpenAPI/Swagger services
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
@@ -98,6 +109,7 @@ builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection("Emai
 builder.Services.Configure<SecuritySettings>(builder.Configuration.GetSection("SecuritySettings"));
 
 // Authentication Services
+builder.Services.AddScoped<IUserRepository, UserRepository>();
 builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<IAuthenticationService, AuthenticationService>();
 builder.Services.AddScoped<ITokenService, TokenService>();
@@ -109,22 +121,39 @@ builder.Services.AddScoped<ICurrentUserContext, CurrentUserContext>();
 builder.Services.AddScoped<IEventBus, InMemoryEventBus>();
 
 // RBAC Module
-builder.Services.AddScoped<IRbacService, RbacService>();
+// RbacService is registered concretely and reached through the memoizing decorator, so a scope that
+// authorizes the same question twice — which is most requests, once for the controller guard and
+// again inside the service — pays for it once.
+builder.Services.AddScoped<IRoleAssignmentRepository, RoleAssignmentRepository>();
+builder.Services.AddScoped<RbacService>();
+builder.Services.AddScoped<IRbacService>(sp =>
+    new MemoizingRbacService(sp.GetRequiredService<RbacService>()));
 
 // OrgProject Module
 builder.Services.AddScoped<IOrganizationRepository, OrganizationRepository>();
 builder.Services.AddScoped<IProjectRepository, ProjectRepository>();
 builder.Services.AddScoped<ITeamRepository, TeamRepository>();
 builder.Services.AddScoped<ITeamMembershipRepository, TeamMembershipRepository>();
+builder.Services.AddScoped<IWorkspaceRepository, WorkspaceRepository>();
 builder.Services.AddScoped<IOrganizationService, OrganizationService>();
 builder.Services.AddScoped<IProjectService, ProjectService>();
 builder.Services.AddScoped<ITeamService, TeamService>();
+builder.Services.AddScoped<IWorkspaceService, WorkspaceService>();
+
+// Notifications Module
+builder.Services.AddNotificationsModule();
+
+// Search Module
+builder.Services.AddScoped<ISearchRepository, SearchRepository>();
+builder.Services.AddScoped<ISearchService, SearchService>();
 
 // WorkItems Module
 builder.Services.AddScoped<IWorkItemRepository, WorkItemRepository>();
 builder.Services.AddScoped<IWorkItemService, WorkItemService>();
 
 // Sprints / Boards Module
+builder.Services.AddScoped<ISprintRepository, SprintRepository>();
+builder.Services.AddScoped<IBoardRepository, BoardRepository>();
 builder.Services.AddScoped<ISprintService, SprintService>();
 builder.Services.AddScoped<IAuthHelpers, AuthHelpers>();
 builder.Services.AddScoped<IBoardService, BoardService>();
@@ -288,10 +317,18 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 
 var dataSourceBuilder = new NpgsqlDataSourceBuilder(connectionString);
 
-//postgres connection pool configuration
+// Postgres connection pool configuration.
+//
+// These are per *instance*, not per deployment, so the ceiling that matters is
+// MaxPoolSize × instance count against the server's max_connections (100 by default). The old
+// values — 10/100 — meant a third replica could exhaust a stock Postgres on its own before serving
+// a single user. Sized here for a handful of instances; anything larger belongs behind pgbouncer
+// in transaction-pooling mode, which decouples replica count from server connections entirely.
 dataSourceBuilder.ConnectionStringBuilder.Pooling = true;
-dataSourceBuilder.ConnectionStringBuilder.MinPoolSize = 10;
-dataSourceBuilder.ConnectionStringBuilder.MaxPoolSize = 100;
+dataSourceBuilder.ConnectionStringBuilder.MinPoolSize =
+    builder.Configuration.GetValue("Database:MinPoolSize", 2);
+dataSourceBuilder.ConnectionStringBuilder.MaxPoolSize =
+    builder.Configuration.GetValue("Database:MaxPoolSize", 20);
 dataSourceBuilder.ConnectionStringBuilder.ConnectionIdleLifetime = 300; // 5 minutes
 
 var dataSource = dataSourceBuilder.Build();
@@ -323,6 +360,8 @@ builder.Services.AddCors(options =>
 });
 
 var app = builder.Build();
+
+app.LogTelemetryStatus();
 
 // Auto-migrate database on startup
 await app.MigrateDatabaseAsync();

@@ -1,15 +1,14 @@
-using BoardSync.Api.Data;
 using BoardSync.Api.Shared.Auth;
 using BoardSync.Api.Shared.Auth.DTOs;
+using BoardSync.Api.Shared.Auth.Repositories;
 using BoardSync.Api.Shared.Kernel.Exceptions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 
 namespace BoardSync.Api.Controllers;
 
 /// <summary>
-/// User lookup endpoints — used primarily when inviting members to orgs/teams.
+/// Public user lookups — the profile fields other people in a workspace are allowed to see.
 /// </summary>
 [ApiController]
 [Route("api/users")]
@@ -17,12 +16,12 @@ namespace BoardSync.Api.Controllers;
 [Produces("application/json")]
 public class UsersController : ControllerBase
 {
-    private readonly BoardSyncDbContext _context;
+    private readonly IUserRepository _users;
     private readonly ICurrentUserContext _currentUser;
 
-    public UsersController(BoardSyncDbContext context, ICurrentUserContext currentUser)
+    public UsersController(IUserRepository users, ICurrentUserContext currentUser)
     {
-        _context = context;
+        _users = users;
         _currentUser = currentUser;
     }
 
@@ -32,13 +31,7 @@ public class UsersController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetById(Guid userId, CancellationToken ct)
     {
-        var user = await _context.Users
-            .Where(u => u.Id == userId && u.IsActive)
-            .Select(u => new UserProfile(
-                u.Id, u.Email, u.FirstName, u.LastName,
-                u.DisplayName, u.ProfilePictureUrl,
-                u.IsEmailConfirmed, u.IsActive, u.CreatedAt))
-            .FirstOrDefaultAsync(ct)
+        var user = await _users.GetProfileByIdAsync(userId, ct)
             ?? throw new NotFoundException("User", userId);
 
         return Ok(new ApiResponse<UserProfile>(true, "User found.", user));
@@ -56,15 +49,7 @@ public class UsersController : ControllerBase
         if (string.IsNullOrWhiteSpace(email))
             return BadRequest(new ApiResponse(false, "Email is required."));
 
-        var normalized = email.Trim().ToLowerInvariant();
-
-        var user = await _context.Users
-            .Where(u => u.Email == normalized && u.IsActive)
-            .Select(u => new UserProfile(
-                u.Id, u.Email, u.FirstName, u.LastName,
-                u.DisplayName, u.ProfilePictureUrl,
-                u.IsEmailConfirmed, u.IsActive, u.CreatedAt))
-            .FirstOrDefaultAsync(ct)
+        var user = await _users.GetProfileByEmailAsync(email, ct)
             ?? throw new NotFoundException($"No user found with email '{email}'.");
 
         return Ok(new ApiResponse<UserProfile>(true, "User found.", user));
@@ -76,13 +61,7 @@ public class UsersController : ControllerBase
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> GetMe(CancellationToken ct)
     {
-        var user = await _context.Users
-            .Where(u => u.Id == _currentUser.UserId && u.IsActive)
-            .Select(u => new UserProfile(
-                u.Id, u.Email, u.FirstName, u.LastName,
-                u.DisplayName, u.ProfilePictureUrl,
-                u.IsEmailConfirmed, u.IsActive, u.CreatedAt))
-            .FirstOrDefaultAsync(ct)
+        var user = await _users.GetProfileByIdAsync(_currentUser.UserId, ct)
             ?? throw new NotFoundException("User", _currentUser.UserId);
 
         return Ok(new ApiResponse<UserProfile>(true, "Profile retrieved.", user));

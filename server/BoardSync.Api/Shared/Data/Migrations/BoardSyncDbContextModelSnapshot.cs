@@ -475,6 +475,8 @@ namespace BoardSync.Api.Shared.Data.Migrations
                     b.HasIndex("TeamId", "Number")
                         .IsUnique();
 
+                    b.HasIndex("TeamId", "Status");
+
                     b.ToTable("Sprints", "plan");
                 });
 
@@ -505,6 +507,8 @@ namespace BoardSync.Api.Shared.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("WorkItemId");
+
+                    b.HasIndex("SprintId", "Position");
 
                     b.HasIndex("SprintId", "WorkItemId")
                         .IsUnique();
@@ -585,6 +589,8 @@ namespace BoardSync.Api.Shared.Data.Migrations
 
                     b.HasIndex("Type");
 
+                    b.HasIndex("ProjectId", "IsActive", "State");
+
                     b.ToTable("WorkItems", "work");
                 });
 
@@ -654,6 +660,9 @@ namespace BoardSync.Api.Shared.Data.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)");
 
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -665,6 +674,9 @@ namespace BoardSync.Api.Shared.Data.Migrations
                     b.HasIndex("ChangedBy");
 
                     b.HasIndex("WorkItemId");
+
+                    b.HasIndex("ProjectId", "CreatedAt")
+                        .IsDescending(false, true);
 
                     b.ToTable("WorkItemHistory", "work");
                 });

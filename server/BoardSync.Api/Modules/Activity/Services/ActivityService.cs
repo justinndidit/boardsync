@@ -1,27 +1,25 @@
-using BoardSync.Api.Data;
 using BoardSync.Api.Modules.Activity.DTOs;
 using BoardSync.Api.Modules.Activity.Models;
+using BoardSync.Api.Modules.Activity.Repositories.Interfaces;
 using BoardSync.Api.Shared.Kernel;
-using Microsoft.EntityFrameworkCore;
 
 namespace BoardSync.Api.Modules.Activity.Services;
 
 /// <inheritdoc />
 public class ActivityRecorder : IActivityRecorder
 {
-    private readonly BoardSyncDbContext _context;
+    private readonly IActivityRepository _repository;
     private readonly ILogger<ActivityRecorder> _logger;
 
-    public ActivityRecorder(BoardSyncDbContext context, ILogger<ActivityRecorder> logger)
+    public ActivityRecorder(IActivityRepository repository, ILogger<ActivityRecorder> logger)
     {
-        _context = context;
+        _repository = repository;
         _logger = logger;
     }
 
     public async Task RecordAsync(ActivityLog entry, CancellationToken ct = default)
     {
-        _context.ActivityLogs.Add(entry);
-        await _context.SaveChangesAsync(ct);
+        await _repository.AddAsync(entry, ct);
 
         _logger.LogDebug("Recorded activity {Verb} on {EntityType} {EntityId} in org {OrgId}",
             entry.Verb, entry.EntityType, entry.EntityId, entry.OrganizationId);
@@ -31,11 +29,11 @@ public class ActivityRecorder : IActivityRecorder
 /// <inheritdoc />
 public class ActivityQueryService : IActivityQueryService
 {
-    private readonly BoardSyncDbContext _context;
+    private readonly IActivityRepository _repository;
 
-    public ActivityQueryService(BoardSyncDbContext context)
+    public ActivityQueryService(IActivityRepository repository)
     {
-        _context = context;
+        _repository = repository;
     }
 
     public async Task<PagedResult<ActivityResponse>> GetForOrganizationsAsync(
@@ -46,25 +44,27 @@ public class ActivityQueryService : IActivityQueryService
         if (organizationIds.Count == 0)
             return PagedResult<ActivityResponse>.Empty(pagination.Page, pagination.PageSize);
 
-        var orgIds = organizationIds as List<Guid> ?? organizationIds.ToList();
+        var total = await _repository.CountForOrganizationsAsync(organizationIds, ct);
 
-        var query = _context.ActivityLogs.Where(a => orgIds.Contains(a.OrganizationId));
-
-        var total = await query.CountAsync(ct);
-
-        // Id is a tiebreaker, not decoration: entries written in the same transaction share an
-        // OccurredAt to the microsecond, and without a total order the same row can appear on two
-        // pages while another is skipped.
-        var rows = await query
-            .OrderByDescending(a => a.OccurredAt)
-            .ThenByDescending(a => a.Id)
-            .Skip(pagination.Skip)
-            .Take(pagination.PageSize)
-            .ToListAsync(ct);
+        // A cursor seeks straight to the client's last position; an offset makes Postgres walk and
+        // discard every row before it, which is what makes deep pages progressively slower. An
+        // unparseable cursor falls through to the offset path rather than failing the request.
+        var rows = ActivityCursor.TryDecode(pagination.Cursor, out var cursor)
+            ? await _repository.GetPageAfterAsync(
+                organizationIds, cursor.OccurredAt, cursor.Id, pagination.PageSize, ct)
+            : await _repository.GetPageAsync(
+                organizationIds, pagination.Skip, pagination.PageSize, ct);
 
         var items = await ProjectAsync(rows, ct);
 
-        return new PagedResult<ActivityResponse>(items, total, pagination.Page, pagination.PageSize);
+        // Only offered when the page came back full. A short page is the end of the feed, and
+        // handing back a cursor there invites a client to poll a position that will never advance.
+        var nextCursor = rows.Count == pagination.PageSize
+            ? new ActivityCursor(rows[^1].OccurredAt, rows[^1].Id).Encode()
+            : null;
+
+        return new PagedResult<ActivityResponse>(
+            items, total, pagination.Page, pagination.PageSize, nextCursor);
     }
 
     /// <summary>
@@ -73,33 +73,23 @@ public class ActivityQueryService : IActivityQueryService
     /// subject's own title is not among them; that one is snapshotted on the row so deleted
     /// entities still read correctly.
     /// </summary>
-    private async Task<List<ActivityResponse>> ProjectAsync(List<ActivityLog> rows, CancellationToken ct)
+    private async Task<List<ActivityResponse>> ProjectAsync(
+        IReadOnlyList<ActivityLog> rows,
+        CancellationToken ct)
     {
         if (rows.Count == 0) return [];
 
-        var actorIds = rows.Select(a => a.ActorId).Distinct().ToList();
-        var actorMap = await _context.Users
-            .Where(u => actorIds.Contains(u.Id))
-            .ToDictionaryAsync(u => u.Id, u => u.DisplayName, ct);
+        var actorMap = await _repository.GetUserNamesAsync(
+            rows.Select(a => a.ActorId).Distinct().ToList(), ct);
 
-        var orgIds = rows.Select(a => a.OrganizationId).Distinct().ToList();
-        var orgMap = await _context.Organizations
-            .Where(o => orgIds.Contains(o.Id))
-            .ToDictionaryAsync(o => o.Id, o => o.Name, ct);
+        var orgMap = await _repository.GetOrganizationNamesAsync(
+            rows.Select(a => a.OrganizationId).Distinct().ToList(), ct);
 
-        var projectIds = rows.Where(a => a.ProjectId.HasValue).Select(a => a.ProjectId!.Value).Distinct().ToList();
-        var projectMap = projectIds.Count == 0
-            ? []
-            : await _context.Projects
-                .Where(p => projectIds.Contains(p.Id))
-                .ToDictionaryAsync(p => p.Id, p => p.Name, ct);
+        var projectMap = await _repository.GetProjectNamesAsync(
+            rows.Where(a => a.ProjectId.HasValue).Select(a => a.ProjectId!.Value).Distinct().ToList(), ct);
 
-        var teamIds = rows.Where(a => a.TeamId.HasValue).Select(a => a.TeamId!.Value).Distinct().ToList();
-        var teamMap = teamIds.Count == 0
-            ? []
-            : await _context.Teams
-                .Where(t => teamIds.Contains(t.Id))
-                .ToDictionaryAsync(t => t.Id, t => t.Name, ct);
+        var teamMap = await _repository.GetTeamNamesAsync(
+            rows.Where(a => a.TeamId.HasValue).Select(a => a.TeamId!.Value).Distinct().ToList(), ct);
 
         return rows.Select(a => new ActivityResponse(
             a.Id,

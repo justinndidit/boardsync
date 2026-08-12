@@ -63,6 +63,12 @@ public class BoardSyncDbContext : DbContext
             entity.HasIndex(w => w.ParentId);
             entity.HasIndex(w => w.IsActive);
 
+            // The shape every project-scoped read uses: one project, live rows only, often narrowed
+            // to a state. Postgres can bitmap-AND the three single-column indexes above instead, but
+            // that costs a heap probe per candidate row — this one answers the workspace summary's
+            // active-work-item count straight from the index.
+            entity.HasIndex(w => new { w.ProjectId, w.IsActive, w.State });
+
             entity.Property(w => w.Title).IsRequired().HasMaxLength(255);
             entity.Property(w => w.Description).HasMaxLength(10000);
             entity.Property(w => w.Type).HasConversion<string>().HasMaxLength(20);
@@ -116,6 +122,12 @@ public class BoardSyncDbContext : DbContext
             entity.HasKey(h => h.Id);
             entity.HasIndex(h => h.WorkItemId);
             entity.HasIndex(h => h.ChangedBy);
+
+            // Serves the workspace notification feed, which filters by a set of projects and sorts
+            // by recency. Descending on CreatedAt so the feed's ORDER BY reads straight out of the
+            // index instead of sorting the matched rows.
+            entity.HasIndex(h => new { h.ProjectId, h.CreatedAt })
+                .IsDescending(false, true);
 
             entity.Property(h => h.FieldName).IsRequired().HasMaxLength(100);
             entity.Property(h => h.OldValue).HasMaxLength(1000);
@@ -287,6 +299,9 @@ public class BoardSyncDbContext : DbContext
             entity.HasIndex(s => new { s.TeamId, s.Number }).IsUnique();
             entity.HasIndex(s => s.Status);
 
+            // "The active sprint for this team" runs on every board render.
+            entity.HasIndex(s => new { s.TeamId, s.Status });
+
             entity.Property(s => s.Goal).HasMaxLength(500);
             entity.Property(s => s.Status)
                 .HasMaxLength(20)
@@ -306,6 +321,9 @@ public class BoardSyncDbContext : DbContext
             entity.HasKey(sw => sw.Id);
             entity.HasIndex(sw => new { sw.SprintId, sw.WorkItemId }).IsUnique();
             entity.HasIndex(sw => sw.WorkItemId);
+
+            // Backlog and board reads want one sprint's entries already in display order.
+            entity.HasIndex(sw => new { sw.SprintId, sw.Position });
         });
 
         modelBuilder.Entity<Board>(entity =>

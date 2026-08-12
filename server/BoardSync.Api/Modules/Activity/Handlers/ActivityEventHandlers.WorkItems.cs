@@ -2,7 +2,6 @@ using BoardSync.Api.Modules.Activity.Models;
 using BoardSync.Api.Modules.Sprints.Events;
 using BoardSync.Api.Modules.WorkItems.Events;
 using BoardSync.Api.Shared.Kernel.Events;
-using Microsoft.EntityFrameworkCore;
 
 namespace BoardSync.Api.Modules.Activity.Handlers;
 
@@ -90,10 +89,7 @@ public partial class ActivityEventHandlers :
         var scope = await ProjectScopeAsync(e.ProjectId, ct);
         if (scope is null) return;
 
-        var body = await _context.WorkItemComments
-            .Where(c => c.Id == e.CommentId)
-            .Select(c => c.Body)
-            .FirstOrDefaultAsync(ct);
+        var body = await _repository.GetCommentBodyAsync(e.CommentId, ct);
 
         // The subject is the work item, not the comment — the feed reads "commented on X", and the
         // comment id travels in EntityId so the client can deep-link to it.
@@ -104,18 +100,15 @@ public partial class ActivityEventHandlers :
 
     public async Task HandleAsync(WorkItemLinked e, CancellationToken ct = default)
     {
-        var source = await _context.WorkItems
-            .Where(w => w.Id == e.SourceId)
-            .Select(w => new { w.Title, w.ProjectId })
-            .FirstOrDefaultAsync(ct);
+        var source = await _repository.GetWorkItemSubjectAsync(e.SourceId, ct);
         if (source is null) return;
 
-        var scope = await ProjectScopeAsync(source.ProjectId, ct);
+        var scope = await ProjectScopeAsync(source.Value.ProjectId, ct);
         if (scope is null) return;
 
         await RecordAsync(e, scope.Value.OrganizationId, ActivityEntityType.WorkItem, e.SourceId,
-            source.Title, ActivityVerb.Linked, e.LinkedByUserId, ct,
-            projectId: source.ProjectId, fieldName: e.LinkType.ToString(),
+            source.Value.Title, ActivityVerb.Linked, e.LinkedByUserId, ct,
+            projectId: source.Value.ProjectId, fieldName: e.LinkType.ToString(),
             newValue: await WorkItemTitleAsync(e.TargetId, ct));
     }
 
@@ -162,15 +155,10 @@ public partial class ActivityEventHandlers :
     /// </summary>
     private async Task<(Guid OrganizationId, string Name)?> ProjectScopeAsync(Guid projectId, CancellationToken ct)
     {
-        var row = await _context.Projects
-            .Where(p => p.Id == projectId)
-            .Select(p => new { p.OrganizationId, p.Name })
-            .FirstOrDefaultAsync(ct);
-
-        return row is null ? null : (row.OrganizationId, row.Name);
+        var scope = await _repository.GetProjectScopeAsync(projectId, ct);
+        return scope is null ? null : (scope.Value.OrganizationId, scope.Value.Name);
     }
 
-    private async Task<string> WorkItemTitleAsync(Guid workItemId, CancellationToken ct) =>
-        await _context.WorkItems.Where(w => w.Id == workItemId)
-            .Select(w => w.Title).FirstOrDefaultAsync(ct) ?? string.Empty;
+    private Task<string> WorkItemTitleAsync(Guid workItemId, CancellationToken ct) =>
+        _repository.GetWorkItemTitleAsync(workItemId, ct);
 }

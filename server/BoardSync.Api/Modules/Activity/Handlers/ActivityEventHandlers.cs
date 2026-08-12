@@ -1,9 +1,8 @@
-using BoardSync.Api.Data;
 using BoardSync.Api.Modules.Activity.Models;
+using BoardSync.Api.Modules.Activity.Repositories.Interfaces;
 using BoardSync.Api.Modules.Activity.Services;
 using BoardSync.Api.Modules.OrgProject.Domain.Events;
 using BoardSync.Api.Shared.Kernel.Events;
-using Microsoft.EntityFrameworkCore;
 using System.Diagnostics.CodeAnalysis;
 
 namespace BoardSync.Api.Modules.Activity.Handlers;
@@ -35,12 +34,12 @@ public partial class ActivityEventHandlers :
     IEventHandler<MemberRemovedFromTeam>
 {
     private readonly IActivityRecorder _recorder;
-    private readonly BoardSyncDbContext _context;
+    private readonly IActivityRepository _repository;
 
-    public ActivityEventHandlers(IActivityRecorder recorder, BoardSyncDbContext context)
+    public ActivityEventHandlers(IActivityRecorder recorder, IActivityRepository repository)
     {
         _recorder = recorder;
-        _context = context;
+        _repository = repository;
     }
 
     // ── Organization ─────────────────────────────────────────────────────────
@@ -159,15 +158,12 @@ public partial class ActivityEventHandlers :
     private static string? Truncate(string? value, int max) =>
         value is null || value.Length <= max ? value : value[..max];
 
-    private async Task<string> UserNameAsync(Guid userId, CancellationToken ct) =>
-        await _context.Users.Where(u => u.Id == userId)
-            .Select(u => u.DisplayName).FirstOrDefaultAsync(ct) ?? "Unknown";
+    private Task<string> UserNameAsync(Guid userId, CancellationToken ct) =>
+        _repository.GetUserNameAsync(userId, ct);
 
-    private async Task<string> OrgNameAsync(Guid orgId, CancellationToken ct) =>
-        await _context.Organizations.Where(o => o.Id == orgId)
-            .Select(o => o.Name).FirstOrDefaultAsync(ct) ?? string.Empty;
+    private Task<string> OrgNameAsync(Guid orgId, CancellationToken ct) =>
+        _repository.GetOrganizationNameAsync(orgId, ct);
 
-    private async Task<string> TeamNameAsync(Guid teamId, CancellationToken ct) =>
-        await _context.Teams.Where(t => t.Id == teamId)
-            .Select(t => t.Name).FirstOrDefaultAsync(ct) ?? string.Empty;
+    private Task<string> TeamNameAsync(Guid teamId, CancellationToken ct) =>
+        _repository.GetTeamNameAsync(teamId, ct);
 }

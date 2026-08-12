@@ -1,4 +1,6 @@
 using BoardSync.Api.Modules.Activity.Handlers;
+using BoardSync.Api.Modules.Activity.Repositories.Implementations;
+using BoardSync.Api.Modules.Activity.Repositories.Interfaces;
 using BoardSync.Api.Modules.Activity.Services;
 using BoardSync.Api.Shared.Kernel.Events;
 
@@ -11,6 +13,7 @@ public static class ActivityModuleExtensions
     /// </summary>
     public static IServiceCollection AddActivityModule(this IServiceCollection services)
     {
+        services.AddScoped<IActivityRepository, ActivityRepository>();
         services.AddScoped<IActivityRecorder, ActivityRecorder>();
         services.AddScoped<IActivityQueryService, ActivityQueryService>();
 

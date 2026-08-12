@@ -9,6 +9,19 @@ public class WorkItemHistory : BaseEntity
 {
     public Guid WorkItemId { get; set; }
 
+    /// <summary>
+    /// The owning project, copied from the work item at write time.
+    /// </summary>
+    /// <remarks>
+    /// Denormalized on purpose. The workspace notification feed asks for "the most recent changes
+    /// across these projects, newest first", and reaching the project through
+    /// <see cref="WorkItem"/> makes that a join whose sort no index can serve — it degrades with
+    /// total history volume forever. Carrying the project here lets one composite index answer the
+    /// filter and the ordering together. Work items never move between projects, so the copy cannot
+    /// drift from its source.
+    /// </remarks>
+    public Guid ProjectId { get; set; }
+
     /// <summary>User who made the change.</summary>
     public Guid ChangedBy { get; set; }
 

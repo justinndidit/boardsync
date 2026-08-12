@@ -95,7 +95,7 @@ public class WorkItemService : IWorkItemService
         }
 
         // Initial history entry
-        AddHistory(item.Id, createdBy, "State", null, WorkItemState.New.ToString());
+        AddHistory(item, createdBy, "State", null, WorkItemState.New.ToString());
 
         await _repository.SaveChangesAsync(ct);
 
@@ -215,7 +215,7 @@ public class WorkItemService : IWorkItemService
         ValidateStateTransition(item.State, newState);
 
         var oldState = item.State;
-        AddHistory(item.Id, updatedBy, "State", oldState.ToString(), newState.ToString());
+        AddHistory(item, updatedBy, "State", oldState.ToString(), newState.ToString());
 
         item.State = newState;
         item.UpdatedAt = DateTime.UtcNow;
@@ -426,15 +426,20 @@ public class WorkItemService : IWorkItemService
         string? newValue)
     {
         if (oldValue == newValue) return;
-        AddHistory(item.Id, changedBy, field, oldValue, newValue);
+        AddHistory(item, changedBy, field, oldValue, newValue);
         changes.Add((field, oldValue, newValue));
     }
 
-    private void AddHistory(Guid workItemId, Guid changedBy, string field, string? oldValue, string? newValue)
+    /// <summary>
+    /// Takes the work item rather than its id because the history row carries the project too —
+    /// see <see cref="WorkItemHistory.ProjectId"/> for why it is stored rather than joined.
+    /// </summary>
+    private void AddHistory(WorkItem item, Guid changedBy, string field, string? oldValue, string? newValue)
     {
         _repository.AddHistory(new WorkItemHistory
         {
-            WorkItemId = workItemId,
+            WorkItemId = item.Id,
+            ProjectId = item.ProjectId,
             ChangedBy = changedBy,
             FieldName = field,
             OldValue = oldValue,

@@ -1,4 +1,3 @@
-using BoardSync.Api.Data;
 using BoardSync.Api.Modules.Rbac.Models;
 using BoardSync.Api.Modules.Rbac.Services.Interfaces;
 using BoardSync.Api.Modules.Sprints.Domain.Helpers;
@@ -6,10 +5,8 @@ using BoardSync.Api.Modules.Sprints.DTOs;
 using BoardSync.Api.Modules.Sprints.Services;
 using BoardSync.Api.Shared.Auth;
 using BoardSync.Api.Shared.Auth.DTOs;
-using BoardSync.Api.Shared.Kernel.Exceptions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 
 namespace BoardSync.Api.Modules.Sprints.Controllers;
 
@@ -28,20 +25,17 @@ public class BoardsController : ControllerBase
     private readonly IBoardService _boardService;
     private readonly IRbacService _rbac;
     private readonly ICurrentUserContext _currentUser;
-    private readonly BoardSyncDbContext _context;
     private readonly IAuthHelpers _authHelpers;
 
     public BoardsController(
         IBoardService boardService,
         IRbacService rbac,
         ICurrentUserContext currentUser,
-        IAuthHelpers authHelpers,
-        BoardSyncDbContext context)
+        IAuthHelpers authHelpers)
     {
         _boardService = boardService;
         _rbac = rbac;
         _currentUser = currentUser;
-        _context = context;
         _authHelpers = authHelpers;
     }
 
@@ -159,17 +153,11 @@ public class BoardsController : ControllerBase
 
 
     /// <summary>
-    /// Resolves the projectId for a column (column → board → projectId) then checks the role.
-    /// Avoids an extra service call by querying the DB directly.
+    /// Resolves the project owning a column (column → board → project) then checks the role.
     /// </summary>
     private async Task RequireColumnProjectRoleAsync(Guid columnId, RoleType minimum, CancellationToken ct)
     {
-        var projectId = await _context.BoardColumns
-            .Where(c => c.Id == columnId)
-            .Select(c => (Guid?)c.Board.ProjectId)
-            .FirstOrDefaultAsync(ct)
-            ?? throw new NotFoundException("BoardColumn", columnId);
-
+        var projectId = await _boardService.GetProjectIdForColumnAsync(columnId, ct);
         await _authHelpers.RequireProjectRoleAsync(projectId, minimum, ct);
     }
 }
