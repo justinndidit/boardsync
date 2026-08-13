@@ -16,5 +16,15 @@ public interface ISprintService
     Task<SprintWorkItemResponse> AddWorkItemAsync(Guid sprintId, AddSprintWorkItemRequest request, Guid addedBy, CancellationToken ct = default);
     Task RemoveWorkItemAsync(Guid sprintId, Guid workItemId, Guid removedBy, CancellationToken ct = default);
     Task<PagedResult<SprintWorkItemResponse>> GetWorkItemsAsync(Guid sprintId, PaginationQuery pagination, CancellationToken ct = default);
+    /// <summary>
+    /// Moves a single backlog item between two neighbours. One row is written.
+    /// </summary>
+    /// <returns>The item's new rank, so the caller can confirm where it landed.</returns>
+    Task<decimal> MoveWorkItemAsync(
+        Guid sprintId,
+        Guid workItemId,
+        MoveSprintWorkItemRequest request,
+        CancellationToken ct = default);
+
     Task ReorderWorkItemsAsync(Guid sprintId, ReorderSprintWorkItemsRequest request, CancellationToken ct = default);
 }

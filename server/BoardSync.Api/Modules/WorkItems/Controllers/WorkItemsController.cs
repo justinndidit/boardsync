@@ -107,7 +107,8 @@ public class WorkItemsController : ControllerBase
     {
         var item = await _workItemService.GetByIdAsync(workItemId, ct);
         await RequireProjectRoleAsync(item.ProjectId, RoleType.TeamMember, ct);
-        var updated = await _workItemService.UpdateStateAsync(workItemId, request.State, _currentUser.UserId, ct);
+        var updated = await _workItemService.UpdateStateAsync(
+            workItemId, request.State, _currentUser.UserId, request.ExpectedVersion, ct);
         return Ok(new ApiResponse<WorkItemResponse>(true, "Work item state updated.", updated));
     }
 

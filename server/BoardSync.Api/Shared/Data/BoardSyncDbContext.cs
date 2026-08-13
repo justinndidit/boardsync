@@ -73,6 +73,10 @@ public class BoardSyncDbContext : DbContext
             // active-work-item count straight from the index.
             entity.HasIndex(w => new { w.ProjectId, w.IsActive, w.State });
 
+            // Postgres maintains xmin itself; mapping it costs no column and no migration, and
+            // gives every work item a version EF can check on update.
+            entity.Property(w => w.Version).IsRowVersion().HasColumnName("xmin").HasColumnType("xid");
+
             entity.Property(w => w.Title).IsRequired().HasMaxLength(255);
             entity.Property(w => w.Description).HasMaxLength(10000);
             entity.Property(w => w.Type).HasConversion<string>().HasMaxLength(20);
@@ -326,8 +330,11 @@ public class BoardSyncDbContext : DbContext
             entity.HasIndex(sw => new { sw.SprintId, sw.WorkItemId }).IsUnique();
             entity.HasIndex(sw => sw.WorkItemId);
 
-            // Backlog and board reads want one sprint's entries already in display order.
+            // Backlog and board reads want one sprint's entries already in display order. Rank is
+            // the sort key now; the Position index stays for the legacy column while anything still
+            // reads it.
             entity.HasIndex(sw => new { sw.SprintId, sw.Position });
+            entity.HasIndex(sw => new { sw.SprintId, sw.Rank });
         });
 
         modelBuilder.Entity<Board>(entity =>
@@ -509,6 +516,12 @@ public class BoardSyncDbContext : DbContext
 
             entity.Property(m => m.EventType).IsRequired().HasMaxLength(200);
             entity.Property(m => m.Payload).IsRequired().HasColumnType("jsonb");
+
+            // GIN so "which messages touched this topic?" is an index lookup on array containment.
+            // A btree cannot answer that — it would degrade into a scan as the table grows, which
+            // is exactly the query a reconnecting client makes.
+            entity.Property(m => m.Topics).HasColumnType("text[]");
+            entity.HasIndex(m => m.Topics).HasMethod("gin");
             entity.Property(m => m.LastError).HasMaxLength(2000);
         });
 

@@ -3,6 +3,7 @@ using BoardSync.Api.Modules.WorkItems.DTOs;
 using BoardSync.Api.Modules.WorkItems.Events;
 using BoardSync.Api.Modules.WorkItems.Models;
 using BoardSync.Api.Modules.WorkItems.Repository;
+using Microsoft.EntityFrameworkCore;
 using BoardSync.Api.Shared.Auth.Services;
 using BoardSync.Api.Shared.Auth.Services.Implementations;
 using BoardSync.Api.Shared.Kernel;
@@ -162,6 +163,8 @@ public class WorkItemService : IWorkItemService
         TrackChange(changes, item, updatedBy, "StoryPoints", item.StoryPoints?.ToString(), request.StoryPoints?.ToString());
         TrackChange(changes, item, updatedBy, "TeamId", item.TeamId?.ToString(), request.TeamId?.ToString());
 
+        ApplyExpectedVersion(item, request.ExpectedVersion);
+
         var previousAssignee = item.AssigneeId;
 
         item.Title = request.Title.Trim();
@@ -195,7 +198,7 @@ public class WorkItemService : IWorkItemService
                 new WorkItemAssigned(item.Id, item.ProjectId, previousAssignee, request.AssigneeId, updatedBy));
         }
 
-        await _repository.SaveChangesAsync(ct);
+        await SaveDetectingConflictAsync(workItemId, ct);
 
         return await MapToResponseAsync(workItemId, ct);
     }
@@ -204,6 +207,7 @@ public class WorkItemService : IWorkItemService
         Guid workItemId,
         WorkItemState newState,
         Guid updatedBy,
+        long? expectedVersion = null,
         CancellationToken ct = default)
     {
         var item = await GetWorkItemOrThrowAsync(workItemId, ct);
@@ -212,6 +216,8 @@ public class WorkItemService : IWorkItemService
             throw new BusinessRuleException($"Work item is already in state '{newState}'.");
 
         ValidateStateTransition(item.State, newState);
+
+        ApplyExpectedVersion(item, expectedVersion);
 
         var oldState = item.State;
         AddHistory(item, updatedBy, "State", oldState.ToString(), newState.ToString());
@@ -222,7 +228,7 @@ public class WorkItemService : IWorkItemService
         _eventBus.Enqueue(
             new WorkItemStateChanged(item.Id, item.ProjectId, oldState, newState, updatedBy));
 
-        await _repository.SaveChangesAsync(ct);
+        await SaveDetectingConflictAsync(workItemId, ct);
 
         return await MapToResponseAsync(workItemId, ct);
     }
@@ -516,8 +522,44 @@ public class WorkItemService : IWorkItemService
             childCount,
             item.CreatedAt,
             item.UpdatedAt,
-            item.CreatedBy
+            item.CreatedBy,
+            item.Version
         );
+    }
+
+    /// <summary>
+    /// Tells EF to check the update against the version the <em>client</em> read, not the one this
+    /// request just loaded.
+    /// </summary>
+    /// <remarks>
+    /// Without this, EF compares against the value it fetched moments ago and the check passes
+    /// almost always — the interesting conflict is not load-to-save inside one request, it is the
+    /// edit that landed between the user opening the form and submitting it.
+    /// </remarks>
+    private void ApplyExpectedVersion(WorkItem item, long? expectedVersion)
+    {
+        if (expectedVersion is null) return;
+
+        _repository.SetOriginalVersion(item, (uint)expectedVersion.Value);
+    }
+
+    /// <summary>
+    /// Saves, turning a lost update into a conflict the caller can act on.
+    /// </summary>
+    private async Task SaveDetectingConflictAsync(Guid workItemId, CancellationToken ct)
+    {
+        try
+        {
+            await _repository.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // Someone else wrote this row after the caller read it. Refusing is the point: the
+            // alternative is silently discarding their edit, which is what this replaces.
+            throw new ConflictException(
+                "This work item was changed by someone else while you were editing it. " +
+                "Reload it and reapply your changes.");
+        }
     }
 
     private static WorkItemCommentResponse MapCommentToResponse(WorkItemComment c) =>

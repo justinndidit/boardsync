@@ -1,3 +1,4 @@
+using BoardSync.Api.Data;
 using BoardSync.Api.Modules.Rbac.Models;
 using BoardSync.Api.Modules.Rbac.Services.Interfaces;
 using Microsoft.Extensions.Caching.Hybrid;
@@ -33,6 +34,7 @@ public sealed class CachingRbacService : IRbacService
     private readonly IRbacService _inner;
     private readonly HybridCache _cache;
     private readonly IConnectionMultiplexer _redis;
+    private readonly ITransactionState _transaction;
     private readonly ILogger<CachingRbacService> _logger;
 
     /// <summary>
@@ -51,11 +53,13 @@ public sealed class CachingRbacService : IRbacService
         IRbacService inner,
         HybridCache cache,
         IConnectionMultiplexer redis,
+        ITransactionState transaction,
         ILogger<CachingRbacService> logger)
     {
         _inner = inner;
         _cache = cache;
         _redis = redis;
+        _transaction = transaction;
         _logger = logger;
     }
 
@@ -66,6 +70,14 @@ public sealed class CachingRbacService : IRbacService
         Guid scopeId,
         CancellationToken ct = default)
     {
+        // Never cache inside an explicit transaction. HybridCache invokes its factory outside the
+        // ambient execution-strategy scope, and EF refuses to start a retriable operation while a
+        // user transaction is open — so a cache miss in that position throws rather than querying.
+        // Bypassing is also the right call on its own merits: code inside a transaction is
+        // mid-write, and it wants the current answer rather than a cached one.
+        if (_transaction.InTransaction)
+            return await _inner.HasRoleAsync(userId, minimumRole, scope, scopeId, ct);
+
         long version;
 
         try

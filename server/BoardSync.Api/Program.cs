@@ -75,6 +75,9 @@ builder.AddBoardSyncTelemetry();
 // HybridCache: in-process L1, Redis L2 when configured.
 builder.AddBoardSyncCaching();
 
+// SignalR hub + Redis backplane.
+builder.AddBoardSyncRealtime();
+
 // One multiplexer per process — it is designed to be shared and is expensive to create per use.
 // Registered only when configured, so the rate limiter can detect its absence and fall back.
 var redisConnectionString = builder.Configuration.GetConnectionString("Redis");
@@ -148,6 +151,7 @@ builder.Services.AddHostedService<OutboxDispatcher>();
 // Three layers, outermost first: per-request memoization, then the shared L1/L2 cache, then the
 // database. A repeated question inside one request costs nothing; a repeated question across
 // requests costs a cache read; only a genuine miss reaches Postgres.
+builder.Services.AddScoped<ITransactionState, TransactionState>();
 builder.Services.AddScoped<IRoleAssignmentRepository, RoleAssignmentRepository>();
 builder.Services.AddScoped<RbacService>();
 // The distributed layer only goes in when Redis is there to hold the version stamps that make
@@ -162,6 +166,7 @@ builder.Services.AddScoped<IRbacService>(sp =>
             sp.GetRequiredService<RbacService>(),
             sp.GetRequiredService<HybridCache>(),
             redis,
+            sp.GetRequiredService<ITransactionState>(),
             sp.GetRequiredService<ILogger<CachingRbacService>>());
 
     return new MemoizingRbacService(inner);
@@ -280,6 +285,10 @@ builder.Services.AddAuthentication(options =>
         ValidateLifetime = jwtSettings.ValidateLifetime,
         ClockSkew = TimeSpan.Zero
     };
+
+    // WebSocket handshakes cannot carry an Authorization header, so the hub reads its token from
+    // the query string. Scoped to the hub path only — see RealtimeExtensions.
+    RealtimeExtensions.ReadTokenFromQueryStringForHub(options);
 });
 
 builder.Services.AddAuthorization(options =>
@@ -467,6 +476,8 @@ app.UseAuthorization();
 app.MapHealthChecks("/healthz").AllowAnonymous();
 
 app.MapControllers();
+
+app.MapBoardSyncRealtime();
 
 app.Run();
 

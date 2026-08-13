@@ -201,7 +201,42 @@ public class SprintsController : ControllerBase
         return NoContent();
     }
 
-    /// <summary>Reorder work items within the sprint backlog. Requires TeamMember.</summary>
+    /// <summary>
+    /// Move one backlog item between two neighbours. Requires TeamMember.
+    /// </summary>
+    /// <remarks>
+    /// The drag-and-drop endpoint. Names only the card that moved and where it landed, so two
+    /// people rearranging different cards write different rows and cannot revert each other —
+    /// unlike the whole-list reorder below, which submits an entire ordering.
+    /// Omit <c>afterWorkItemId</c> to move to the top, or <c>beforeWorkItemId</c> to move to the end.
+    /// </remarks>
+    [HttpPatch("api/sprints/{sprintId:guid}/workitems/{workItemId:guid}/move")]
+    [ProducesResponseType(typeof(ApiResponse<MoveSprintWorkItemResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> MoveWorkItem(
+        Guid sprintId,
+        Guid workItemId,
+        [FromBody] MoveSprintWorkItemRequest request,
+        CancellationToken ct)
+    {
+        var sprint = await _sprintService.GetByIdAsync(sprintId, ct);
+        await RequireTeamRoleAsync(sprint.TeamId, RoleType.TeamMember, ct);
+
+        var rank = await _sprintService.MoveWorkItemAsync(sprintId, workItemId, request, ct);
+
+        return Ok(new ApiResponse<MoveSprintWorkItemResponse>(
+            true, "Work item moved.", new MoveSprintWorkItemResponse(workItemId, rank)));
+    }
+
+    /// <summary>
+    /// Reorder the whole sprint backlog. Requires TeamMember.
+    /// </summary>
+    /// <remarks>
+    /// Last-writer-wins across every item: it submits an ordering computed before any concurrent
+    /// move existed, so a second caller silently reverts the first. Fine for a single editor;
+    /// prefer the move endpoint above wherever more than one person can drag at once.
+    /// </remarks>
     [HttpPatch("api/sprints/{sprintId:guid}/workitems/reorder")]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]

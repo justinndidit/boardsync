@@ -47,6 +47,29 @@ public class AddSprintWorkItemRequest
 }
 
 /// <summary>Reorder work items within a sprint backlog.</summary>
+/// <summary>
+/// Moves one backlog item to sit between two others.
+/// </summary>
+/// <remarks>
+/// Prefer this over <see cref="ReorderSprintWorkItemsRequest"/> for drag-and-drop. It names only
+/// the card that moved and where it landed, so two people dragging different cards touch different
+/// rows and cannot overwrite each other. Sending a whole ordering — which is what the older
+/// endpoint takes — means submitting a view of the list computed before the other person's move
+/// existed, and silently reverting it.
+/// </remarks>
+public class MoveSprintWorkItemRequest
+{
+    /// <summary>
+    /// The item the moved card should sit *after*, or null when it moves to the top.
+    /// </summary>
+    public Guid? AfterWorkItemId { get; init; }
+
+    /// <summary>
+    /// The item the moved card should sit *before*, or null when it moves to the end.
+    /// </summary>
+    public Guid? BeforeWorkItemId { get; init; }
+}
+
 public class ReorderSprintWorkItemsRequest
 {
     /// <summary>Ordered list of WorkItem IDs representing the desired backlog order.</summary>

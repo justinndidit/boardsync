@@ -1,6 +1,6 @@
 # Scaling, Caching, and Real-Time Design
 
-Status: Phases 0–1 shipped, Phases 2–3 proposed · Scope: `server/BoardSync.Api` ·
+Status: Phases 0–2 shipped, Phase 3 proposed · Scope: `server/BoardSync.Api` ·
 Companion to `docs/activity-feed-frontend.md`
 
 ---
@@ -560,17 +560,39 @@ board rendering 6 cards with tags, cursor and offset paging still agreeing.
 > of the write and the event being atomic, and it is the same delivery path the real-time work in
 > Phase 2 builds on.
 
-### Phase 2 — Real-time
+### Phase 2 — Real-time ✅ **shipped**
 
-- SignalR hub + Redis backplane
-- Topic model and subscribe-time authorization
-- Dispatcher fans out to hub groups
-- Client resume protocol (`lastSequence` → bounded outbox replay → `resync`)
-- Fractional ranks for reorder; `xmin` concurrency token on `WorkItem`
-- Board snapshot caching with version-stamped keys
-- Presence, if wanted
+- [x] SignalR hub + Redis backplane, at `/hubs/workspace`
+- [x] Topic model and subscribe-time authorization
+- [x] Dispatcher fans out to hub groups
+- [x] Client resume protocol (`lastSequence` → bounded outbox replay → `resync`)
+- [x] Fractional ranks for reorder, with a single-row move endpoint
+- [x] `xmin` concurrency token on `WorkItem`, surfaced as an opaque `version` with an optional
+      `expectedVersion` on writes and a `409` on conflict
+- [x] Board snapshot caching with version-stamped keys, bumped by the dispatcher
+- [x] Presence, as a Redis sorted set scored by heartbeat so stale entries age out
 
-*Outcome: live boards, live activity feed, live notifications — correct under concurrent editing.*
+**Verified with a real WebSocket client** — 18 checks, all passing:
+
+| Area | Proven |
+| --- | --- |
+| Authorization | Refuses a project with no role, an org it is not in, another user's topic, and a malformed topic; allows its own. Denial reason is identical for "forbidden" and "missing". |
+| Live delivery | A REST write reached a subscriber with no polling, carrying sequence, topic, and a usable delta (`title="Live card"`) rather than an invalidation. |
+| Resume | Nothing arrives while unsubscribed; resubscribing with `lastSequence` replayed exactly what was missed, all sequences newer than the resume point, `resync: false`. |
+| Concurrent reorder | Two simultaneous moves of *different* cards both survived — the case the whole-list reorder silently broke. |
+
+**One deviation:** there is no `board:` topic. A board is one-to-one with its project, so it would
+always have identical subscribers to `project:` and only add a second thing to keep in sync. Board
+changes ride the project topic.
+
+**A bug this work surfaced:** caching RBAC decisions broke every membership endpoint. `HybridCache`
+invokes its factory outside the ambient execution-strategy scope, and EF refuses to start a
+retriable operation while a user transaction is open — so any permission check *inside* a
+transaction threw a 400. It went unnoticed through Phase 1 because no test had added a member to an
+organization. The caching decorator now bypasses the cache inside a transaction, which is also the
+right call on its own: code mid-write wants the current answer, not a cached one.
+
+*Outcome: live boards, live activity feed, live notifications — correct under concurrent reordering.*
 
 ### Phase 3 — Scale out
 

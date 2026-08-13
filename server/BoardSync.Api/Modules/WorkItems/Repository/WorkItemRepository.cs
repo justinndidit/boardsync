@@ -193,5 +193,8 @@ public class WorkItemRepository : IWorkItemRepository
 
     // ── Unit of work ──────────────────────────────────────────────────────────
 
+    public void SetOriginalVersion(WorkItem item, uint version) =>
+        _context.Entry(item).Property(w => w.Version).OriginalValue = version;
+
     public Task SaveChangesAsync(CancellationToken ct = default) => _context.SaveChangesAsync(ct);
 }
