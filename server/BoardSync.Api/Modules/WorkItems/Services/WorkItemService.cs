@@ -3,6 +3,7 @@ using BoardSync.Api.Modules.WorkItems.DTOs;
 using BoardSync.Api.Modules.WorkItems.Events;
 using BoardSync.Api.Modules.WorkItems.Models;
 using BoardSync.Api.Modules.WorkItems.Repository;
+using Microsoft.EntityFrameworkCore;
 using BoardSync.Api.Shared.Auth.Services;
 using BoardSync.Api.Shared.Auth.Services.Implementations;
 using BoardSync.Api.Shared.Kernel;
@@ -95,12 +96,11 @@ public class WorkItemService : IWorkItemService
         }
 
         // Initial history entry
-        AddHistory(item.Id, createdBy, "State", null, WorkItemState.New.ToString());
+        AddHistory(item, createdBy, "State", null, WorkItemState.New.ToString());
+
+        _eventBus.Enqueue(new WorkItemCreated(item.Id, projectId, item.Type, item.Title, createdBy));
 
         await _repository.SaveChangesAsync(ct);
-
-        await _eventBus.PublishAsync(
-            new WorkItemCreated(item.Id, projectId, item.Type, item.Title, createdBy), ct);
 
         _logger.LogInformation("WorkItem '{Title}' ({Id}) created in project {ProjectId} by {UserId}",
             item.Title, item.Id, projectId, createdBy);
@@ -163,6 +163,8 @@ public class WorkItemService : IWorkItemService
         TrackChange(changes, item, updatedBy, "StoryPoints", item.StoryPoints?.ToString(), request.StoryPoints?.ToString());
         TrackChange(changes, item, updatedBy, "TeamId", item.TeamId?.ToString(), request.TeamId?.ToString());
 
+        ApplyExpectedVersion(item, request.ExpectedVersion);
+
         var previousAssignee = item.AssigneeId;
 
         item.Title = request.Title.Trim();
@@ -183,20 +185,20 @@ public class WorkItemService : IWorkItemService
         foreach (var added in newTagNames.Where(n => existingTags.All(t => t.Name != n)))
             _repository.AddTag(new WorkItemTag { WorkItemId = item.Id, Name = added, CreatedBy = updatedBy });
 
-        await _repository.SaveChangesAsync(ct);
-
         // Assignment gets its own event, so it is not also reported as a generic field change.
         foreach (var (field, oldValue, newValue) in changes.Where(c => c.Field != "AssigneeId"))
         {
-            await _eventBus.PublishAsync(
-                new WorkItemUpdated(item.Id, item.ProjectId, field, oldValue, newValue, updatedBy), ct);
+            _eventBus.Enqueue(
+                new WorkItemUpdated(item.Id, item.ProjectId, field, oldValue, newValue, updatedBy));
         }
 
         if (previousAssignee != request.AssigneeId)
         {
-            await _eventBus.PublishAsync(
-                new WorkItemAssigned(item.Id, item.ProjectId, previousAssignee, request.AssigneeId, updatedBy), ct);
+            _eventBus.Enqueue(
+                new WorkItemAssigned(item.Id, item.ProjectId, previousAssignee, request.AssigneeId, updatedBy));
         }
+
+        await SaveDetectingConflictAsync(workItemId, ct);
 
         return await MapToResponseAsync(workItemId, ct);
     }
@@ -205,6 +207,7 @@ public class WorkItemService : IWorkItemService
         Guid workItemId,
         WorkItemState newState,
         Guid updatedBy,
+        long? expectedVersion = null,
         CancellationToken ct = default)
     {
         var item = await GetWorkItemOrThrowAsync(workItemId, ct);
@@ -214,16 +217,18 @@ public class WorkItemService : IWorkItemService
 
         ValidateStateTransition(item.State, newState);
 
+        ApplyExpectedVersion(item, expectedVersion);
+
         var oldState = item.State;
-        AddHistory(item.Id, updatedBy, "State", oldState.ToString(), newState.ToString());
+        AddHistory(item, updatedBy, "State", oldState.ToString(), newState.ToString());
 
         item.State = newState;
         item.UpdatedAt = DateTime.UtcNow;
 
-        await _repository.SaveChangesAsync(ct);
+        _eventBus.Enqueue(
+            new WorkItemStateChanged(item.Id, item.ProjectId, oldState, newState, updatedBy));
 
-        await _eventBus.PublishAsync(
-            new WorkItemStateChanged(item.Id, item.ProjectId, oldState, newState, updatedBy), ct);
+        await SaveDetectingConflictAsync(workItemId, ct);
 
         return await MapToResponseAsync(workItemId, ct);
     }
@@ -236,9 +241,9 @@ public class WorkItemService : IWorkItemService
         item.IsActive = false;
         item.UpdatedAt = DateTime.UtcNow;
 
-        await _repository.SaveChangesAsync(ct);
+        _eventBus.Enqueue(new WorkItemDeleted(item.Id, item.ProjectId, deletedBy));
 
-        await _eventBus.PublishAsync(new WorkItemDeleted(item.Id, item.ProjectId, deletedBy), ct);
+        await _repository.SaveChangesAsync(ct);
 
         _logger.LogInformation("WorkItem {Id} soft-deleted by {UserId}", workItemId, deletedBy);
     }
@@ -263,10 +268,9 @@ public class WorkItemService : IWorkItemService
 
         _repository.AddComment(comment);
         item.UpdatedAt = DateTime.UtcNow;
-        await _repository.SaveChangesAsync(ct);
+        _eventBus.Enqueue(new WorkItemCommentAdded(comment.Id, workItemId, item.ProjectId, authorId));
 
-        await _eventBus.PublishAsync(
-            new WorkItemCommentAdded(comment.Id, workItemId, item.ProjectId, authorId), ct);
+        await _repository.SaveChangesAsync(ct);
 
         return MapCommentToResponse(comment);
     }
@@ -364,10 +368,9 @@ public class WorkItemService : IWorkItemService
         };
 
         _repository.AddLink(link);
-        await _repository.SaveChangesAsync(ct);
+        _eventBus.Enqueue(new WorkItemLinked(workItemId, request.TargetId, request.LinkType, createdBy));
 
-        await _eventBus.PublishAsync(
-            new WorkItemLinked(workItemId, request.TargetId, request.LinkType, createdBy), ct);
+        await _repository.SaveChangesAsync(ct);
 
         return new WorkItemLinkResponse(
             link.Id, link.SourceId, link.TargetId, link.LinkType,
@@ -426,15 +429,20 @@ public class WorkItemService : IWorkItemService
         string? newValue)
     {
         if (oldValue == newValue) return;
-        AddHistory(item.Id, changedBy, field, oldValue, newValue);
+        AddHistory(item, changedBy, field, oldValue, newValue);
         changes.Add((field, oldValue, newValue));
     }
 
-    private void AddHistory(Guid workItemId, Guid changedBy, string field, string? oldValue, string? newValue)
+    /// <summary>
+    /// Takes the work item rather than its id because the history row carries the project too —
+    /// see <see cref="WorkItemHistory.ProjectId"/> for why it is stored rather than joined.
+    /// </summary>
+    private void AddHistory(WorkItem item, Guid changedBy, string field, string? oldValue, string? newValue)
     {
         _repository.AddHistory(new WorkItemHistory
         {
-            WorkItemId = workItemId,
+            WorkItemId = item.Id,
+            ProjectId = item.ProjectId,
             ChangedBy = changedBy,
             FieldName = field,
             OldValue = oldValue,
@@ -514,8 +522,44 @@ public class WorkItemService : IWorkItemService
             childCount,
             item.CreatedAt,
             item.UpdatedAt,
-            item.CreatedBy
+            item.CreatedBy,
+            item.Version
         );
+    }
+
+    /// <summary>
+    /// Tells EF to check the update against the version the <em>client</em> read, not the one this
+    /// request just loaded.
+    /// </summary>
+    /// <remarks>
+    /// Without this, EF compares against the value it fetched moments ago and the check passes
+    /// almost always — the interesting conflict is not load-to-save inside one request, it is the
+    /// edit that landed between the user opening the form and submitting it.
+    /// </remarks>
+    private void ApplyExpectedVersion(WorkItem item, long? expectedVersion)
+    {
+        if (expectedVersion is null) return;
+
+        _repository.SetOriginalVersion(item, (uint)expectedVersion.Value);
+    }
+
+    /// <summary>
+    /// Saves, turning a lost update into a conflict the caller can act on.
+    /// </summary>
+    private async Task SaveDetectingConflictAsync(Guid workItemId, CancellationToken ct)
+    {
+        try
+        {
+            await _repository.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // Someone else wrote this row after the caller read it. Refusing is the point: the
+            // alternative is silently discarding their edit, which is what this replaces.
+            throw new ConflictException(
+                "This work item was changed by someone else while you were editing it. " +
+                "Reload it and reapply your changes.");
+        }
     }
 
     private static WorkItemCommentResponse MapCommentToResponse(WorkItemComment c) =>

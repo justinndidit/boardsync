@@ -12,4 +12,15 @@ public interface IBoardService
     Task<BoardColumnDetailResponse> UpdateColumnAsync(Guid columnId, UpdateBoardColumnRequest request, Guid updatedBy, CancellationToken ct = default);
     Task DeleteColumnAsync(Guid columnId, Guid deletedBy, CancellationToken ct = default);
     Task ReorderColumnsAsync(Guid boardId, ReorderBoardColumnsRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// Project owning a column, resolved column → board → project.
+    /// </summary>
+    /// <remarks>
+    /// Columns are addressed by their own IDs, so authorization has to resolve the owning project
+    /// before it can decide anything. Exposed here so the controller can ask the module rather than
+    /// reaching into the database itself.
+    /// </remarks>
+    /// <exception cref="Shared.Kernel.Exceptions.NotFoundException">No such column.</exception>
+    Task<Guid> GetProjectIdForColumnAsync(Guid columnId, CancellationToken ct = default);
 }

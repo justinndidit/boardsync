@@ -52,6 +52,13 @@ public record SprintWorkItemResponse(
     int Position
 );
 
+/// <summary>Where a moved backlog item landed.</summary>
+/// <param name="WorkItemId">The item that moved.</param>
+/// <param name="Rank">
+/// Its new sort key. Ordering is by this ascending; treat the value as opaque and only compare it.
+/// </param>
+public record MoveSprintWorkItemResponse(Guid WorkItemId, decimal Rank);
+
 /// <summary>Summary returned after closing a sprint.</summary>
 public record CloseSprintResponse(
     SprintResponse Sprint,

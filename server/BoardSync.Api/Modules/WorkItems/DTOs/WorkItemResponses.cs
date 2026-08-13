@@ -2,6 +2,11 @@ using BoardSync.Api.Modules.WorkItems.Models;
 
 namespace BoardSync.Api.Modules.WorkItems.DTOs;
 
+/// <remarks>
+/// <c>Version</c> is an opaque row version. Send it back as <c>expectedVersion</c> when updating to
+/// be told about a conflict instead of silently overwriting whoever edited in between. Compare only
+/// — never compute with it or assume it increments by one.
+/// </remarks>
 public record WorkItemResponse(
     Guid Id,
     Guid ProjectId,
@@ -19,7 +24,8 @@ public record WorkItemResponse(
     int ChildCount,
     DateTime CreatedAt,
     DateTime UpdatedAt,
-    Guid? CreatedBy
+    Guid? CreatedBy,
+    long Version = 0
 );
 
 public record WorkItemSummaryResponse(

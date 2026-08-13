@@ -180,7 +180,7 @@
         </member>
         <member name="T:BoardSync.Api.Controllers.UsersController">
             <summary>
-            User lookup endpoints — used primarily when inviting members to orgs/teams.
+            Public user lookups — the profile fields other people in a workspace are allowed to see.
             </summary>
         </member>
         <member name="M:BoardSync.Api.Controllers.UsersController.GetById(System.Guid,System.Threading.CancellationToken)">
@@ -194,6 +194,119 @@
         </member>
         <member name="M:BoardSync.Api.Controllers.UsersController.GetMe(System.Threading.CancellationToken)">
             <summary>Get the currently authenticated user's own profile.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Extensions.CachingExtensions.AddBoardSyncCaching(Microsoft.AspNetCore.Builder.WebApplicationBuilder)">
+            <summary>
+            Registers <c>HybridCache</c> — in-process L1 always, Redis L2 when a connection string is
+            configured.
+            </summary>
+            <remarks>
+            <para>
+            Without Redis this still works: L1 alone is correct for a single instance, just not shared.
+            That is deliberate so a developer can run the API with nothing but Postgres. It is also why
+            nothing cached here may be authoritative — with several instances and no L2, each holds its
+            own copy and they expire independently.
+            </para>
+            <para>
+            The default entry lifetime is deliberately short. Everything cached is derived data whose
+            source of truth is Postgres, and a stale permission is a security problem rather than a
+            performance one, so entries are also invalidated explicitly on write — see
+            <c>CachingRbacService</c>.
+            </para>
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Extensions.CachingExtensions.LogCacheStatus(Microsoft.AspNetCore.Builder.WebApplication)">
+            <summary>
+            Logs whether the distributed tier is live, so "the cache is not shared across instances" is
+            visible at startup rather than inferred from odd behaviour later.
+            </summary>
+        </member>
+        <member name="F:BoardSync.Api.Extensions.DatabaseExtensions.MigrationLockKey">
+            <summary>
+            Arbitrary but fixed key identifying the migration lock. Any value works as long as every
+            instance uses the same one and nothing else in the database picks it too.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Extensions.DatabaseExtensions.MigrateDatabaseAsync(Microsoft.AspNetCore.Builder.WebApplication)">
+            <summary>
+            Applies pending migrations at startup, if this instance is configured to do so.
+            </summary>
+            <remarks>
+            <para>
+            Off by default in Production. Schema changes there belong in the release pipeline as their
+            own step, where a failure stops the rollout instead of surfacing as replicas that crash-loop
+            or, worse, come up healthy against a half-migrated schema. Set <c>Database:AutoMigrate</c>
+            to opt back in — the local production-like compose stack does exactly that, because it has
+            no separate migration step to run.
+            </para>
+            <para>
+            When it does run, it runs under a Postgres advisory lock. Instances start together during a
+            rolling deploy, and EF takes no cross-process lock of its own: without this, two of them read
+            the same empty migration history and both try to create the same tables. The lock is
+            session-scoped, so an instance that dies mid-migration releases it by disconnecting rather
+            than wedging every other replica.
+            </para>
+            </remarks>
+        </member>
+        <member name="F:BoardSync.Api.Extensions.RealtimeExtensions.HubPath">
+            <summary>Where clients connect.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Extensions.RealtimeExtensions.AddBoardSyncRealtime(Microsoft.AspNetCore.Builder.WebApplicationBuilder)">
+            <summary>
+            Registers the real-time hub and its Redis backplane.
+            </summary>
+            <remarks>
+            The backplane is what makes this work with more than one instance: a client connected to
+            instance A must receive a change written on instance B, and without it each instance can only
+            reach its own connections. It is registered only when Redis is configured — single-instance
+            development works without it, and the startup log says which mode is in effect.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Extensions.RealtimeExtensions.MapBoardSyncRealtime(Microsoft.AspNetCore.Builder.WebApplication)">
+            <summary>
+            Maps the hub, unless real-time is switched off.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Extensions.RealtimeExtensions.ReadTokenFromQueryStringForHub(Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerOptions)">
+            <summary>
+            Lets the hub read its bearer token from the query string.
+            </summary>
+            <remarks>
+            Browsers cannot set headers on a WebSocket handshake, so SignalR sends the token as
+            <c>?access_token=</c> instead. This is scoped to the hub path only — accepting query-string
+            tokens on ordinary endpoints would put credentials into every access log and referrer header
+            that touches a URL.
+            </remarks>
+        </member>
+        <member name="F:BoardSync.Api.Extensions.TelemetryExtensions.NpgsqlSourceName">
+            <summary>
+            Npgsql publishes its own spans and metrics under this name — database command durations and,
+            importantly, the connection pool counters. Pool saturation is the number that tells you
+            whether the per-instance pool size is right before it turns into request timeouts.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Extensions.TelemetryExtensions.AddBoardSyncTelemetry(Microsoft.AspNetCore.Builder.WebApplicationBuilder)">
+            <summary>
+            Wires up OpenTelemetry traces and metrics, but only when somewhere to send them is configured.
+            </summary>
+            <remarks>
+            <para>
+            Gated deliberately. Registering the SDK makes it a listener on every instrumented
+            <c>ActivitySource</c>, so spans get built and sampled whether or not anything consumes them;
+            with no exporter that is pure overhead plus a log full of failed connection attempts to a
+            collector that isn't there. Unconfigured, this costs nothing and says so once at startup.
+            </para>
+            <para>
+            Set <c>Telemetry:OtlpEndpoint</c>, or the standard <c>OTEL_EXPORTER_OTLP_ENDPOINT</c>
+            environment variable, to turn it on.
+            </para>
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Extensions.TelemetryExtensions.LogTelemetryStatus(Microsoft.AspNetCore.Builder.WebApplication)">
+            <summary>
+            Logs whether telemetry is live, so an operator can tell "no traces because nothing happened"
+            apart from "no traces because it was never switched on".
+            </summary>
         </member>
         <member name="F:BoardSync.Api.Middleware.GlobalExceptionHandlingMiddleware.UniqueViolation">
             <summary>PostgreSQL SQLSTATE 23505 — unique_violation.</summary>
@@ -240,10 +353,17 @@
             subscribers — the raising modules know nothing about the activity log.
             </summary>
             <remarks>
-            Recording is best-effort by construction: <see cref="T:BoardSync.Api.Shared.Kernel.Events.InMemoryEventBus"/> resolves handlers in a
-            fresh scope after the originating transaction has committed, and swallows whatever they throw.
-            A dropped row costs a line in the feed and nothing else, which is the right trade for never
-            failing a user's write because the audit trail was unavailable.
+            <para>
+            Recording is no longer best-effort. Events reach these handlers through the outbox, so a
+            failure here is retried rather than swallowed — the message stays queued until its handlers
+            succeed or it exhausts its attempts, at which point it is left in the table where it can be
+            found. Entries can no longer go missing because a handler happened to throw.
+            </para>
+            <para>
+            The other side of that guarantee is at-least-once delivery: a handler can be invoked twice for
+            the same event. Every write here is keyed on <see cref="P:BoardSync.Api.Shared.Kernel.Events.IDomainEvent.EventId"/>, and a
+            redelivery is recognised and skipped rather than duplicated.
+            </para>
             </remarks>
             <summary>
             Work item, sprint and board subscribers. Split from the OrgProject half of the class purely
@@ -285,6 +405,16 @@
              caller belongs to.
              </summary>
         </member>
+        <member name="P:BoardSync.Api.Modules.Activity.Models.ActivityLog.EventId">
+            <summary>
+            The outbox event this entry was written from.
+            </summary>
+            <remarks>
+            Unique, and it is what makes recording idempotent. The outbox delivers at least once — a
+            dispatcher that crashes after running handlers but before marking the row dispatched will
+            redeliver — so without this key a redelivery would duplicate the feed line.
+            </remarks>
+        </member>
         <member name="P:BoardSync.Api.Modules.Activity.Models.ActivityLog.OrganizationId">
             <summary>Organization the activity belongs to. Always set — this is what the feeds filter on.</summary>
         </member>
@@ -315,13 +445,154 @@
             handlers run after the originating transaction commits, so the two can differ.
             </summary>
         </member>
+        <member name="T:BoardSync.Api.Modules.Activity.Repositories.Implementations.ActivityRepository">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Modules.Activity.Repositories.Implementations.ActivityRepository.IsDuplicateEventId(Microsoft.EntityFrameworkCore.DbUpdateException)">
+            <summary>
+            Whether the failure was the EventId uniqueness constraint specifically, rather than any
+            other write error — those must keep propagating so the dispatcher retries them.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Activity.Repositories.Implementations.ActivityRepository.Ordered(System.Linq.IQueryable{BoardSync.Api.Modules.Activity.Models.ActivityLog})">
+            <summary>
+            Newest first, with Id as a tiebreaker. Id is not decoration: entries written in the same
+            transaction share an OccurredAt to the microsecond, and without a total order the same row
+            can appear on two pages while another is skipped. It is also what makes a cursor a stable
+            position rather than an approximate one.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Activity.Repositories.Interfaces.IActivityRepository">
+            <summary>
+            Data access for the activity log — the <c>activity.ActivityLogs</c> table, plus the name
+            lookups the feed needs to render an entry.
+            </summary>
+            <remarks>
+            The log is append-only: there is no update or delete here by design. Entries record what
+            happened, and rewriting history is not a thing the product does.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Activity.Repositories.Interfaces.IActivityRepository.AddIfNewAsync(BoardSync.Api.Modules.Activity.Models.ActivityLog,System.Threading.CancellationToken)">
+            <summary>
+            Appends one entry, or does nothing if an entry for the same originating event already
+            exists.
+            </summary>
+            <remarks>
+            Idempotent by <see cref="P:BoardSync.Api.Modules.Activity.Models.ActivityLog.EventId"/>, because the outbox delivers at least once:
+            a dispatcher that runs the handlers and then dies before marking the message dispatched will
+            redeliver it. Without this, the feed would grow a duplicate line every time that happened.
+            </remarks>
+            <returns>True if a new entry was written, false if it was already recorded.</returns>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Activity.Repositories.Interfaces.IActivityRepository.CountForOrganizationsAsync(System.Collections.Generic.IReadOnlyCollection{System.Guid},System.Threading.CancellationToken)">
+            <summary>Total entries filed against the given organizations.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Activity.Repositories.Interfaces.IActivityRepository.GetPageAsync(System.Collections.Generic.IReadOnlyCollection{System.Guid},System.Int32,System.Int32,System.Threading.CancellationToken)">
+            <summary>
+            A page of entries, newest first, using an offset.
+            </summary>
+            <remarks>
+            Kept for the documented <c>?page=</c> contract. Offsets make the database walk and discard
+            every row before the page, so depth costs time — prefer
+            <see cref="M:BoardSync.Api.Modules.Activity.Repositories.Interfaces.IActivityRepository.GetPageAfterAsync(System.Collections.Generic.IReadOnlyCollection{System.Guid},System.DateTime,System.Guid,System.Int32,System.Threading.CancellationToken)"/> for anything that scrolls.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Activity.Repositories.Interfaces.IActivityRepository.GetPageAfterAsync(System.Collections.Generic.IReadOnlyCollection{System.Guid},System.DateTime,System.Guid,System.Int32,System.Threading.CancellationToken)">
+            <summary>
+            A page of entries strictly older than the given position, newest first — the keyset path.
+            Seeks straight to the cursor instead of counting past everything before it.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Activity.Repositories.Interfaces.IActivityRepository.GetUserNamesAsync(System.Collections.Generic.IReadOnlyCollection{System.Guid},System.Threading.CancellationToken)">
+            <summary>Display names for the given users, keyed by id. Missing users are absent.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Activity.Repositories.Interfaces.IActivityRepository.GetOrganizationNamesAsync(System.Collections.Generic.IReadOnlyCollection{System.Guid},System.Threading.CancellationToken)">
+            <summary>Names for the given organizations, keyed by id.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Activity.Repositories.Interfaces.IActivityRepository.GetProjectNamesAsync(System.Collections.Generic.IReadOnlyCollection{System.Guid},System.Threading.CancellationToken)">
+            <summary>Names for the given projects, keyed by id.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Activity.Repositories.Interfaces.IActivityRepository.GetTeamNamesAsync(System.Collections.Generic.IReadOnlyCollection{System.Guid},System.Threading.CancellationToken)">
+            <summary>Names for the given teams, keyed by id.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Activity.Repositories.Interfaces.IActivityRepository.GetUserNameAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>One user's display name, or "Unknown" if the user is gone.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Activity.Repositories.Interfaces.IActivityRepository.GetOrganizationNameAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>One organization's name, or empty if it is gone.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Activity.Repositories.Interfaces.IActivityRepository.GetTeamNameAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>One team's name, or empty if it is gone.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Activity.Repositories.Interfaces.IActivityRepository.GetProjectScopeAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            The organization owning a project and that project's name, or null if the project is gone —
+            in which case there is nothing to file the entry under and it is dropped.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Activity.Repositories.Interfaces.IActivityRepository.GetWorkItemTitleAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>One work item's title, or empty if it is gone.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Activity.Repositories.Interfaces.IActivityRepository.GetWorkItemSubjectAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>A work item's title and owning project, or null if it is gone.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Activity.Repositories.Interfaces.IActivityRepository.GetCommentBodyAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>One comment's body, or null if it is gone.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Activity.Repositories.Interfaces.ProjectScope">
+            <summary>The organization a project belongs to, with the project's current name.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Activity.Repositories.Interfaces.ProjectScope.#ctor(System.Guid,System.String)">
+            <summary>The organization a project belongs to, with the project's current name.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Activity.Repositories.Interfaces.WorkItemSubject">
+            <summary>A work item's title and the project it lives in.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Activity.Repositories.Interfaces.WorkItemSubject.#ctor(System.String,System.Guid)">
+            <summary>A work item's title and the project it lives in.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Activity.Services.ActivityCursor">
+            <summary>
+            A position in the activity feed: the sort key of the last row a client has seen.
+            </summary>
+            <remarks>
+            Both components are required. The feed sorts by <see cref="P:BoardSync.Api.Modules.Activity.Services.ActivityCursor.OccurredAt"/> and breaks ties on
+            <see cref="P:BoardSync.Api.Modules.Activity.Services.ActivityCursor.Id"/> because entries written in one transaction share a timestamp to the microsecond;
+            a cursor carrying only the timestamp would skip or repeat those rows at exactly the boundary
+            where they are most likely to sit.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Activity.Services.ActivityCursor.#ctor(System.DateTime,System.Guid)">
+            <summary>
+            A position in the activity feed: the sort key of the last row a client has seen.
+            </summary>
+            <remarks>
+            Both components are required. The feed sorts by <see cref="P:BoardSync.Api.Modules.Activity.Services.ActivityCursor.OccurredAt"/> and breaks ties on
+            <see cref="P:BoardSync.Api.Modules.Activity.Services.ActivityCursor.Id"/> because entries written in one transaction share a timestamp to the microsecond;
+            a cursor carrying only the timestamp would skip or repeat those rows at exactly the boundary
+            where they are most likely to sit.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Activity.Services.ActivityCursor.Encode">
+            <summary>
+            Encodes to base64url. Ticks rather than a formatted date because the value has to survive the
+            round trip exactly — a cursor that loses sub-millisecond precision silently re-reads rows.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Activity.Services.ActivityCursor.TryDecode(System.String,BoardSync.Api.Modules.Activity.Services.ActivityCursor@)">
+            <summary>
+            Parses a cursor supplied by a caller. Returns false for anything malformed rather than
+            throwing: the value arrives from the query string, so a bad one is a client mistake to be
+            answered with the first page, not a 500.
+            </summary>
+        </member>
         <member name="T:BoardSync.Api.Modules.Activity.Services.ActivityRecorder">
             <inheritdoc />
         </member>
         <member name="T:BoardSync.Api.Modules.Activity.Services.ActivityQueryService">
             <inheritdoc />
         </member>
-        <member name="M:BoardSync.Api.Modules.Activity.Services.ActivityQueryService.ProjectAsync(System.Collections.Generic.List{BoardSync.Api.Modules.Activity.Models.ActivityLog},System.Threading.CancellationToken)">
+        <member name="M:BoardSync.Api.Modules.Activity.Services.ActivityQueryService.ProjectAsync(System.Collections.Generic.IReadOnlyList{BoardSync.Api.Modules.Activity.Models.ActivityLog},System.Threading.CancellationToken)">
             <summary>
             Resolves the names that are looked up rather than snapshotted — actor, organization,
             project and team all rename freely, so the feed shows what they are called now. The
@@ -352,6 +623,131 @@
             Activity across the given organizations, newest first. Pass one id for an organization
             feed, or every organization the caller belongs to for the workspace feed.
             </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Notifications.Controllers.NotificationsController">
+            <summary>
+            The notification bell — recent work item changes across the caller's organizations.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Notifications.Controllers.NotificationsController.GetMyNotifications(System.Int32,System.Threading.CancellationToken)">
+            <summary>
+            Recent notifications for the current user, newest first.
+            </summary>
+            <remarks>
+            Also served at the original <c>GET /api/workspace/notifications</c>. Both routes run this
+            same action and return the same body; the workspace path stays because clients were already
+            written against it.
+            </remarks>
+            <param name="limit">
+            Maximum entries, default 20, clamped to 50. Values outside the range are clamped rather
+            than rejected.
+            </param>
+            <param name="ct">Cancellation token.</param>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Notifications.DTOs.NotificationResponse">
+            <summary>
+            One entry in the notification bell.
+            </summary>
+            <remarks>
+            Field-for-field identical to the shape this endpoint returned when it lived on
+            <c>WorkspaceController</c>, so moving it here changed nothing on the wire.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Notifications.DTOs.NotificationResponse.#ctor(System.Guid,System.String,System.String,System.String,System.DateTime)">
+            <summary>
+            One entry in the notification bell.
+            </summary>
+            <remarks>
+            Field-for-field identical to the shape this endpoint returned when it lived on
+            <c>WorkspaceController</c>, so moving it here changed nothing on the wire.
+            </remarks>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Notifications.DTOs.NotificationSource">
+            <summary>
+            A work item change as it comes out of the database, before it is worded for display.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Notifications.DTOs.NotificationSource.#ctor(System.Guid,System.String,System.String,System.String,System.String,System.DateTime)">
+            <summary>
+            A work item change as it comes out of the database, before it is worded for display.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Notifications.NotificationsModuleExtensions.AddNotificationsModule(Microsoft.Extensions.DependencyInjection.IServiceCollection)">
+            <summary>
+            Registers the notification bell's reader and its data access.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Notifications.Repositories.Implementations.NotificationRepository">
+            <inheritdoc />
+        </member>
+        <member name="T:BoardSync.Api.Modules.Notifications.Repositories.Interfaces.INotificationRepository">
+            <summary>
+            Data access for the notification bell.
+            </summary>
+            <remarks>
+            <para>
+            Notifications are not stored. They are derived on read from <c>work.WorkItemHistory</c>, which
+            means there is no per-user read state and no fan-out on write — and equally, no way to mark one
+            as read. That is a known limitation of the current design rather than an oversight; see the
+            module's service for what a stored notification would change.
+            </para>
+            <para>
+            The query filters on the history row's own <c>ProjectId</c> rather than reaching through the
+            work item, so one composite index serves both the filter and the ordering.
+            </para>
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Notifications.Repositories.Interfaces.INotificationRepository.GetOrganizationIdsForUserAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Organizations the user is a member of.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Notifications.Repositories.Interfaces.INotificationRepository.GetRecentForOrganizationsAsync(System.Collections.Generic.IReadOnlyCollection{System.Guid},System.Int32,System.Threading.CancellationToken)">
+            <summary>
+            The most recent work item changes across every active project in the given organizations,
+            newest first, capped at <paramref name="take"/>.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Notifications.Services.INotificationService">
+            <summary>
+            The notification bell: recent changes worth surfacing to one user.
+            </summary>
+            <remarks>
+            <para>
+            Derived from work item history on read, not stored. Two consequences worth knowing before
+            building on this: there is no read/unread state, and the feed only knows about work item field
+            changes — project, team, sprint and membership activity do not appear here even though they do
+            appear in the activity feed.
+            </para>
+            <para>
+            It also keeps its own <c>type</c> vocabulary (<c>WorkItemUpdated</c>, <c>WorkItem{State}</c>)
+            rather than the activity feed's <c>EntityType.Verb</c> form. Rebuilding this on the activity log
+            would fix all three at once and is the obvious next step for this module; until then, do not
+            share a rendering component between the bell and the feed.
+            </para>
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Notifications.Services.INotificationService.GetForUserAsync(System.Guid,System.Int32,System.Threading.CancellationToken)">
+            <summary>
+            Recent notifications for one user, newest first, across every organization they belong to.
+            </summary>
+            <param name="userId">The recipient.</param>
+            <param name="limit">Maximum entries to return. Clamped to a sane ceiling.</param>
+            <param name="ct">Cancellation token.</param>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Notifications.Services.NotificationDefaults">
+            <summary>Bell sizing. The bell is a glance, not a page — it does not paginate.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Notifications.Services.NotificationService">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Modules.Notifications.Services.NotificationService.Describe(BoardSync.Api.Modules.Notifications.DTOs.NotificationSource)">
+            <summary>
+            Words a raw history row for display.
+            </summary>
+            <remarks>
+            The <c>type</c> vocabulary is preserved exactly as it was before this module existed —
+            <c>WorkItem{NewState}</c> for a state change, <c>WorkItemUpdated</c> for everything else —
+            because clients already switch on those strings.
+            </remarks>
         </member>
         <member name="T:BoardSync.Api.Modules.Backlog.Controllers.BacklogController">
              <summary>
@@ -655,22 +1051,20 @@
         </member>
         <member name="T:BoardSync.Api.Modules.OrgProject.Controllers.WorkspaceController">
             <summary>
-            Workspace-level aggregates: dashboard summary, notification bell, and activity feed.
-            All data is scoped to the organizations the calling user belongs to.
+            Workspace-level aggregates: dashboard summary and activity feed, both scoped to the
+            organizations the calling user belongs to.
             </summary>
+            <remarks>
+            The notification bell used to live here too. It now belongs to the Notifications module and is
+            served by <c>NotificationsController</c>, which still answers on
+            <c>GET /api/workspace/notifications</c> as well as its own route.
+            </remarks>
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.WorkspaceController.GetSummary(System.Threading.CancellationToken)">
             <summary>
             Aggregate counts for the current user's workspace dashboard.
             Returns organization count, project count, total member count across all orgs,
             and the number of active (non-closed) work items across all projects.
-            </summary>
-        </member>
-        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.WorkspaceController.GetNotifications(System.Threading.CancellationToken)">
-            <summary>
-            Recent notifications for the current user's workspace bell.
-            Returns the 20 most recent work item changes across all projects the user has access to,
-            ordered by most recent first.
             </summary>
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.WorkspaceController.GetActivity(BoardSync.Api.Shared.Kernel.PaginationQuery,System.Threading.CancellationToken)">
@@ -842,6 +1236,9 @@
         <member name="T:BoardSync.Api.Modules.OrgProject.Repositories.Implementations.TeamRepository">
             <inheritdoc />
         </member>
+        <member name="T:BoardSync.Api.Modules.OrgProject.Repositories.Implementations.WorkspaceRepository">
+            <inheritdoc />
+        </member>
         <member name="T:BoardSync.Api.Modules.OrgProject.Repositories.Interfaces.IOrganizationRepository">
              <summary>
              Persistence for the Organization aggregate and its memberships.
@@ -942,6 +1339,28 @@
         <member name="M:BoardSync.Api.Modules.OrgProject.Repositories.Interfaces.ITeamRepository.ExecuteInTransactionAsync(System.Func{System.Threading.CancellationToken,System.Threading.Tasks.Task},System.Threading.CancellationToken)">
             <inheritdoc cref="M:BoardSync.Api.Modules.OrgProject.Repositories.Interfaces.IOrganizationRepository.ExecuteInTransactionAsync(System.Func{System.Threading.CancellationToken,System.Threading.Tasks.Task},System.Threading.CancellationToken)" />
         </member>
+        <member name="T:BoardSync.Api.Modules.OrgProject.Repositories.Interfaces.IWorkspaceRepository">
+            <summary>
+            Cross-organization reads for the workspace dashboard.
+            </summary>
+            <remarks>
+            Separate from the per-aggregate repositories because these questions do not belong to one
+            organization, project or team — they span every organization a user is in.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Repositories.Interfaces.IWorkspaceRepository.GetOrganizationIdsForUserAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Organizations the user is a member of.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Repositories.Interfaces.IWorkspaceRepository.GetSummaryAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            The four dashboard counters, resolved in one round trip.
+            </summary>
+            <remarks>
+            Composed as subqueries rather than four sequential queries, and the organization and project
+            id sets stay in the database instead of being pulled into memory and shipped back as IN
+            lists that grow with the user's membership.
+            </remarks>
+        </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Services.Implementations.OrganizationService.MostPrivilegedBy(System.Collections.Generic.IEnumerable{BoardSync.Api.Modules.Rbac.Models.RoleAssignment},System.Func{BoardSync.Api.Modules.Rbac.Models.RoleAssignment,System.Guid})">
             <summary>
             Reduces role assignments to the single most-privileged role per key (lowest enum value wins).
@@ -953,6 +1372,9 @@
             <c>t.Members</c> because teams are loaded without their membership collection, which
             would otherwise report every team as having zero members.
             </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.OrgProject.Services.Implementations.WorkspaceService">
+            <inheritdoc />
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Services.Interfaces.IOrganizationService.SetMemberRoleAsync(System.Guid,System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType,System.Guid,System.Threading.CancellationToken)">
             <summary>
@@ -989,6 +1411,21 @@
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Services.Interfaces.ITeamService.IsMemberAsync(System.Guid,System.Guid,System.Threading.CancellationToken)">
             <summary>Whether a user is currently a member of the team.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.OrgProject.Services.Interfaces.IWorkspaceService">
+            <summary>
+            Workspace-level reads — everything scoped to "the organizations this user belongs to" rather
+            than to one organization, project or team.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Services.Interfaces.IWorkspaceService.GetSummaryAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Dashboard counters for one user's workspace.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Services.Interfaces.IWorkspaceService.GetOrganizationIdsAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Organizations the user is a member of. The activity feed spans all of them, so it needs
+            the set before it can query.
+            </summary>
         </member>
         <member name="T:BoardSync.Api.Modules.Rbac.Models.RoleType">
             <summary>
@@ -1038,10 +1475,143 @@
             for Scope=Team this is the TeamId.
             </summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.Rbac.Services.Implementations.RbacService.WhereScope(System.Linq.IQueryable{BoardSync.Api.Modules.Rbac.Models.RoleAssignment},BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid)">
+        <member name="T:BoardSync.Api.Modules.Rbac.Repositories.Implementations.RoleAssignmentRepository">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Repositories.Implementations.RoleAssignmentRepository.WhereScope(System.Linq.IQueryable{BoardSync.Api.Modules.Rbac.Models.RoleAssignment},BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid)">
             <summary>
-            Filters a RoleAssignment query to the given scope, comparing against
-            whichever of OrganizationId/ProjectId/TeamId matches the scope.
+            Filters to the given scope, comparing against whichever of
+            OrganizationId/ProjectId/TeamId matches it.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Rbac.Repositories.Interfaces.IRoleAssignmentRepository">
+            <summary>
+            Data access for role assignments — the <c>iam.RoleAssignments</c> table.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Repositories.Interfaces.IRoleAssignmentRepository.GetAsync(System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType,BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            A user's exact role assignment at one scope, tracked for mutation, or null.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Repositories.Interfaces.IRoleAssignmentRepository.GetRolesAtScopeAsync(System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Just the roles a user holds at one scope.
+            </summary>
+            <remarks>
+            Returns the roles rather than a yes/no answer because the privilege comparison cannot happen
+            in SQL: <see cref="T:BoardSync.Api.Modules.Rbac.Models.RoleType"/> is persisted with <c>HasConversion&lt;string&gt;()</c>, so a
+            database-side <c>&lt;=</c> would compare the *names*. 'TeamMember' &lt;= 'Reader' is false
+            and 'Reader' &lt;= 'TeamMember' is true, which would both deny team members read access and
+            let readers perform team-member writes.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Repositories.Interfaces.IRoleAssignmentRepository.GetForUserAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Every role assignment held by a user, across all scopes.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Repositories.Interfaces.IRoleAssignmentRepository.GetForScopeAsync(BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid,System.Threading.CancellationToken)">
+            <summary>Every role assignment attached to one scope resource.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Repositories.Interfaces.IRoleAssignmentRepository.GetUserAssignmentsAtScopeAsync(System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid,System.Threading.CancellationToken)">
+            <summary>All of a user's assignments at one scope, tracked — used when revoking in bulk.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Repositories.Interfaces.IRoleAssignmentRepository.IsOrgAdminForScopeAsync(System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Whether the user is an OrgAdmin of the organization owning the given project or team.
+            </summary>
+            <remarks>
+            Org admins implicitly satisfy every project and team check inside their organization, so
+            this is the fallback consulted when no direct assignment matches. Resolved in one query
+            rather than fetching the admin's organizations and testing them in memory.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Repositories.Interfaces.IRoleAssignmentRepository.SaveChangesAsync(System.Threading.CancellationToken)">
+            <summary>Persists everything staged since the last save.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Rbac.Services.Implementations.CachingRbacService">
+            <summary>
+            Caches permission decisions across requests, in memory and in Redis.
+            </summary>
+            <remarks>
+            <para>
+            Role assignments are the most-read and least-written data in the system: every authorized action
+            asks, and almost nothing changes. Before this, each ask cost a query — two when the direct match
+            failed and org-admin inheritance had to be tested.
+            </para>
+            <para>
+            <b>Invalidation is by version stamp, not by deleting keys.</b> Each user has a counter in Redis
+            that is included in every decision key; bumping it makes every previously cached decision about
+            that user unreachable in one atomic operation, and the orphans expire on their own. This is the
+            pattern the scaling design calls for, and it is deliberately not tag-based eviction: that would
+            depend on the cache provider actually implementing tag removal across both tiers, and a silently
+            unimplemented eviction here means a revoked user keeps their access.
+            </para>
+            <para>
+            The version is read from Redis on every check, which is the cost of making revocation take
+            effect immediately rather than at the end of a TTL. It trades one Postgres round trip — often
+            two — for one Redis GET, and keeps the security-critical direction exact.
+            </para>
+            </remarks>
+        </member>
+        <member name="F:BoardSync.Api.Modules.Rbac.Services.Implementations.CachingRbacService.KeyVersion">
+            <summary>
+            Bumped when the cached shape or its meaning changes. A deploy that changes how a decision is
+            computed must not read entries written by the previous one.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Services.Implementations.CachingRbacService.GetVersionAsync(System.Guid)">
+            <summary>
+            The user's current cache generation. Absent means zero — a user nobody has ever revoked
+            anything from simply starts at generation 0.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Services.Implementations.CachingRbacService.InvalidateAsync(System.Guid)">
+            <summary>
+            Advances the user's generation, orphaning every decision cached about them.
+            </summary>
+            <remarks>
+            Failures are not swallowed. If the version cannot be advanced, previously cached decisions
+            stay reachable and a revoked user keeps their access until those entries expire — the caller
+            needs the write to fail rather than to quietly not take effect.
+            </remarks>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Rbac.Services.Implementations.MemoizingRbacService">
+            <summary>
+            Scoped decorator that answers a repeated permission question once per request.
+            </summary>
+            <remarks>
+            <para>
+            Nearly every action authorizes twice or more against the same scope: the controller guard runs
+            <see cref="M:BoardSync.Api.Modules.Rbac.Services.Implementations.MemoizingRbacService.HasRoleAsync(System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType,BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid,System.Threading.CancellationToken)"/>, then a service method re-resolves the same scope to decide what it is
+            allowed to touch. Each of those calls costs one query, and two when the direct role match fails
+            and org-admin inheritance has to be tested. Memoizing collapses them to the first one.
+            </para>
+            <para>
+            The cache lives exactly as long as the request. That is deliberate: it is short enough that role
+            changes made elsewhere are picked up on the caller's next request without any invalidation
+            machinery, which is what keeps this safe to add before the distributed cache exists. Anything
+            longer-lived needs the explicit invalidation described in the caching design, because a stale
+            grant outliving a revocation is a security bug rather than a cache miss.
+            </para>
+            <para>
+            A plain dictionary is the right structure here even though it is not thread-safe. This decorator
+            is scoped, so it shares its lifetime — and its threading contract — with the repository chain
+            beneath it, which is ultimately backed by a DbContext that already forbids concurrent use.
+            </para>
+            </remarks>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Rbac.Services.Implementations.MemoizingRbacService.RoleCheck">
+            <summary>
+            One permission question. <paramref name="MinimumRole"/> is part of the identity because
+            "is this user at least a TeamMember here" and "is this user at least a Reader here" are
+            different questions with different answers.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Services.Implementations.MemoizingRbacService.RoleCheck.#ctor(System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType,BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid)">
+            <summary>
+            One permission question. <paramref name="MinimumRole"/> is part of the identity because
+            "is this user at least a TeamMember here" and "is this user at least a Reader here" are
+            different questions with different answers.
             </summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Rbac.Services.Implementations.RbacService.CreateAssignment(System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType,BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid,System.Nullable{System.Guid})">
@@ -1078,6 +1648,62 @@
         <member name="M:BoardSync.Api.Modules.Rbac.Services.Interfaces.IRbacService.GetScopeRolesAsync(BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid,System.Threading.CancellationToken)">
             <summary>Return all role assignments for a specific scope resource.</summary>
         </member>
+        <member name="T:BoardSync.Api.Modules.Search.Repositories.ISearchRepository">
+            <summary>
+            Data access for global search.
+            </summary>
+            <remarks>
+            <para>
+            Search is the one read that deliberately crosses every module: it answers "where is this thing"
+            without the caller knowing what kind of thing it is. Rather than pretend otherwise, it owns its
+            own repository and queries the tables it needs directly. Fanning it out to each module's
+            repository would mean four interfaces each growing a <c>SearchBy…</c> method that only this
+            feature ever calls.
+            </para>
+            <para>
+            Every method is scoped by the organizations the caller belongs to — search must never be a way
+            to discover the existence of things you cannot otherwise see.
+            </para>
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Search.Repositories.ISearchRepository.GetOrganizationIdsForUserAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Organizations the user is a member of. Everything else is scoped to these.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Search.Repositories.ISearchRepository.SearchOrganizationsAsync(System.Collections.Generic.IReadOnlyCollection{System.Guid},System.String,System.Int32,System.Threading.CancellationToken)">
+            <summary>Active organizations matching the term by name or slug.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Search.Repositories.ISearchRepository.SearchProjectsAsync(System.Collections.Generic.IReadOnlyCollection{System.Guid},System.String,System.Int32,System.Threading.CancellationToken)">
+            <summary>Active projects matching the term by name or slug.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Search.Repositories.ISearchRepository.SearchMembersAsync(System.Collections.Generic.IReadOnlyCollection{System.Guid},System.String,System.Int32,System.Threading.CancellationToken)">
+            <summary>Active members of those organizations matching by display name or email.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Search.Repositories.ISearchRepository.SearchWorkItemsAsync(System.Collections.Generic.IReadOnlyCollection{System.Guid},System.String,System.Int32,System.Threading.CancellationToken)">
+            <summary>Active work items in those organizations' projects matching by title.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Search.Repositories.SearchRepository">
+            <inheritdoc />
+        </member>
+        <member name="T:BoardSync.Api.Modules.Search.Services.ISearchService">
+            <summary>
+            Global search across organizations, projects, members and work items.
+            </summary>
+        </member>
+        <member name="F:BoardSync.Api.Modules.Search.Services.ISearchService.MinimumTermLength">
+            <summary>Minimum term length. Shorter terms match nearly everything and cost a scan to say so.</summary>
+        </member>
+        <member name="F:BoardSync.Api.Modules.Search.Services.ISearchService.ResultsPerCategory">
+            <summary>Results per category.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Search.Services.ISearchService.SearchAsync(System.Guid,System.String,System.Threading.CancellationToken)">
+            <summary>
+            Searches everything the user can see. The term is normalized here, so callers pass whatever
+            was typed.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Search.Services.SearchService">
+            <inheritdoc />
+        </member>
         <member name="T:BoardSync.Api.Modules.Sprints.Controllers.BoardsController">
             <summary>
             Kanban board management scoped to a project — one board per project,
@@ -1113,8 +1739,7 @@
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Controllers.BoardsController.RequireColumnProjectRoleAsync(System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType,System.Threading.CancellationToken)">
             <summary>
-            Resolves the projectId for a column (column → board → projectId) then checks the role.
-            Avoids an extra service call by querying the DB directly.
+            Resolves the project owning a column (column → board → project) then checks the role.
             </summary>
         </member>
         <member name="T:BoardSync.Api.Modules.Sprints.Controllers.SprintsController">
@@ -1166,8 +1791,64 @@
         <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.RemoveWorkItem(System.Guid,System.Guid,System.Threading.CancellationToken)">
             <summary>Remove a work item from the sprint backlog. Requires TeamMember.</summary>
         </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.MoveWorkItem(System.Guid,System.Guid,BoardSync.Api.Modules.Sprints.DTOs.MoveSprintWorkItemRequest,System.Threading.CancellationToken)">
+            <summary>
+            Move one backlog item between two neighbours. Requires TeamMember.
+            </summary>
+            <remarks>
+            The drag-and-drop endpoint. Names only the card that moved and where it landed, so two
+            people rearranging different cards write different rows and cannot revert each other —
+            unlike the whole-list reorder below, which submits an entire ordering.
+            Omit <c>afterWorkItemId</c> to move to the top, or <c>beforeWorkItemId</c> to move to the end.
+            </remarks>
+        </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.ReorderWorkItems(System.Guid,BoardSync.Api.Modules.Sprints.DTOs.ReorderSprintWorkItemsRequest,System.Threading.CancellationToken)">
-            <summary>Reorder work items within the sprint backlog. Requires TeamMember.</summary>
+            <summary>
+            Reorder the whole sprint backlog. Requires TeamMember.
+            </summary>
+            <remarks>
+            Last-writer-wins across every item: it submits an ordering computed before any concurrent
+            move existed, so a second caller silently reverts the first. Fine for a single editor;
+            prefer the move endpoint above wherever more than one person can drag at once.
+            </remarks>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.Domain.Ranking">
+            <summary>
+            Computes fractional sort keys for backlog ordering.
+            </summary>
+            <remarks>
+            The whole point is that placing an item never requires touching its neighbours. Given the ranks
+            either side of a target position, the new rank is simply a value between them.
+            </remarks>
+        </member>
+        <member name="F:BoardSync.Api.Modules.Sprints.Domain.Ranking.Step">
+            <summary>Distance between ranks when appending, and the rank of the first item.</summary>
+        </member>
+        <member name="F:BoardSync.Api.Modules.Sprints.Domain.Ranking.MinimumGap">
+            <summary>
+            Below this gap, repeated midpoints are close enough to exhausting <c>decimal</c> precision
+            that the backlog should be rebalanced.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Domain.Ranking.Between(System.Nullable{System.Decimal},System.Nullable{System.Decimal})">
+            <summary>
+            A rank that sorts between <paramref name="before"/> and <paramref name="after"/>.
+            </summary>
+            <param name="before">Rank of the item above the target slot, or null when moving to the top.</param>
+            <param name="after">Rank of the item below the target slot, or null when moving to the end.</param>
+            <remarks>
+            Both null means an empty backlog. Open ends step by <see cref="F:BoardSync.Api.Modules.Sprints.Domain.Ranking.Step"/> rather than halving
+            toward zero, so repeatedly moving items to the top does not converge on a floor.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Domain.Ranking.NeedsRebalance(System.Nullable{System.Decimal},System.Nullable{System.Decimal})">
+            <summary>
+            Whether the gap between two adjacent ranks has collapsed far enough that further
+            subdivision risks losing precision, and the backlog should be renumbered.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Domain.Ranking.RankAt(System.Int32)">
+            <summary>Evenly spaced ranks for renumbering a whole backlog.</summary>
         </member>
         <member name="T:BoardSync.Api.Modules.Sprints.DTOs.UpdateBoardRequest">
             <summary>Rename an existing board.</summary>
@@ -1244,8 +1925,28 @@
         <member name="P:BoardSync.Api.Modules.Sprints.DTOs.AddSprintWorkItemRequest.Position">
             <summary>0-based position in the backlog. Omit to append at the end.</summary>
         </member>
-        <member name="T:BoardSync.Api.Modules.Sprints.DTOs.ReorderSprintWorkItemsRequest">
+        <member name="T:BoardSync.Api.Modules.Sprints.DTOs.MoveSprintWorkItemRequest">
             <summary>Reorder work items within a sprint backlog.</summary>
+            <summary>
+            Moves one backlog item to sit between two others.
+            </summary>
+            <remarks>
+            Prefer this over <see cref="T:BoardSync.Api.Modules.Sprints.DTOs.ReorderSprintWorkItemsRequest"/> for drag-and-drop. It names only
+            the card that moved and where it landed, so two people dragging different cards touch different
+            rows and cannot overwrite each other. Sending a whole ordering — which is what the older
+            endpoint takes — means submitting a view of the list computed before the other person's move
+            existed, and silently reverting it.
+            </remarks>
+        </member>
+        <member name="P:BoardSync.Api.Modules.Sprints.DTOs.MoveSprintWorkItemRequest.AfterWorkItemId">
+            <summary>
+            The item the moved card should sit *after*, or null when it moves to the top.
+            </summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.Sprints.DTOs.MoveSprintWorkItemRequest.BeforeWorkItemId">
+            <summary>
+            The item the moved card should sit *before*, or null when it moves to the end.
+            </summary>
         </member>
         <member name="P:BoardSync.Api.Modules.Sprints.DTOs.ReorderSprintWorkItemsRequest.WorkItemIds">
             <summary>Ordered list of WorkItem IDs representing the desired backlog order.</summary>
@@ -1294,6 +1995,28 @@
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.DTOs.SprintWorkItemResponse.#ctor(System.Guid,System.String,BoardSync.Api.Modules.WorkItems.Models.WorkItemType,BoardSync.Api.Modules.WorkItems.Models.WorkItemState,BoardSync.Api.Modules.WorkItems.Models.WorkItemPriority,System.Nullable{System.Guid},System.Nullable{System.Int32},System.Int32)">
             <summary>A single work item entry within a sprint backlog.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.DTOs.MoveSprintWorkItemResponse">
+            <summary>Where a moved backlog item landed.</summary>
+            <param name="WorkItemId">The item that moved.</param>
+            <param name="Rank">
+            Its new sort key. Ordering is by this ascending; treat the value as opaque and only compare it.
+            </param>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.DTOs.MoveSprintWorkItemResponse.#ctor(System.Guid,System.Decimal)">
+            <summary>Where a moved backlog item landed.</summary>
+            <param name="WorkItemId">The item that moved.</param>
+            <param name="Rank">
+            Its new sort key. Ordering is by this ascending; treat the value as opaque and only compare it.
+            </param>
+        </member>
+        <member name="P:BoardSync.Api.Modules.Sprints.DTOs.MoveSprintWorkItemResponse.WorkItemId">
+            <summary>The item that moved.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.Sprints.DTOs.MoveSprintWorkItemResponse.Rank">
+            <summary>
+            Its new sort key. Ordering is by this ascending; treat the value as opaque and only compare it.
+            </summary>
         </member>
         <member name="T:BoardSync.Api.Modules.Sprints.DTOs.CloseSprintResponse">
             <summary>Summary returned after closing a sprint.</summary>
@@ -1365,13 +2088,255 @@
         </member>
         <member name="P:BoardSync.Api.Modules.Sprints.Models.SprintWorkItem.Position">
             <summary>Display position within the sprint backlog (0-based).</summary>
+            <remarks>
+            Superseded by <see cref="P:BoardSync.Api.Modules.Sprints.Models.SprintWorkItem.Rank"/> for ordering; kept so the existing whole-list reorder
+            endpoint and any client reading it keep working. Written alongside Rank, never read for
+            sort order.
+            </remarks>
         </member>
-        <member name="M:BoardSync.Api.Modules.Sprints.Services.BoardService.PublishAsync(BoardSync.Api.Modules.Sprints.Models.Board,System.String,System.String,System.String,System.Guid,System.Threading.CancellationToken)">
+        <member name="P:BoardSync.Api.Modules.Sprints.Models.SprintWorkItem.Rank">
+            <summary>
+            Fractional sort key. Ordering is by this, ascending.
+            </summary>
+            <remarks>
+            <para>
+            Fractional so that moving a card is a single-row update: to place it between two neighbours,
+            take the midpoint of their ranks. Nothing else in the backlog is touched.
+            </para>
+            <para>
+            That property is what makes concurrent editing safe. Rewriting every row's integer position
+            meant two people dragging different cards each wrote back a complete ordering computed
+            before the other's move existed, so whoever saved second silently reverted the first. With
+            ranks, two people moving different cards touch different rows and cannot collide at all;
+            two people moving the *same* card resolve as last-write-wins on one row, which is both
+            correct and what users expect.
+            </para>
+            <para>
+            <c>numeric</c> rather than a float: repeated midpoints need exact arithmetic, and binary
+            floating point runs out of precision after about 50 subdivisions of the same gap. A
+            rebalance is still needed eventually, just far less often.
+            </para>
+            </remarks>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.Repositories.Implementations.BoardRepository">
+            <inheritdoc />
+        </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.Repositories.Implementations.SprintRepository">
+            <inheritdoc />
+        </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.IBoardRepository">
+            <summary>
+            Data access for the Board aggregate — the <c>plan.Boards</c> and <c>plan.BoardColumns</c> tables.
+            </summary>
+            <remarks>
+            Like <see cref="T:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository"/>, a handful of reads reach across into
+            <c>org.Projects</c> and <c>work.WorkItems</c>. A board is a view over another module's work
+            items, so rendering one without them is not possible; the writes stay inside <c>plan</c>.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.IBoardRepository.GetWithColumnsAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Board by ID with its columns loaded, tracked for mutation, or null.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.IBoardRepository.GetForProjectWithColumnsAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>A project's board with its columns loaded, or null when it has none yet.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.IBoardRepository.ProjectExistsAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Whether an active project with this ID exists.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.IBoardRepository.GetOrganizationIdForProjectAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>The organization owning a board's project, or null if the project is gone.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.IBoardRepository.GetSprintContextAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            The team assigned to a project and that team's active sprint, resolved together.
+            A board is scoped to a project but its cards come from the assigned team's active sprint,
+            so both are needed before any card can be loaded.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.IBoardRepository.GetCardsForSprintAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Every card in a sprint, with its tags, ready to be dealt into columns.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.IBoardRepository.GetColumnAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Column by ID, tracked for mutation, or null.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.IBoardRepository.GetColumnsAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Every column on a board, tracked — used when reordering.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.IBoardRepository.GetNextColumnPositionAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Position that appends to the end of the column list.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.IBoardRepository.GetProjectIdForColumnAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Project owning a column, resolved column → board → project, or null if no such column.
+            Columns are addressed by their own IDs, so authorization needs this before touching one.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.IBoardRepository.SaveChangesAsync(System.Threading.CancellationToken)">
+            <summary>Persists everything staged since the last save.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.BoardSprintContext">
+            <summary>The team a project's work belongs to, and that team's active sprint if it has one.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.BoardSprintContext.#ctor(System.Guid,System.Nullable{System.Guid})">
+            <summary>The team a project's work belongs to, and that team's active sprint if it has one.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.BoardCardRow">
+            <summary>
+            A card as it comes out of the database. Enums stay typed the whole way through — stringifying
+            them in SQL only to parse them back per card is work for nothing.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.BoardCardRow.#ctor(System.Guid,System.String,BoardSync.Api.Modules.WorkItems.Models.WorkItemType,BoardSync.Api.Modules.WorkItems.Models.WorkItemState,BoardSync.Api.Modules.WorkItems.Models.WorkItemPriority,System.Nullable{System.Guid},System.Nullable{System.Int32},System.Collections.Generic.List{System.String})">
+            <summary>
+            A card as it comes out of the database. Enums stay typed the whole way through — stringifying
+            them in SQL only to parse them back per card is work for nothing.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository">
+            <summary>
+            Data access for the Sprint aggregate and its backlog — the <c>plan.Sprints</c> and
+            <c>plan.SprintWorkItems</c> tables.
+            </summary>
+            <remarks>
+            <para>
+            Mutations are staged and only persisted by <see cref="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.SaveChangesAsync(System.Threading.CancellationToken)"/>, so the service keeps
+            control of the transaction boundary.
+            </para>
+            <para>
+            A few methods read across into <c>work.WorkItems</c> and <c>org.Teams</c>. That is deliberate and
+            confined to read-side projections: a sprint backlog is meaningless without the work item titles
+            and states beside it, and resolving those one aggregate at a time would trade one query for one
+            per row. Nothing here writes outside the <c>plan</c> schema.
+            </para>
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.GetByIdAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Sprint by ID, tracked for mutation, or null.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.GetActiveForTeamAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>The team's currently active sprint, or null when it has none.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.GetForTeamAsync(System.Guid,System.Int32,System.Int32,System.Threading.CancellationToken)">
+            <summary>Paginated sprint summaries for a team, newest sprint number first.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.TeamExistsAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Whether an active team with this ID exists.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.HasOverlappingSprintAsync(System.Guid,System.DateTime,System.DateTime,System.Threading.CancellationToken)">
+            <summary>
+            Whether the team already has a non-completed sprint covering any part of the given range.
+            Completed sprints are excluded — history is allowed to overlap, only live plans are not.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.HasAnotherActiveSprintAsync(System.Guid,System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Whether the team has an active sprint other than <paramref name="excludingSprintId"/>.
+            Guards the one-active-sprint-per-team rule when starting a sprint.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.GetNextNumberAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Next sprint number for a team. Numbers are sequential per team, starting at 1.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.GetOrganizationIdForTeamAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            The organization owning a sprint's team, or null if the team is gone. Sprints hang off a
+            team but activity is filed by organization, so events need this before they can be published.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.GetBacklogEntryAsync(System.Guid,System.Guid,System.Threading.CancellationToken)">
+            <summary>A single backlog entry, tracked for mutation, or null.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.GetBacklogEntriesAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Every backlog entry for a sprint, tracked — used when reordering.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.BacklogContainsAsync(System.Guid,System.Guid,System.Threading.CancellationToken)">
+            <summary>Whether the work item is already on this sprint's backlog.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.HasBacklogEntriesAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Whether the sprint has any backlog entries at all.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.GetNextPositionAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Position that appends to the end of the backlog.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.GetMaxRankAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Highest rank currently in the backlog, or null when it is empty.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.GetNeighbourRanksAsync(System.Guid,System.Nullable{System.Guid},System.Nullable{System.Guid},System.Threading.CancellationToken)">
+            <summary>
+            The ranks of two specific backlog entries, used to compute a midpoint for a move.
+            A null id yields a null rank, meaning "the end of the list in that direction".
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.GetWorkItemsAsync(System.Guid,System.Int32,System.Int32,System.Threading.CancellationToken)">
+            <summary>Paginated backlog in display order, joined to the work items it points at.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.GetProgressAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Item and story-point totals for a sprint, computed in the database.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.SaveChangesAsync(System.Threading.CancellationToken)">
+            <summary>Persists everything staged since the last save.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.SprintProgress">
+            <summary>
+            Rolled-up sprint burn figures. "Completed" means a work item in <c>Closed</c> or
+            <c>Resolved</c> — the two states the board treats as done.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.SprintProgress.#ctor(System.Int32,System.Int32,System.Int32,System.Int32)">
+            <summary>
+            Rolled-up sprint burn figures. "Completed" means a work item in <c>Closed</c> or
+            <c>Resolved</c> — the two states the board treats as done.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.Services.IBoardCacheVersion">
+            <summary>
+            Generation counter for a project's board snapshot.
+            </summary>
+            <remarks>
+            <para>
+            A board is assembled from four tables — board, columns, the assigned team's active sprint, and
+            that sprint's work items with their tags — so almost anything in a project can invalidate it.
+            Trying to delete the right cache keys after each write means re-deriving which keys those were,
+            which is more work and more ways to be subtly wrong than simply making the old ones unreachable.
+            </para>
+            <para>
+            So the version goes <em>in the key</em>. Bumping it orphans every snapshot of that project at
+            once, atomically, and the orphans expire on their own. There is no delete storm, and no race
+            where an invalidation lands before the write it was meant to invalidate.
+            </para>
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Services.IBoardCacheVersion.GetAsync(System.Guid)">
+            <summary>Current generation for a project. Absent means zero.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Services.IBoardCacheVersion.BumpAsync(System.Guid)">
+            <summary>Advances the generation, orphaning every cached snapshot of this project.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.Services.BoardCacheVersion">
+            <inheritdoc />
+        </member>
+        <member name="F:BoardSync.Api.Modules.Sprints.Services.BoardService.SnapshotOptions">
+            <summary>
+            Short on purpose. The version stamp is what makes a change visible immediately; this only
+            bounds how long an untouched board can sit cached, and a board nobody is changing is a board
+            nobody minds reading slightly late.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Services.BoardService.EnqueueAsync(BoardSync.Api.Modules.Sprints.Models.Board,System.String,System.String,System.String,System.Guid,System.Threading.CancellationToken)">
             <summary>
             Publishes a board change against the project's owning organization, which is what the
             activity log files entries under. Skipped if the project has gone — there would be no
             organization to attribute the change to.
             </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Services.BoardService.GetBoardResponseAsync(BoardSync.Api.Modules.Sprints.Models.Board,System.Threading.CancellationToken)">
+            <summary>
+            Builds the board, from cache when one is available for the project's current generation.
+            </summary>
+            <remarks>
+            Without Redis there is no generation to stamp keys with, and caching without one would serve
+            boards that never notice a card moved — so it reads through instead.
+            </remarks>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Services.BoardService.BuildDefaultBoard(System.Guid,System.Guid)">
             <summary>Creates a board with the four default columns mapped to WorkItemState values.</summary>
@@ -1379,6 +2344,7 @@
         <member name="M:BoardSync.Api.Modules.Sprints.Services.IBoardService.GetOrCreateForProjectAsync(System.Guid,System.Guid,System.Threading.CancellationToken)">
             <summary>Get (or auto-create with default columns) the board for a project.</summary>
         </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Services.IBoardService.GetProjectIdForColumnAsync(System.Guid,System.Threading.CancellationToken)">
         <member name="M:BoardSync.Api.Modules.Sprints.Services.ISprintService.CloseAsync(System.Guid,BoardSync.Api.Modules.Sprints.DTOs.CloseSprintRequest,System.Guid,System.Threading.CancellationToken)">
             <summary>
             Close an active sprint.
@@ -1387,10 +2353,37 @@
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Services.SprintService.PublishAsync``1(BoardSync.Api.Modules.Sprints.Models.Sprint,System.Func{System.Guid,``0},System.Threading.CancellationToken)">
             <summary>
-            Sprints hang off a team, but activity is filed by organization, so every sprint event needs
-            the team's owning organization looked up first. If the team has vanished there is nothing to
-            file the event under and it is skipped rather than published half-formed.
+            Project owning a column, resolved column → board → project.
             </summary>
+            <remarks>
+            Columns are addressed by their own IDs, so authorization has to resolve the owning project
+            before it can decide anything. Exposed here so the controller can ask the module rather than
+            reaching into the database itself.
+            </remarks>
+            <exception cref="T:BoardSync.Api.Shared.Kernel.Exceptions.NotFoundException">No such column.</exception>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Services.ISprintService.MoveWorkItemAsync(System.Guid,System.Guid,BoardSync.Api.Modules.Sprints.DTOs.MoveSprintWorkItemRequest,System.Threading.CancellationToken)">
+            <summary>
+            Moves a single backlog item between two neighbours. One row is written.
+            </summary>
+            <returns>The item's new rank, so the caller can confirm where it landed.</returns>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Services.SprintService.RebalanceAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Spreads the backlog back out over evenly spaced ranks, preserving current order.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Services.SprintService.EnqueueAsync``1(BoardSync.Api.Modules.Sprints.Models.Sprint,System.Func{System.Guid,``0},System.Threading.CancellationToken)">
+            <summary>
+            Stages a sprint event. Still async because sprints hang off a team while activity is filed
+            by organization, so the team's owning organization has to be looked up first. If the team
+            has vanished there is nothing to file the event under and it is skipped rather than queued
+            half-formed.
+            </summary>
+            <remarks>
+            Call this <b>before</b> saving — it stages the outbox row on the same unit of work, which is
+            what makes the event and the sprint change commit together.
+            </remarks>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Services.SprintService.SprintName(BoardSync.Api.Modules.Sprints.Models.Sprint)">
             <summary>Display name for a sprint — they are numbered per team, not named.</summary>
@@ -1451,6 +2444,34 @@
         <member name="P:BoardSync.Api.Modules.WorkItems.DTOs.CreateWorkItemRequest.TeamId">
             <summary>Team scope.</summary>
         </member>
+        <member name="P:BoardSync.Api.Modules.WorkItems.DTOs.UpdateWorkItemRequest.ExpectedVersion">
+            <summary>
+            The <c>version</c> from the work item you read, when you want conflicts reported.
+            </summary>
+            <remarks>
+            Optional, and omitting it keeps the previous behaviour — last write wins, no conflict
+            signal. Supplying it turns "somebody else changed this while you were editing" from a silent
+            overwrite into a <c>409</c> carrying the current state, which is the only way a client can
+            reconcile rather than clobber.
+            </remarks>
+        </member>
+        <member name="P:BoardSync.Api.Modules.WorkItems.DTOs.UpdateWorkItemStateRequest.ExpectedVersion">
+            <inheritdoc cref="P:BoardSync.Api.Modules.WorkItems.DTOs.UpdateWorkItemRequest.ExpectedVersion" />
+        </member>
+        <member name="T:BoardSync.Api.Modules.WorkItems.DTOs.WorkItemResponse">
+            <remarks>
+            <c>Version</c> is an opaque row version. Send it back as <c>expectedVersion</c> when updating to
+            be told about a conflict instead of silently overwriting whoever edited in between. Compare only
+            — never compute with it or assume it increments by one.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.WorkItems.DTOs.WorkItemResponse.#ctor(System.Guid,System.Guid,System.Nullable{System.Guid},System.Nullable{System.Guid},BoardSync.Api.Modules.WorkItems.Models.WorkItemType,BoardSync.Api.Modules.WorkItems.Models.WorkItemState,BoardSync.Api.Modules.WorkItems.Models.WorkItemPriority,System.String,System.String,System.Nullable{System.Guid},System.Nullable{System.Int32},System.Collections.Generic.List{System.String},System.Int32,System.Int32,System.DateTime,System.DateTime,System.Nullable{System.Guid},System.Int64)">
+            <remarks>
+            <c>Version</c> is an opaque row version. Send it back as <c>expectedVersion</c> when updating to
+            be told about a conflict instead of silently overwriting whoever edited in between. Compare only
+            — never compute with it or assume it increments by one.
+            </remarks>
+        </member>
         <member name="T:BoardSync.Api.Modules.WorkItems.Models.WorkItemType">
             <summary>
             Work item types supported in the system (Epic → Feature → Story → Task/Bug).
@@ -1471,6 +2492,24 @@
             A trackable unit of work scoped to a project.
             Supports the full hierarchy: Epic → Feature → Story → Task/Bug.
             </summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.WorkItems.Models.WorkItem.Version">
+            <summary>
+            Row version, mapped to Postgres' <c>xmin</c> system column.
+            </summary>
+            <remarks>
+            <para>
+            Postgres bumps <c>xmin</c> on every update by itself, so this needs no column, no trigger
+            and no migration — the value is already there on every row.
+            </para>
+            <para>
+            It exists so that two people editing the same work item cannot silently overwrite each
+            other. Note that EF's own check only spans load-to-save inside one request, which is not
+            where the conflict lives: the real race is A reads, B saves, A saves. Closing that needs the
+            client to send back the version it read — see
+            <c>IWorkItemService.UpdateAsync</c>.
+            </para>
+            </remarks>
         </member>
         <member name="P:BoardSync.Api.Modules.WorkItems.Models.WorkItem.TeamId">
             <summary>Optional team scope (for board/sprint assignment).</summary>
@@ -1496,6 +2535,19 @@
             <summary>
             Immutable audit trail entry recording a field change on a work item.
             </summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.WorkItems.Models.WorkItemHistory.ProjectId">
+            <summary>
+            The owning project, copied from the work item at write time.
+            </summary>
+            <remarks>
+            Denormalized on purpose. The workspace notification feed asks for "the most recent changes
+            across these projects, newest first", and reaching the project through
+            <see cref="P:BoardSync.Api.Modules.WorkItems.Models.WorkItemHistory.WorkItem"/> makes that a join whose sort no index can serve — it degrades with
+            total history volume forever. Carrying the project here lets one composite index answer the
+            filter and the ordering together. Work items never move between projects, so the copy cannot
+            drift from its source.
+            </remarks>
         </member>
         <member name="P:BoardSync.Api.Modules.WorkItems.Models.WorkItemHistory.ChangedBy">
             <summary>User who made the change.</summary>
@@ -1570,6 +2622,16 @@
         <member name="M:BoardSync.Api.Modules.WorkItems.Repository.IWorkItemRepository.GetProjectIdForCommentAsync(System.Guid,System.Threading.CancellationToken)">
             <summary>Project owning the comment's work item, or null if the comment does not exist.</summary>
         </member>
+        <member name="M:BoardSync.Api.Modules.WorkItems.Repository.IWorkItemRepository.SetOriginalVersion(BoardSync.Api.Modules.WorkItems.Models.WorkItem,System.UInt32)">
+            <summary>
+            Overrides the row version EF will check this update against.
+            </summary>
+            <remarks>
+            Belongs here because it reaches into the change tracker, which is the repository's business.
+            The service supplies the version its caller read so a concurrent edit is detected rather
+            than overwritten.
+            </remarks>
+        </member>
         <member name="M:BoardSync.Api.Modules.WorkItems.Repository.IWorkItemRepository.SaveChangesAsync(System.Threading.CancellationToken)">
             <summary>Persists everything staged since the last save.</summary>
         </member>
@@ -1595,11 +2657,33 @@
             caller to publish once the save has committed. No-ops when the value did not actually move.
             </summary>
         </member>
+        <member name="M:BoardSync.Api.Modules.WorkItems.Services.WorkItemService.AddHistory(BoardSync.Api.Modules.WorkItems.Models.WorkItem,System.Guid,System.String,System.String,System.String)">
+            <summary>
+            Takes the work item rather than its id because the history row carries the project too —
+            see <see cref="P:BoardSync.Api.Modules.WorkItems.Models.WorkItemHistory.ProjectId"/> for why it is stored rather than joined.
+            </summary>
+        </member>
         <member name="M:BoardSync.Api.Modules.WorkItems.Services.WorkItemService.NormalizeTags(System.Collections.Generic.IEnumerable{System.String})">
             <summary>
             Trims, lower-cases and de-duplicates tag names, dropping blanks. Normalization must happen
             before de-duplication so that casing variants collapse to the single row the unique
             (WorkItemId, Name) index allows.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.WorkItems.Services.WorkItemService.ApplyExpectedVersion(BoardSync.Api.Modules.WorkItems.Models.WorkItem,System.Nullable{System.Int64})">
+            <summary>
+            Tells EF to check the update against the version the <em>client</em> read, not the one this
+            request just loaded.
+            </summary>
+            <remarks>
+            Without this, EF compares against the value it fetched moments ago and the check passes
+            almost always — the interesting conflict is not load-to-save inside one request, it is the
+            edit that landed between the user opening the form and submitting it.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.WorkItems.Services.WorkItemService.SaveDetectingConflictAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Saves, turning a lost update into a conflict the caller can act on.
             </summary>
         </member>
         <member name="T:BoardSync.Api.Shared.Auth.Attributes.RequireAuthenticationAttribute">
@@ -1633,6 +2717,93 @@
             <summary>
             Server-side equivalent of <see cref="P:BoardSync.Api.Shared.Auth.Models.RefreshToken.IsActive"/>. The property itself is
             unmapped and cannot be translated to SQL, so it must not be used inside a query predicate.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Auth.Repositories.IUserRepository">
+            <summary>
+            Data access for user accounts and their refresh tokens — the <c>public.Users</c> and
+            <c>public.RefreshTokens</c> tables.
+            </summary>
+            <remarks>
+            <para>
+            Every email lookup normalizes its argument the same way, so callers pass whatever the user
+            typed and do not each have to remember to lower-case it. Getting that wrong in one place is how
+            duplicate accounts appear.
+            </para>
+            <para>
+            Mutations are staged and persisted by <see cref="M:BoardSync.Api.Shared.Auth.Repositories.IUserRepository.SaveChangesAsync(System.Threading.CancellationToken)"/>, so a service can change a
+            user and revoke their tokens in a single write.
+            </para>
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Auth.Repositories.IUserRepository.GetByIdAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>User by ID, tracked for mutation, or null.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Auth.Repositories.IUserRepository.GetByEmailAsync(System.String,System.Threading.CancellationToken)">
+            <summary>User by email, tracked for mutation, or null. Email is normalized for you.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Auth.Repositories.IUserRepository.EmailExistsAsync(System.String,System.Threading.CancellationToken)">
+            <summary>Whether an account already exists for this email.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Auth.Repositories.IUserRepository.IsActiveAndConfirmedAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Whether the user exists, is active and has a confirmed email.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Auth.Repositories.IUserRepository.IsEligibleForAccessAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Whether the user may currently be served at all: active, and either unlocked or holding a
+            lock whose expiry has passed.
+            </summary>
+            <remarks>
+            The expiry is compared in the database rather than through <c>User.IsLocked</c>, which is an
+            unmapped property and would silently pull every user into memory to evaluate.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Auth.Repositories.IUserRepository.GetProfileByIdAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Active user by ID as a public profile, or null. Projected in the database so nothing
+            security-bearing — password hash, reset and confirmation tokens, lockout counters — is
+            ever loaded for a read that only needs the public view.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Auth.Repositories.IUserRepository.GetProfileByEmailAsync(System.String,System.Threading.CancellationToken)">
+            <inheritdoc cref="M:BoardSync.Api.Shared.Auth.Repositories.IUserRepository.GetProfileByIdAsync(System.Guid,System.Threading.CancellationToken)" />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Auth.Repositories.IUserRepository.GetRefreshTokenWithUserAsync(System.String,System.Threading.CancellationToken)">
+            <summary>Refresh token by its value, with the owning user loaded, or null.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Auth.Repositories.IUserRepository.GetActiveRefreshTokensAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Every unrevoked, unexpired token for a user, tracked for revocation.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Auth.Repositories.IUserRepository.GetRefreshTokenForUserAsync(System.String,System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            One user's refresh token by value, tracked, or null. Scoped to the user on purpose: a token
+            is only revocable by the account that owns it, and matching on the value alone would let a
+            caller revoke someone else's session by guessing.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Auth.Repositories.IUserRepository.SaveChangesAsync(System.Threading.CancellationToken)">
+            <summary>Persists everything staged since the last save.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Auth.Repositories.UserRepository">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Auth.Repositories.UserRepository.ToProfile(System.Linq.IQueryable{BoardSync.Api.Shared.Auth.Models.User})">
+            <summary>
+            Projects users to the public profile. Roles are left null — they are scope-specific and the
+            caller that wants them asks RBAC, which is the thing that actually knows.
+            </summary>
+            <remarks>
+            Takes the filtered query rather than applying the projection first. Filtering after the
+            Select would build a predicate over <see cref="T:BoardSync.Api.Shared.Auth.DTOs.UserProfile"/> instead of the entity, which
+            EF cannot translate — it fails the request at runtime, not at build time.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Auth.Repositories.UserRepository.Normalize(System.String)">
+            <summary>
+            One definition of what an email key looks like. Every lookup goes through here so a caller
+            that forgets to normalize cannot create a second account for the same address.
             </summary>
         </member>
         <member name="T:BoardSync.Api.Shared.Data.Migrations.InitialAuthenticationMigration">
@@ -1719,6 +2890,54 @@
         <member name="M:BoardSync.Api.Shared.Data.Migrations.ActivityLog.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
             <inheritdoc />
         </member>
+        <member name="T:BoardSync.Api.Shared.Data.Migrations.Phase0_HotPathIndexes">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase0_HotPathIndexes.Up(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase0_HotPathIndexes.Down(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase0_HotPathIndexes.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="T:BoardSync.Api.Shared.Data.Migrations.Phase1_OutboxAndIdempotency">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase1_OutboxAndIdempotency.Up(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase1_OutboxAndIdempotency.Down(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase1_OutboxAndIdempotency.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="T:BoardSync.Api.Shared.Data.Migrations.Phase2_OutboxTopics">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase2_OutboxTopics.Up(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase2_OutboxTopics.Down(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase2_OutboxTopics.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="T:BoardSync.Api.Shared.Data.Migrations.Phase2_FractionalRanks">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase2_FractionalRanks.Up(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase2_FractionalRanks.Down(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase2_FractionalRanks.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
+            <inheritdoc />
+        </member>
         <member name="T:BoardSync.Api.Shared.Data.Migrations.AddSprintsAndBoards">
             <inheritdoc />
         </member>
@@ -1746,6 +2965,44 @@
         <member name="T:BoardSync.Api.Shared.Kernel.BaseEntity">
             <summary>
             Base class for all domain entities. Provides common audit fields.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Kernel.Configuration.OutboxSettings">
+            <summary>
+            Tuning for the outbox dispatcher.
+            </summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Kernel.Configuration.OutboxSettings.Enabled">
+            <summary>
+            Whether this instance drains the outbox. On by default.
+            </summary>
+            <remarks>
+            Turning it off is for running a dedicated dispatcher process, not for saving work — with
+            every instance disabled, events accumulate and the activity feed silently stops updating.
+            The dispatcher logs a warning at startup when it is off, for exactly that reason.
+            </remarks>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Kernel.Configuration.OutboxSettings.BatchSize">
+            <summary>Messages claimed per pass. Larger batches amortise the transaction, but hold locks longer.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Kernel.Configuration.OutboxSettings.PollIntervalSeconds">
+            <summary>
+            Fallback poll interval. Normal latency comes from Postgres NOTIFY; this is the safety net for
+            when the listener connection has dropped, so it trades a little idle querying for never
+            stalling the queue.
+            </summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Kernel.Configuration.OutboxSettings.MaxAttempts">
+            <summary>
+            Delivery attempts before a message is left alone. It stays in the table, undispatched and
+            visible, rather than being deleted or retried forever.
+            </summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Kernel.Configuration.OutboxSettings.RetentionHours">
+            <summary>
+            How long delivered messages are kept before cleanup. They are the replay log a real-time
+            client resumes from, so this is the practical ceiling on how far behind a client can fall
+            and still catch up without a full refetch.
             </summary>
         </member>
         <member name="T:BoardSync.Api.Shared.Kernel.Configuration.RateLimitSettings">
@@ -1781,35 +3038,336 @@
         <member name="P:BoardSync.Api.Shared.Kernel.Configuration.RateLimitPolicySettings.QueueLimit">
             <summary>How many requests may wait for the next window instead of being rejected outright.</summary>
         </member>
+        <member name="T:BoardSync.Api.Shared.Kernel.Configuration.RealtimeSettings">
+            <summary>
+            Tuning for the real-time hub.
+            </summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Kernel.Configuration.RealtimeSettings.Enabled">
+            <summary>
+            Whether the hub is mapped. Off means clients simply cannot connect and fall back to whatever
+            polling they already do — the REST API is unaffected either way.
+            </summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Kernel.Configuration.RealtimeSettings.MaxReplayMessages">
+            <summary>
+            How many missed messages a reconnecting client may be replayed before it is told to resync
+            instead.
+            </summary>
+            <remarks>
+            The bound exists so a client that slept for six hours cannot drag its entire backlog through
+            the hub. Past it, one REST refetch is cheaper for both sides than thousands of deltas — and
+            it is bounded work rather than work proportional to how long the client was away.
+            </remarks>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Kernel.Events.EventDispatcher">
+            <summary>
+            Resolves and runs the handlers registered for a domain event.
+            </summary>
+            <remarks>
+            Handlers are registered against the closed interface (<c>IEventHandler&lt;WorkItemCreated&gt;</c>),
+            but the dispatcher only has an <see cref="T:BoardSync.Api.Shared.Kernel.Events.IDomainEvent"/> at runtime, so the closed type is
+            rebuilt reflectively to look them up.
+            </remarks>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Kernel.Events.EventTopics">
+            <summary>
+            Decides which topics an event should reach.
+            </summary>
+            <remarks>
+            <para>
+            One switch, in one file, on purpose. The alternative — each module deciding its own routing —
+            spreads the answer to "who sees this?" across the codebase, and the failure mode is an event
+            that quietly reaches nobody.
+            </para>
+            <para>
+            Topics are computed at enqueue time and stored on the outbox row, so replaying "what did this
+            topic miss?" is an indexed database filter rather than deserializing every message to ask.
+            </para>
+            <para>
+            Work item events carry a project but no organization, so they do not route to
+            <see cref="M:BoardSync.Api.Shared.Kernel.Events.Topic.Organization(System.Guid)"/> here. The organization feed is served separately by the activity
+            path, which already resolves the owning organization and has the rendered feed entry to send —
+            pushing the raw event as well would put two different shapes of the same change on one topic.
+            </para>
+            </remarks>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Kernel.Events.EventTypeRegistry">
+            <summary>
+            Maps the event type names stored in the outbox back to CLR types.
+            </summary>
+            <remarks>
+            Outbox rows store the short type name rather than an assembly-qualified one, so moving an event
+            between namespaces does not strand messages already queued. The cost is that names must stay
+            unique across the assembly — <see cref="M:BoardSync.Api.Shared.Kernel.Events.EventTypeRegistry.Resolve(System.String)"/> refuses to guess between duplicates rather
+            than silently picking one and deserializing into the wrong shape.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Kernel.Events.EventTypeRegistry.Resolve(System.String)">
+            <summary>The CLR type for a stored event name, or null if nothing matches it.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Kernel.Events.EventTypeRegistry.KnownEventTypes">
+            <summary>Every domain event type known to this build. Exposed for the startup self-check.</summary>
+        </member>
         <member name="T:BoardSync.Api.Shared.Kernel.Events.IDomainEvent">
             <summary>
             Marker interface for all domain events published on the internal event bus.
             </summary>
         </member>
         <member name="T:BoardSync.Api.Shared.Kernel.Events.DomainEvent">
-            <summary>
-            Base record for domain events — provides EventId and OccurredAt automatically.
-            </summary>
+             <summary>
+             Base record for domain events — provides EventId and OccurredAt automatically.
+             </summary>
+             <remarks>
+             Both properties are <c>init</c>, not get-only, and that is load-bearing rather than stylistic.
+             Events round-trip through the outbox as JSON, and a get-only auto-property cannot be set by the
+             deserializer — it would silently fall back to the initializer and mint a <b>new</b> id every
+             time a message was read back. Identity would then differ on every redelivery, which defeats the
+             whole point of keying idempotency on <see cref="P:BoardSync.Api.Shared.Kernel.Events.DomainEvent.EventId"/>: the unique index would never see a
+             duplicate and handlers would happily record the same event twice.
+            
+             <c>init</c> keeps the record immutable to callers while still letting the deserializer restore
+             the original values.
+             </remarks>
         </member>
         <member name="T:BoardSync.Api.Shared.Kernel.Events.IEventBus">
             <summary>
-            In-process event bus abstraction.
-            Modules publish events here; other modules subscribe to react without direct coupling.
+            How modules tell the rest of the system that something happened.
+            </summary>
+            <remarks>
+            <para>
+            Enqueuing stages the event on the caller's unit of work. It is <b>not</b> delivered here —
+            it is written to the outbox by the next <c>SaveChangesAsync</c>, in the same transaction as the
+            domain change, and delivered afterwards by the dispatcher.
+            </para>
+            <para>
+            That ordering is the whole point, and it is the opposite of what this interface used to do.
+            Enqueue <b>before</b> saving:
+            </para>
+            <code>
+            _eventBus.Enqueue(new WorkItemStateChanged(...));
+            await _repository.SaveChangesAsync(ct);   // domain row + outbox row, one transaction
+            </code>
+            <para>
+            Enqueuing after the save still works — the event lands on the next save — but it is a trap: if
+            nothing saves again, the event never leaves. Put it before.
+            </para>
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Kernel.Events.IEventBus.Enqueue``1(``0)">
+            <summary>
+            Stages a domain event for durable delivery. Returns immediately; nothing is written until
+            the surrounding unit of work is saved.
             </summary>
         </member>
-        <member name="M:BoardSync.Api.Shared.Kernel.Events.IEventBus.PublishAsync``1(``0,System.Threading.CancellationToken)">
-            <summary>Publish a domain event to all registered handlers.</summary>
+        <member name="T:BoardSync.Api.Shared.Kernel.Events.IEventDispatcher">
+            <summary>
+            Invokes the handlers subscribed to a domain event. Used by the outbox dispatcher, not by the
+            modules that raise events.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Kernel.Events.IEventDispatcher.DispatchAsync(BoardSync.Api.Shared.Kernel.Events.IDomainEvent,System.Threading.CancellationToken)">
+            <summary>
+            Resolves and runs every handler registered for the event's type.
+            </summary>
+            <remarks>
+            Exceptions propagate. The dispatcher records the failure against the outbox row and retries
+            it, which is only possible because nothing is marked dispatched until the handlers succeed.
+            </remarks>
         </member>
         <member name="T:BoardSync.Api.Shared.Kernel.Events.IEventHandler`1">
+             <summary>
+             Handler for a specific domain event type.
+             </summary>
+             <remarks>
+             Subscription is DI registration: register an <see cref="T:BoardSync.Api.Shared.Kernel.Events.IEventHandler`1"/> and the
+             dispatcher will resolve and invoke it.
+            
+             Handlers must be <b>idempotent</b>. The outbox delivers at least once, so the same event can
+             arrive twice — after a dispatcher crash between running the handlers and marking the row
+             dispatched, for instance. Key any write on <see cref="P:BoardSync.Api.Shared.Kernel.Events.IDomainEvent.EventId"/>.
+             </remarks>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Kernel.Events.OutboxDispatcher">
             <summary>
-            Handler for a specific domain event type.
+            Drains the outbox: claims queued messages, runs their handlers, marks them delivered.
+            </summary>
+            <remarks>
+            <para>
+            Claiming uses <c>FOR UPDATE SKIP LOCKED</c>, so several instances can run this at once without
+            coordinating — each takes rows the others have not locked, and none of them block. That is what
+            makes the dispatcher safe to leave switched on across a whole deployment rather than nominating
+            a leader.
+            </para>
+            <para>
+            A message is marked dispatched only after its handlers succeed. Crash in between and it is
+            simply claimed again on the next pass, which is why handlers must be idempotent.
+            </para>
+            </remarks>
+        </member>
+        <member name="F:BoardSync.Api.Shared.Kernel.Events.OutboxDispatcher.NotifyChannel">
+            <summary>Postgres NOTIFY channel used to wake the dispatcher the moment a message is queued.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Kernel.Events.OutboxDispatcher.DispatchBatchAsync(System.Threading.CancellationToken)">
+            <summary>
+            Claims and delivers one batch. Returns how many messages were processed.
             </summary>
         </member>
-        <member name="T:BoardSync.Api.Shared.Kernel.Events.InMemoryEventBus">
+        <member name="M:BoardSync.Api.Shared.Kernel.Events.OutboxDispatcher.ClaimAndDeliverAsync(BoardSync.Api.Data.BoardSyncDbContext,BoardSync.Api.Shared.Kernel.Events.IEventDispatcher,BoardSync.Api.Shared.Realtime.IRealtimeNotifier,BoardSync.Api.Modules.Sprints.Services.IBoardCacheVersion,System.Threading.CancellationToken)">
             <summary>
-            Simple in-process event bus backed by the DI container.
-            All handlers registered as IEventHandler&lt;TEvent&gt; in DI are resolved and invoked.
+            One claim-and-deliver cycle, retriable as a whole by the execution strategy above.
             </summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Kernel.Events.OutboxDispatcher.Deserialize(BoardSync.Api.Shared.Kernel.Events.OutboxMessage)">
+            <summary>
+            Rebuilds the domain event from its stored JSON, or null when the type no longer exists.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Kernel.Events.OutboxDispatcher.WaitForWorkAsync(System.Threading.CancellationToken)">
+            <summary>
+            Sleeps until the poll interval elapses or a NOTIFY arrives, whichever is first.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Kernel.Events.OutboxDispatcher.ListenForNotificationsAsync(System.Threading.CancellationToken)">
+            <summary>
+            Holds a dedicated connection open on the NOTIFY channel so a queued message is picked up in
+            milliseconds rather than at the next poll.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Kernel.Events.OutboxDispatcher.InvalidateBoardsAsync(BoardSync.Api.Modules.Sprints.Services.IBoardCacheVersion,BoardSync.Api.Shared.Kernel.Events.OutboxMessage)">
+            <summary>
+            Advances the board cache generation for every project this message touched.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Kernel.Events.OutboxEventBus">
+            <summary>
+            Stages domain events as outbox rows on the caller's <c>DbContext</c>, so they commit in the same
+            transaction as the change that raised them.
+            </summary>
+            <remarks>
+            Scoped, and it shares the request's DbContext with every repository — that shared instance is
+            exactly what makes the event and the domain row land in one transaction. It does no I/O of its
+            own: <see cref="M:BoardSync.Api.Shared.Kernel.Events.OutboxEventBus.Enqueue``1(``0)"/> only adds to the change tracker.
+            </remarks>
+        </member>
+        <member name="F:BoardSync.Api.Shared.Kernel.Events.OutboxEventBus.SerializerOptions">
+            <summary>
+            Shared by the bus and the dispatcher — the two have to agree on the wire format or nothing
+            round-trips.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Kernel.Events.OutboxMessage">
+            <summary>
+            A domain event durably queued for delivery, written in the same transaction as the change that
+            raised it.
+            </summary>
+            <remarks>
+            <para>
+            This exists because the previous design could lose events silently. Services committed their
+            write, then published on an in-process bus that swallowed handler exceptions — so a crash, a
+            timeout, or a thrown handler between the two left the activity log with a hole and nobody the
+            wiser. Staging the event on the same <c>DbContext</c> makes the two atomic: no commit, no event;
+            commit, guaranteed event.
+            </para>
+            <para>
+            The cost is that delivery becomes at-least-once rather than at-most-once, so handlers must be
+            idempotent. That is the better half of the trade — a duplicate is recoverable, a silent loss is
+            not.
+            </para>
+            </remarks>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Kernel.Events.OutboxMessage.Sequence">
+            <summary>
+            Database-generated, monotonically increasing. This is the ordering authority for the whole
+            system: per-topic order follows from a global sequence, which is what will let a real-time
+            client say "I last saw 412, catch me up" without a second event store.
+            </summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Kernel.Events.OutboxMessage.EventId">
+            <summary>
+            The originating event's own id. Unique, and the key handlers deduplicate on — a redelivered
+            message carries the same EventId, so an idempotent handler can recognise it.
+            </summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Kernel.Events.OutboxMessage.EventType">
+            <summary>
+            The event's CLR type name (e.g. <c>WorkItemStateChanged</c>), used to resolve the handler.
+            Deliberately the short name and not an assembly-qualified one: a namespace reorganisation
+            should not strand messages already sitting in the queue.
+            </summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Kernel.Events.OutboxMessage.Payload">
+            <summary>The serialized event, as JSON.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Kernel.Events.OutboxMessage.Topics">
+            <summary>
+            The real-time channels this event should reach, resolved once at enqueue time.
+            </summary>
+            <remarks>
+            Stored rather than derived at dispatch so that "what did this topic miss since sequence N?"
+            — the question a reconnecting client asks — is an indexed array containment filter instead
+            of a scan that deserializes every candidate message to find out.
+            </remarks>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Kernel.Events.OutboxMessage.OccurredAt">
+            <summary>When the event happened, copied off the event itself.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Kernel.Events.OutboxMessage.DispatchedAt">
+            <summary>
+            When the dispatcher finished with this message. Null means still queued — the partial index
+            on this column is what keeps claiming cheap as the table grows.
+            </summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Kernel.Events.OutboxMessage.Attempts">
+            <summary>
+            How many delivery attempts have been made. Incremented on failure so a message that cannot
+            ever succeed stops being retried forever and becomes visible instead.
+            </summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Kernel.Events.OutboxMessage.LastError">
+            <summary>Last failure, kept for diagnosis. Null while healthy.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Kernel.Events.Topic">
+            <summary>
+            The channels a real-time client subscribes to.
+            </summary>
+            <remarks>
+            <para>
+            A topic names <em>what a client is looking at</em>, not what kind of event occurred. That is why
+            they are scope identities — an org, a project, a team, a sprint, one user — rather than event
+            names: a client watching a board subscribes once and receives everything relevant to it.
+            </para>
+            <para>
+            There is deliberately no <c>board:</c> topic. A board is one-to-one with its project, so a board
+            topic would always have exactly the same subscribers as the project topic and would only add a
+            second thing to keep in sync. Board changes travel on <see cref="M:BoardSync.Api.Shared.Kernel.Events.Topic.Project(System.Guid)"/>.
+            </para>
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Kernel.Events.Topic.User(System.Guid)">
+            <summary>One user's private channel — notifications, assignment to them, forced re-auth.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Kernel.Events.Topic.Organization(System.Guid)">
+            <summary>Everything happening in an organization, including its activity feed.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Kernel.Events.Topic.Project(System.Guid)">
+            <summary>Work items, comments and board changes inside one project.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Kernel.Events.Topic.Team(System.Guid)">
+            <summary>Team membership and the team's sprints.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Kernel.Events.Topic.Sprint(System.Guid)">
+            <summary>One sprint's backlog and status.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Kernel.Events.Topic.TryParse(System.String,BoardSync.Api.Shared.Kernel.Events.TopicKind@,System.Guid@)">
+            <summary>
+            Splits a topic string into its kind and id, or returns false if it is not a well-formed
+            topic. Callers get this straight from a client, so a malformed value is a bad request rather
+            than an exception.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Kernel.Events.TopicKind">
+            <summary>What a topic is scoped to. Determines how a subscription is authorized.</summary>
         </member>
         <member name="T:BoardSync.Api.Shared.Kernel.Exceptions.DomainException">
             <summary>Base class for all domain-specific exceptions.</summary>
@@ -1831,10 +3389,363 @@
             Generic paginated result wrapper used across all list endpoints.
             </summary>
         </member>
+        <member name="P:BoardSync.Api.Shared.Kernel.PagedResult`1.NextCursor">
+            <summary>
+            Opaque pointer at the last item on this page. Pass it back as <c>?cursor=</c> to get the next
+            page without an offset scan; null when the endpoint does not support cursor paging or there
+            is nothing after this page.
+            </summary>
+            <remarks>
+            Purely additive — <c>?page</c> keeps working exactly as before, and clients that ignore this
+            field see no change. It exists because offsets degrade with depth and, on a feed that is
+            still being written to, shift rows across page boundaries while a client is reading.
+            </remarks>
+        </member>
         <member name="T:BoardSync.Api.Shared.Kernel.PaginationQuery">
             <summary>
             Query parameters for paginated requests.
             </summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Kernel.PaginationQuery.Cursor">
+            <summary>
+            Opaque cursor from a previous response's <see cref="P:BoardSync.Api.Shared.Kernel.PagedResult`1.NextCursor"/>. When set,
+            endpoints that support it page forward from that point and ignore <see cref="P:BoardSync.Api.Shared.Kernel.PaginationQuery.Page"/>.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Kernel.RateLimiting.RedisFixedWindowRateLimiter">
+            <summary>
+            A fixed-window rate limiter whose counter lives in Redis, so the budget is shared by every
+            instance instead of being per-process.
+            </summary>
+            <remarks>
+            <para>
+            The in-process limiter multiplies the effective limit by the number of instances: the password
+            policy at 5 attempts per 5 minutes quietly becomes 15 across three replicas. That matters
+            because it is a brute-force control, and it fails open in exactly the situation — more capacity,
+            more traffic — where it should not.
+            </para>
+            <para>
+            Counting is done by a Lua script so the increment and the expiry are one atomic step. Doing them
+            as two round trips leaves a window where a crash between them creates a key with no TTL, which
+            would lock a caller out permanently.
+            </para>
+            <para>
+            <b>Fails open.</b> If Redis is unreachable the request is allowed through. A cache outage should
+            degrade a protection, not take the whole API down with it — the alternative is that losing Redis
+            rejects every request in the deployment.
+            </para>
+            </remarks>
+        </member>
+        <member name="F:BoardSync.Api.Shared.Kernel.RateLimiting.RedisFixedWindowRateLimiter.IncrementScript">
+            <summary>
+            Increments the window's counter and sets its expiry on first use, atomically.
+            Returns the count after incrementing.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Kernel.RateLimiting.RedisFixedWindowRateLimiter.AttemptAcquireCore(System.Int32)">
+            <summary>
+            Always declines, which routes every decision through <see cref="M:BoardSync.Api.Shared.Kernel.RateLimiting.RedisFixedWindowRateLimiter.AcquireAsyncCore(System.Int32,System.Threading.CancellationToken)"/>.
+            </summary>
+            <remarks>
+            This must not grant. The counter lives across the network and cannot be consulted without
+            awaiting, and ASP.NET Core's rate limiting middleware tries the synchronous path first and
+            only falls back to the async one when it does not acquire. A lease granted here would
+            therefore short-circuit the middleware into allowing every request without Redis ever being
+            asked — the limiter would look wired up and enforce nothing.
+            </remarks>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Realtime.IPresenceTracker">
+            <summary>
+            Who is currently looking at a topic.
+            </summary>
+            <remarks>
+            <para>
+            Redis only — presence is not worth a database write. It is the most disposable state in the
+            system: losing all of it costs a stale avatar row for a few seconds.
+            </para>
+            <para>
+            Membership is a sorted set scored by the time each user was last seen, rather than a plain set
+            of who joined. That difference matters: a browser tab that is closed, crashes, or drops off wifi
+            never sends a leave, and a plain set would show that person as present forever. Scoring by
+            timestamp lets stale entries be dropped on read, so presence self-heals without depending on
+            clients behaving well.
+            </para>
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Realtime.IPresenceTracker.JoinAsync(System.String,System.Guid)">
+            <summary>Records that a user is watching a topic, or refreshes them if already there.</summary>
+            <returns>True if this was a new arrival, false if it only refreshed an existing one.</returns>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Realtime.IPresenceTracker.LeaveAsync(System.String,System.Guid)">
+            <summary>Removes a user from a topic. Removing someone not present is not an error.</summary>
+            <returns>True if they were actually present.</returns>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Realtime.IPresenceTracker.GetPresentAsync(System.String)">
+            <summary>Everyone seen on a topic within the freshness window.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Realtime.PresenceTracker">
+            <inheritdoc />
+        </member>
+        <member name="F:BoardSync.Api.Shared.Realtime.PresenceTracker.Freshness">
+            <summary>
+            How long a user counts as present without being seen again. Clients refresh well inside
+            this, so it only comes into play when one disappears without saying goodbye.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Realtime.RealtimeMessage">
+            <summary>
+            What a client receives on the wire.
+            </summary>
+            <param name="Sequence">
+            Global, monotonically increasing. The client stores the highest it has processed per topic and
+            sends it back on reconnect to be caught up.
+            </param>
+            <param name="Topic">Which subscription this arrived on. A client may hold several.</param>
+            <param name="Type">
+            The domain event name, e.g. <c>WorkItemStateChanged</c>. Switch on this to decide how to apply
+            the payload.
+            </param>
+            <param name="Payload">
+            The event itself. Self-sufficient by design — enough to patch local state without a refetch.
+            </param>
+            <param name="OccurredAt">When the change happened, not when it was delivered.</param>
+            <remarks>
+            Messages carry deltas rather than "something changed, go refetch". A bare invalidation turns
+            every write by one user into a read by every other user watching, which is the fanout that hurts
+            most exactly when a board is busiest.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Realtime.RealtimeMessage.#ctor(System.Int64,System.String,System.String,System.Text.Json.JsonElement,System.DateTime)">
+            <summary>
+            What a client receives on the wire.
+            </summary>
+            <param name="Sequence">
+            Global, monotonically increasing. The client stores the highest it has processed per topic and
+            sends it back on reconnect to be caught up.
+            </param>
+            <param name="Topic">Which subscription this arrived on. A client may hold several.</param>
+            <param name="Type">
+            The domain event name, e.g. <c>WorkItemStateChanged</c>. Switch on this to decide how to apply
+            the payload.
+            </param>
+            <param name="Payload">
+            The event itself. Self-sufficient by design — enough to patch local state without a refetch.
+            </param>
+            <param name="OccurredAt">When the change happened, not when it was delivered.</param>
+            <remarks>
+            Messages carry deltas rather than "something changed, go refetch". A bare invalidation turns
+            every write by one user into a read by every other user watching, which is the fanout that hurts
+            most exactly when a board is busiest.
+            </remarks>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Realtime.RealtimeMessage.Sequence">
+            <summary>
+            Global, monotonically increasing. The client stores the highest it has processed per topic and
+            sends it back on reconnect to be caught up.
+            </summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Realtime.RealtimeMessage.Topic">
+            <summary>Which subscription this arrived on. A client may hold several.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Realtime.RealtimeMessage.Type">
+            <summary>
+            The domain event name, e.g. <c>WorkItemStateChanged</c>. Switch on this to decide how to apply
+            the payload.
+            </summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Realtime.RealtimeMessage.Payload">
+            <summary>
+            The event itself. Self-sufficient by design — enough to patch local state without a refetch.
+            </summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Realtime.RealtimeMessage.OccurredAt">
+            <summary>When the change happened, not when it was delivered.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Realtime.IRealtimeNotifier">
+            <summary>
+            Pushes a delivered event out to everyone watching the topics it belongs to.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Realtime.IRealtimeNotifier.NotifyAsync(BoardSync.Api.Shared.Kernel.Events.OutboxMessage,System.Threading.CancellationToken)">
+            <summary>
+            Sends one outbox message to its topics.
+            </summary>
+            <remarks>
+            Never throws. Real-time delivery is an optimisation on top of state that is already
+            committed and already readable over REST — a hub failure must not fail the outbox message
+            and send the whole thing round again, because that would duplicate the push to everyone who
+            did receive it.
+            </remarks>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Realtime.SignalRNotifier">
+            <inheritdoc />
+        </member>
+        <member name="T:BoardSync.Api.Shared.Realtime.IRealtimeReplay">
+            <summary>
+            Catches a reconnecting client up on what it missed.
+            </summary>
+            <remarks>
+            The outbox is already a durable, ordered, per-topic log of everything that happened, so replay
+            reads from it directly. No second event store is needed, and there is no way for the replayed
+            history to disagree with what was originally sent — it is the same rows.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Realtime.IRealtimeReplay.GetCurrentSequenceAsync(System.Threading.CancellationToken)">
+            <summary>The newest sequence in the log. A client with this value is fully caught up.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Realtime.IRealtimeReplay.GetMissedAsync(System.String,System.Int64,System.Threading.CancellationToken)">
+            <summary>
+            Messages on a topic after <paramref name="afterSequence"/>, oldest first.
+            </summary>
+            <returns>
+            The missed messages, or <c>null</c> when the gap exceeds the replay bound and the client
+            must refetch instead.
+            </returns>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Realtime.RealtimeReplay">
+            <inheritdoc />
+        </member>
+        <member name="T:BoardSync.Api.Shared.Realtime.ITopicAuthorizer">
+            <summary>
+            Decides whether a user may listen on a topic.
+            </summary>
+            <remarks>
+            A subscription is a standing grant to receive everything on a channel, so it has to be
+            authorized at least as carefully as the REST endpoint that would return the same data. Getting
+            this wrong does not throw — it quietly streams another organization's work to someone who should
+            never see it.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Realtime.ITopicAuthorizer.CanSubscribeAsync(System.Guid,System.String,System.Threading.CancellationToken)">
+            <summary>Whether this user may subscribe to this topic.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Realtime.TopicAuthorizer">
+            <inheritdoc />
+        </member>
+        <member name="T:BoardSync.Api.Shared.Realtime.WorkspaceHub">
+            <summary>
+            The real-time channel. Clients subscribe to topics and receive changes as they happen.
+            </summary>
+            <remarks>
+            <para>
+            Authorization happens per <see cref="M:BoardSync.Api.Shared.Realtime.WorkspaceHub.SubscribeAsync(System.String,System.Nullable{System.Int64})"/>, not once at connect. A connection proves
+            who you are; a subscription proves what you may watch, and those are different questions with
+            different answers that change at different times.
+            </para>
+            <para>
+            Everything a client receives arrives as <c>Message</c> with a monotonically increasing
+            <c>sequence</c>. That sequence is the client's resume point — see <see cref="M:BoardSync.Api.Shared.Realtime.WorkspaceHub.SubscribeAsync(System.String,System.Nullable{System.Int64})"/>.
+            </para>
+            </remarks>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Realtime.WorkspaceHub.JoinedTopics">
+            <summary>
+            Topics this connection has joined, so a disconnect can clean up its presence.
+            </summary>
+            <remarks>
+            Held per connection rather than globally: SignalR gives no way to enumerate a connection's
+            groups, and presence that only clears on a polite unsubscribe would leak every closed tab.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Realtime.WorkspaceHub.SubscribeAsync(System.String,System.Nullable{System.Int64})">
+            <summary>
+            Joins a topic and, when a resume point is supplied, catches the caller up on what they
+            missed.
+            </summary>
+            <param name="topic">A topic string, e.g. <c>project:{guid}</c>.</param>
+            <param name="lastSequence">
+            The sequence of the last message this client processed on this topic, or null for a fresh
+            subscription.
+            </param>
+            <returns>
+            The outcome — whether the subscription was accepted, the current sequence to resume from
+            next time, and whether the client must refetch instead of relying on replay.
+            </returns>
+            <remarks>
+            The failure mode this guards against is not the disconnect — it is the client that
+            reconnects, misses the messages sent while it was away, and carries on looking correct while
+            showing stale data. Replay closes that gap; <c>resync</c> is the honest answer when the gap
+            is too wide to close cheaply.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Realtime.WorkspaceHub.UnsubscribeAsync(System.String)">
+            <summary>Leaves a topic. Unsubscribing from something you were never on is not an error.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Realtime.WorkspaceHub.GetPresenceAsync(System.String)">
+            <summary>Who else is watching this topic right now.</summary>
+            <remarks>
+            Authorized like a subscription — being able to see who is on a board is being able to see
+            that the board exists.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Realtime.WorkspaceHub.HeartbeatAsync">
+            <summary>
+            Keeps this connection counted as present. Call every ~30 seconds while a view is open.
+            </summary>
+            <remarks>
+            Presence entries expire on their own, so a client that stops heartbeating fades out rather
+            than lingering. That is the point — a crashed tab cannot send a goodbye.
+            </remarks>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Realtime.SubscribeResult">
+            <summary>The outcome of a subscribe attempt.</summary>
+            <param name="Subscribed">Whether the client is now receiving this topic.</param>
+            <param name="CurrentSequence">
+            The newest sequence at subscribe time. Persist it and send it back as <c>lastSequence</c> on the
+            next reconnect.
+            </param>
+            <param name="Resync">
+            True when the gap was too large to replay. The client must refetch the relevant state over REST;
+            the deltas that follow are still valid from <paramref name="CurrentSequence"/> onward.
+            </param>
+            <param name="Reason">Why a denied subscription was denied. Null on success.</param>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Realtime.SubscribeResult.#ctor(System.Boolean,System.Int64,System.Boolean,System.String)">
+            <summary>The outcome of a subscribe attempt.</summary>
+            <param name="Subscribed">Whether the client is now receiving this topic.</param>
+            <param name="CurrentSequence">
+            The newest sequence at subscribe time. Persist it and send it back as <c>lastSequence</c> on the
+            next reconnect.
+            </param>
+            <param name="Resync">
+            True when the gap was too large to replay. The client must refetch the relevant state over REST;
+            the deltas that follow are still valid from <paramref name="CurrentSequence"/> onward.
+            </param>
+            <param name="Reason">Why a denied subscription was denied. Null on success.</param>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Realtime.SubscribeResult.Subscribed">
+            <summary>Whether the client is now receiving this topic.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Realtime.SubscribeResult.CurrentSequence">
+            <summary>
+            The newest sequence at subscribe time. Persist it and send it back as <c>lastSequence</c> on the
+            next reconnect.
+            </summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Realtime.SubscribeResult.Resync">
+            <summary>
+            True when the gap was too large to replay. The client must refetch the relevant state over REST;
+            the deltas that follow are still valid from <paramref name="CurrentSequence"/> onward.
+            </summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Realtime.SubscribeResult.Reason">
+            <summary>Why a denied subscription was denied. Null on success.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Data.ITransactionState">
+            <summary>
+            Whether the current unit of work is inside an explicit transaction.
+            </summary>
+            <remarks>
+            Exists so services that are otherwise ignorant of persistence can still tell when they are
+            running inside one, without taking a dependency on <see cref="T:BoardSync.Api.Data.BoardSyncDbContext"/> and
+            reopening the door this codebase closed by moving all data access behind repositories.
+            </remarks>
+        </member>
+        <member name="P:BoardSync.Api.Data.ITransactionState.InTransaction">
+            <summary>True while an explicit transaction is open on this request's unit of work.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Data.TransactionState">
+            <inheritdoc />
         </member>
         <member name="T:Program">
             <summary>

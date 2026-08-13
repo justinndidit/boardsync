@@ -1,18 +1,17 @@
-using BoardSync.Api.Data;
 using BoardSync.Api.Modules.Rbac.Models;
+using BoardSync.Api.Modules.Rbac.Repositories.Interfaces;
 using BoardSync.Api.Modules.Rbac.Services.Interfaces;
-using Microsoft.EntityFrameworkCore;
 
 namespace BoardSync.Api.Modules.Rbac.Services.Implementations;
 
 public class RbacService : IRbacService
 {
-    private readonly BoardSyncDbContext _context;
+    private readonly IRoleAssignmentRepository _repository;
     private readonly ILogger<RbacService> _logger;
 
-    public RbacService(BoardSyncDbContext context, ILogger<RbacService> logger)
+    public RbacService(IRoleAssignmentRepository repository, ILogger<RbacService> logger)
     {
-        _context = context;
+        _repository = repository;
         _logger = logger;
     }
 
@@ -24,16 +23,15 @@ public class RbacService : IRbacService
         Guid? assignedBy = null,
         CancellationToken ct = default)
     {
-        var existing = await WhereScope(_context.RoleAssignments, scope, scopeId)
-            .FirstOrDefaultAsync(ra => ra.UserId == userId && ra.Role == role, ct);
+        var existing = await _repository.GetAsync(userId, role, scope, scopeId, ct);
 
         if (existing != null)
             return existing;
 
         var assignment = CreateAssignment(userId, role, scope, scopeId, assignedBy);
 
-        _context.RoleAssignments.Add(assignment);
-        await _context.SaveChangesAsync(ct);
+        _repository.Add(assignment);
+        await _repository.SaveChangesAsync(ct);
 
         _logger.LogInformation("Assigned role {Role} to user {UserId} at {Scope}:{ScopeId}",
             role, userId, scope, scopeId);
@@ -41,15 +39,19 @@ public class RbacService : IRbacService
         return assignment;
     }
 
-    public async Task RemoveRoleAsync(Guid userId, RoleType role, RoleScope scope, Guid scopeId, CancellationToken ct = default)
+    public async Task RemoveRoleAsync(
+        Guid userId,
+        RoleType role,
+        RoleScope scope,
+        Guid scopeId,
+        CancellationToken ct = default)
     {
-        var assignment = await WhereScope(_context.RoleAssignments, scope, scopeId)
-            .FirstOrDefaultAsync(ra => ra.UserId == userId && ra.Role == role, ct);
+        var assignment = await _repository.GetAsync(userId, role, scope, scopeId, ct);
 
         if (assignment == null) return;
 
-        _context.RoleAssignments.Remove(assignment);
-        await _context.SaveChangesAsync(ct);
+        _repository.Remove(assignment);
+        await _repository.SaveChangesAsync(ct);
 
         _logger.LogInformation("Removed role {Role} from user {UserId} at {Scope}:{ScopeId}",
             role, userId, scope, scopeId);
@@ -62,81 +64,52 @@ public class RbacService : IRbacService
         Guid scopeId,
         CancellationToken ct = default)
     {
-        // Load all role assignments for this user at this scope into memory,
-        // then do the numeric privilege comparison in C#.
-        // We cannot use (int)ra.Role in SQL because the column is stored as a
-        // character varying (HasConversion<string>) and Postgres rejects integer casts on it.
-        var assignments = await WhereScope(_context.RoleAssignments, scope, scopeId)
-            .Where(ra => ra.UserId == userId)
-            .Select(ra => ra.Role)
-            .ToListAsync(ct);
+        var assignments = await _repository.GetRolesAtScopeAsync(userId, scope, scopeId, ct);
 
-        // A role satisfies the requirement if its numeric value is <= minimumRole
-        // (lower value = more privileged in the enum).
-        //
-        // The comparison MUST be resolved in C# and matched by identity. Role is persisted with
-        // HasConversion<string>() (see BoardSyncDbContext), so writing `(int)ra.Role <= (int)minimumRole`
-        // in the predicate silently drops the casts and asks the database to compare the *names*:
-        // 'TeamMember' <= 'Reader' is false and 'Reader' <= 'TeamMember' is true, which both denies
-        // team members read access and lets readers perform team-member writes.
+        // A role satisfies the requirement if its numeric value is <= minimumRole (lower value =
+        // more privileged). The comparison MUST be resolved here and matched by identity — see
+        // IRoleAssignmentRepository.GetRolesAtScopeAsync for why it cannot happen in SQL.
         var satisfyingRoles = RolesSatisfying(minimumRole);
-        var directMatch = assignments.Any(satisfyingRoles.Contains);
-        if (directMatch) return true;
+
+        if (assignments.Any(satisfyingRoles.Contains))
+            return true;
 
         // OrgAdmin implicitly satisfies any project/team scope check within that org.
-        if (scope == RoleScope.Project || scope == RoleScope.Team)
-        {
-            var isOrgAdmin = await IsOrgAdminForScopeAsync(userId, scope, scopeId, ct);
-            if (isOrgAdmin) return true;
-        }
+        if (scope is RoleScope.Project or RoleScope.Team)
+            return await _repository.IsOrgAdminForScopeAsync(userId, scope, scopeId, ct);
 
         return false;
     }
 
-    public async Task<IReadOnlyList<RoleAssignment>> GetUserRolesAsync(Guid userId, CancellationToken ct = default)
+    public Task<IReadOnlyList<RoleAssignment>> GetUserRolesAsync(Guid userId, CancellationToken ct = default)
+        => _repository.GetForUserAsync(userId, ct);
+
+    public Task<IReadOnlyList<RoleAssignment>> GetScopeRolesAsync(
+        RoleScope scope,
+        Guid scopeId,
+        CancellationToken ct = default)
+        => _repository.GetForScopeAsync(scope, scopeId, ct);
+
+    public async Task RemoveAllRolesAsync(
+        Guid userId,
+        RoleScope scope,
+        Guid scopeId,
+        CancellationToken ct = default)
     {
-        return await _context.RoleAssignments
-            .Where(ra => ra.UserId == userId)
-            .ToListAsync(ct);
+        var assignments = await _repository.GetUserAssignmentsAtScopeAsync(userId, scope, scopeId, ct);
+
+        if (assignments.Count == 0) return;
+
+        _repository.RemoveRange(assignments);
+        await _repository.SaveChangesAsync(ct);
+
+        _logger.LogInformation("Removed {Count} role(s) from user {UserId} at {Scope}:{ScopeId}",
+            assignments.Count, userId, scope, scopeId);
     }
-
-    public async Task<IReadOnlyList<RoleAssignment>> GetScopeRolesAsync(RoleScope scope, Guid scopeId, CancellationToken ct = default)
-    {
-        return await WhereScope(_context.RoleAssignments, scope, scopeId)
-            .ToListAsync(ct);
-    }
-
-    public async Task RemoveAllRolesAsync(Guid userId, RoleScope scope, Guid scopeId, CancellationToken ct = default)
-{
-    var assignments = await WhereScope(_context.RoleAssignments, scope, scopeId)
-        .Where(ra => ra.UserId == userId)
-        .ToListAsync(ct);
-
-    if (assignments.Count == 0) return;
-
-    _context.RoleAssignments.RemoveRange(assignments);
-    await _context.SaveChangesAsync(ct);
-
-    _logger.LogInformation("Removed {Count} role(s) from user {UserId} at {Scope}:{ScopeId}",
-        assignments.Count, userId, scope, scopeId);
-}
 
     // -------------------------------------------------------------------------
     // Private helpers
     // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// Filters a RoleAssignment query to the given scope, comparing against
-    /// whichever of OrganizationId/ProjectId/TeamId matches the scope.
-    /// </summary>
-    private static IQueryable<RoleAssignment> WhereScope(
-        IQueryable<RoleAssignment> query, RoleScope scope, Guid scopeId) => scope switch
-    {
-        RoleScope.Organization => query.Where(ra => ra.OrganizationId == scopeId),
-        RoleScope.Project => query.Where(ra => ra.ProjectId == scopeId),
-        RoleScope.Team => query.Where(ra => ra.TeamId == scopeId),
-        _ => throw new ArgumentOutOfRangeException(nameof(scope), scope, "Unhandled RoleScope value.")
-    };
 
     /// <summary>
     /// Builds a RoleAssignment with exactly the scope column populated that
@@ -172,29 +145,4 @@ public class RbacService : IRbacService
         Enum.GetValues<RoleType>()
             .Where(role => (int)role <= (int)minimumRole)
             .ToArray();
-
-    private async Task<bool> IsOrgAdminForScopeAsync(Guid userId, RoleScope scope, Guid scopeId, CancellationToken ct)
-    {
-        // Get all orgs where this user is OrgAdmin
-        var orgAdminOrgIds = await _context.RoleAssignments
-            .Where(ra => ra.UserId == userId && ra.Role == RoleType.OrgAdmin && ra.Scope == RoleScope.Organization)
-            .Select(ra => ra.OrganizationId!.Value)
-            .ToListAsync(ct);
-
-        if (orgAdminOrgIds.Count == 0) return false;
-
-        if (scope == RoleScope.Project)
-        {
-            return await _context.Projects
-                .AnyAsync(p => p.Id == scopeId && orgAdminOrgIds.Contains(p.OrganizationId), ct);
-        }
-
-        if (scope == RoleScope.Team)
-        {
-            return await _context.Teams
-                .AnyAsync(t => t.Id == scopeId && orgAdminOrgIds.Contains(t.OrganizationId), ct);
-        }
-
-        return false;
-    }
 }

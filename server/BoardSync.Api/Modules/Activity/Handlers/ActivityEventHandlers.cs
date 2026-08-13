@@ -1,9 +1,8 @@
-using BoardSync.Api.Data;
 using BoardSync.Api.Modules.Activity.Models;
+using BoardSync.Api.Modules.Activity.Repositories.Interfaces;
 using BoardSync.Api.Modules.Activity.Services;
 using BoardSync.Api.Modules.OrgProject.Domain.Events;
 using BoardSync.Api.Shared.Kernel.Events;
-using Microsoft.EntityFrameworkCore;
 using System.Diagnostics.CodeAnalysis;
 
 namespace BoardSync.Api.Modules.Activity.Handlers;
@@ -13,10 +12,17 @@ namespace BoardSync.Api.Modules.Activity.Handlers;
 /// subscribers — the raising modules know nothing about the activity log.
 /// </summary>
 /// <remarks>
-/// Recording is best-effort by construction: <see cref="InMemoryEventBus"/> resolves handlers in a
-/// fresh scope after the originating transaction has committed, and swallows whatever they throw.
-/// A dropped row costs a line in the feed and nothing else, which is the right trade for never
-/// failing a user's write because the audit trail was unavailable.
+/// <para>
+/// Recording is no longer best-effort. Events reach these handlers through the outbox, so a
+/// failure here is retried rather than swallowed — the message stays queued until its handlers
+/// succeed or it exhausts its attempts, at which point it is left in the table where it can be
+/// found. Entries can no longer go missing because a handler happened to throw.
+/// </para>
+/// <para>
+/// The other side of that guarantee is at-least-once delivery: a handler can be invoked twice for
+/// the same event. Every write here is keyed on <see cref="IDomainEvent.EventId"/>, and a
+/// redelivery is recognised and skipped rather than duplicated.
+/// </para>
 /// </remarks>
 public partial class ActivityEventHandlers :
     IEventHandler<OrganizationCreated>,
@@ -35,12 +41,12 @@ public partial class ActivityEventHandlers :
     IEventHandler<MemberRemovedFromTeam>
 {
     private readonly IActivityRecorder _recorder;
-    private readonly BoardSyncDbContext _context;
+    private readonly IActivityRepository _repository;
 
-    public ActivityEventHandlers(IActivityRecorder recorder, BoardSyncDbContext context)
+    public ActivityEventHandlers(IActivityRecorder recorder, IActivityRepository repository)
     {
         _recorder = recorder;
-        _context = context;
+        _repository = repository;
     }
 
     // ── Organization ─────────────────────────────────────────────────────────
@@ -136,6 +142,9 @@ public partial class ActivityEventHandlers :
         string? newValue = null) =>
         _recorder.RecordAsync(new ActivityLog
         {
+            // Carrying the originating event id is what makes recording idempotent — the outbox
+            // delivers at least once, and this is the key a redelivery is recognised by.
+            EventId = e.EventId,
             OrganizationId = organizationId,
             ProjectId = projectId,
             TeamId = teamId,
@@ -159,15 +168,12 @@ public partial class ActivityEventHandlers :
     private static string? Truncate(string? value, int max) =>
         value is null || value.Length <= max ? value : value[..max];
 
-    private async Task<string> UserNameAsync(Guid userId, CancellationToken ct) =>
-        await _context.Users.Where(u => u.Id == userId)
-            .Select(u => u.DisplayName).FirstOrDefaultAsync(ct) ?? "Unknown";
+    private Task<string> UserNameAsync(Guid userId, CancellationToken ct) =>
+        _repository.GetUserNameAsync(userId, ct);
 
-    private async Task<string> OrgNameAsync(Guid orgId, CancellationToken ct) =>
-        await _context.Organizations.Where(o => o.Id == orgId)
-            .Select(o => o.Name).FirstOrDefaultAsync(ct) ?? string.Empty;
+    private Task<string> OrgNameAsync(Guid orgId, CancellationToken ct) =>
+        _repository.GetOrganizationNameAsync(orgId, ct);
 
-    private async Task<string> TeamNameAsync(Guid teamId, CancellationToken ct) =>
-        await _context.Teams.Where(t => t.Id == teamId)
-            .Select(t => t.Name).FirstOrDefaultAsync(ct) ?? string.Empty;
+    private Task<string> TeamNameAsync(Guid teamId, CancellationToken ct) =>
+        _repository.GetTeamNameAsync(teamId, ct);
 }

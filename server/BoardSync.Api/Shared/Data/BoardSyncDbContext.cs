@@ -5,6 +5,7 @@ using BoardSync.Api.Modules.Rbac.Models;
 using BoardSync.Api.Modules.Sprints.Models;
 using BoardSync.Api.Modules.WorkItems.Models;
 using BoardSync.Api.Shared.Auth.Models;
+using BoardSync.Api.Shared.Kernel.Events;
 using Microsoft.EntityFrameworkCore;
 
 namespace BoardSync.Api.Data;
@@ -45,8 +46,8 @@ public class BoardSyncDbContext : DbContext
     // ---- Activity module ----
     public DbSet<ActivityLog> ActivityLogs { get; set; } = null!;
 
-    // ---- Backlog module ----
-    public DbSet<BacklogItem> BacklogItems { get; set; } = null!;
+    // ── Shared kernel ─────────────────────────────────────────────────────────
+    public DbSet<OutboxMessage> OutboxMessages { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -66,6 +67,16 @@ public class BoardSyncDbContext : DbContext
             entity.HasIndex(w => w.Type);
             entity.HasIndex(w => w.ParentId);
             entity.HasIndex(w => w.IsActive);
+
+            // The shape every project-scoped read uses: one project, live rows only, often narrowed
+            // to a state. Postgres can bitmap-AND the three single-column indexes above instead, but
+            // that costs a heap probe per candidate row — this one answers the workspace summary's
+            // active-work-item count straight from the index.
+            entity.HasIndex(w => new { w.ProjectId, w.IsActive, w.State });
+
+            // Postgres maintains xmin itself; mapping it costs no column and no migration, and
+            // gives every work item a version EF can check on update.
+            entity.Property(w => w.Version).IsRowVersion().HasColumnName("xmin").HasColumnType("xid");
 
             entity.Property(w => w.Title).IsRequired().HasMaxLength(255);
             entity.Property(w => w.Description).HasMaxLength(10000);
@@ -120,6 +131,12 @@ public class BoardSyncDbContext : DbContext
             entity.HasKey(h => h.Id);
             entity.HasIndex(h => h.WorkItemId);
             entity.HasIndex(h => h.ChangedBy);
+
+            // Serves the workspace notification feed, which filters by a set of projects and sorts
+            // by recency. Descending on CreatedAt so the feed's ORDER BY reads straight out of the
+            // index instead of sorting the matched rows.
+            entity.HasIndex(h => new { h.ProjectId, h.CreatedAt })
+                .IsDescending(false, true);
 
             entity.Property(h => h.FieldName).IsRequired().HasMaxLength(100);
             entity.Property(h => h.OldValue).HasMaxLength(1000);
@@ -291,6 +308,9 @@ public class BoardSyncDbContext : DbContext
             entity.HasIndex(s => new { s.TeamId, s.Number }).IsUnique();
             entity.HasIndex(s => s.Status);
 
+            // "The active sprint for this team" runs on every board render.
+            entity.HasIndex(s => new { s.TeamId, s.Status });
+
             entity.Property(s => s.Goal).HasMaxLength(500);
             entity.Property(s => s.Status)
                 .HasMaxLength(20)
@@ -310,6 +330,12 @@ public class BoardSyncDbContext : DbContext
             entity.HasKey(sw => sw.Id);
             entity.HasIndex(sw => new { sw.SprintId, sw.WorkItemId }).IsUnique();
             entity.HasIndex(sw => sw.WorkItemId);
+
+            // Backlog and board reads want one sprint's entries already in display order. Rank is
+            // the sort key now; the Position index stays for the legacy column while anything still
+            // reads it.
+            entity.HasIndex(sw => new { sw.SprintId, sw.Position });
+            entity.HasIndex(sw => new { sw.SprintId, sw.Rank });
         });
 
         modelBuilder.Entity<Board>(entity =>
@@ -354,6 +380,10 @@ public class BoardSyncDbContext : DbContext
             // feed a small IN-list, and either way the sort comes out of the index.
             entity.HasIndex(a => new { a.OrganizationId, a.OccurredAt })
                 .IsDescending(false, true);
+
+            // The idempotency key. A redelivered outbox message carries the same EventId, and this
+            // index is what turns "write it twice" into a no-op instead of a duplicate feed line.
+            entity.HasIndex(a => a.EventId).IsUnique();
             entity.HasIndex(a => a.ProjectId);
             entity.HasIndex(a => a.TeamId);
             entity.HasIndex(a => a.EntityId);
@@ -479,5 +509,36 @@ public class BoardSyncDbContext : DbContext
             entity.HasIndex(rt => rt.Revoked);
             entity.HasIndex(rt => rt.Created);
         });
+        // ----------------------------------------------------------------
+        // Shared kernel — schema: kernel
+        // ----------------------------------------------------------------
+        modelBuilder.Entity<OutboxMessage>(entity =>
+        {
+            entity.ToTable("OutboxMessages", "kernel");
+            entity.HasKey(m => m.Sequence);
+
+            // Database-generated so the ordering authority is the database, not the application.
+            // Several instances write concurrently; only the sequence can order them.
+            entity.Property(m => m.Sequence).ValueGeneratedOnAdd();
+
+            entity.HasIndex(m => m.EventId).IsUnique();
+
+            // Partial: the dispatcher only ever asks for undelivered rows, and once the table has
+            // months of delivered history a full index on DispatchedAt would be mostly dead weight.
+            entity.HasIndex(m => m.Sequence)
+                .HasFilter("\"DispatchedAt\" IS NULL")
+                .HasDatabaseName("IX_OutboxMessages_Undispatched");
+
+            entity.Property(m => m.EventType).IsRequired().HasMaxLength(200);
+            entity.Property(m => m.Payload).IsRequired().HasColumnType("jsonb");
+
+            // GIN so "which messages touched this topic?" is an index lookup on array containment.
+            // A btree cannot answer that — it would degrade into a scan as the table grows, which
+            // is exactly the query a reconnecting client makes.
+            entity.Property(m => m.Topics).HasColumnType("text[]");
+            entity.HasIndex(m => m.Topics).HasMethod("gin");
+            entity.Property(m => m.LastError).HasMaxLength(2000);
+        });
+
     }
 }

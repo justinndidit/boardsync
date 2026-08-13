@@ -1,23 +1,43 @@
-using BoardSync.Api.Data;
 using BoardSync.Api.Modules.Sprints.DTOs;
+using Microsoft.Extensions.Caching.Hybrid;
 using BoardSync.Api.Modules.Sprints.Events;
 using BoardSync.Api.Modules.Sprints.Models;
+using BoardSync.Api.Modules.Sprints.Repositories.Interfaces;
 using BoardSync.Api.Shared.Kernel.Events;
 using BoardSync.Api.Shared.Kernel.Exceptions;
-using Microsoft.EntityFrameworkCore;
 
 namespace BoardSync.Api.Modules.Sprints.Services;
 
 public class BoardService : IBoardService
 {
-    private readonly BoardSyncDbContext _context;
+    private readonly IBoardRepository _repository;
     private readonly IEventBus _eventBus;
+    private readonly HybridCache _cache;
+    private readonly IBoardCacheVersion? _version;
     private readonly ILogger<BoardService> _logger;
 
-    public BoardService(BoardSyncDbContext context, IEventBus eventBus, ILogger<BoardService> logger)
+    /// <summary>
+    /// Short on purpose. The version stamp is what makes a change visible immediately; this only
+    /// bounds how long an untouched board can sit cached, and a board nobody is changing is a board
+    /// nobody minds reading slightly late.
+    /// </summary>
+    private static readonly HybridCacheEntryOptions SnapshotOptions = new()
     {
-        _context = context;
+        Expiration = TimeSpan.FromMinutes(2),
+        LocalCacheExpiration = TimeSpan.FromSeconds(20)
+    };
+
+    public BoardService(
+        IBoardRepository repository,
+        IEventBus eventBus,
+        HybridCache cache,
+        ILogger<BoardService> logger,
+        IBoardCacheVersion? version = null)
+    {
+        _repository = repository;
         _eventBus = eventBus;
+        _cache = cache;
+        _version = version;
         _logger = logger;
     }
 
@@ -26,28 +46,26 @@ public class BoardService : IBoardService
         Guid createdBy,
         CancellationToken ct = default)
     {
-        if (!await _context.Projects.AnyAsync(p => p.Id == projectId && p.IsActive, ct))
+        if (!await _repository.ProjectExistsAsync(projectId, ct))
             throw new NotFoundException("Project", projectId);
 
-        var board = await _context.Boards
-            .Include(b => b.Columns)
-            .FirstOrDefaultAsync(b => b.ProjectId == projectId, ct);
+        var board = await _repository.GetForProjectWithColumnsAsync(projectId, ct);
 
         if (board is null)
         {
             board = BuildDefaultBoard(projectId, createdBy);
-            _context.Boards.Add(board);
-            await _context.SaveChangesAsync(ct);
+            _repository.Add(board);
+            await _repository.SaveChangesAsync(ct);
             _logger.LogInformation("Board auto-created for project {ProjectId}", projectId);
         }
 
-        return await BuildBoardResponseAsync(board, ct);
+        return await GetBoardResponseAsync(board, ct);
     }
 
     public async Task<BoardResponse> GetByIdAsync(Guid boardId, CancellationToken ct = default)
     {
         var board = await GetBoardOrThrowAsync(boardId, ct);
-        return await BuildBoardResponseAsync(board, ct);
+        return await GetBoardResponseAsync(board, ct);
     }
 
     public async Task<BoardResponse> UpdateAsync(
@@ -61,10 +79,11 @@ public class BoardService : IBoardService
 
         board.Name = request.Name.Trim();
         board.UpdatedAt = DateTime.UtcNow;
-        await _context.SaveChangesAsync(ct);
 
         if (previousName != board.Name)
-            await PublishAsync(board, "Name", previousName, board.Name, updatedBy, ct);
+            await EnqueueAsync(board, "Name", previousName, board.Name, updatedBy, ct);
+
+        await _repository.SaveChangesAsync(ct);
 
         return await BuildBoardResponseAsync(board, ct);
     }
@@ -77,26 +96,23 @@ public class BoardService : IBoardService
     {
         var board = await GetBoardOrThrowAsync(boardId, ct);
 
-        // Default to appending at the end
-        var position = request.Position ?? (
-            await _context.BoardColumns
-                .Where(c => c.BoardId == boardId)
-                .MaxAsync(c => (int?)c.Position, ct) ?? -1) + 1;
+        var position = request.Position ?? await _repository.GetNextColumnPositionAsync(boardId, ct);
 
         var column = new BoardColumn
         {
-            BoardId   = boardId,
-            Name      = request.Name.Trim(),
+            BoardId     = boardId,
+            Name        = request.Name.Trim(),
             MappedState = request.MappedState.Trim(),
-            Position  = position,
-            WipLimit  = request.WipLimit,
-            CreatedBy = createdBy
+            Position    = position,
+            WipLimit    = request.WipLimit,
+            CreatedBy   = createdBy
         };
 
-        _context.BoardColumns.Add(column);
-        await _context.SaveChangesAsync(ct);
+        _repository.AddColumn(column);
 
-        await PublishAsync(board, "Column added", null, column.Name, createdBy, ct);
+        await EnqueueAsync(board, "Column added", null, column.Name, createdBy, ct);
+
+        await _repository.SaveChangesAsync(ct);
 
         return MapColumnDetail(column);
     }
@@ -116,10 +132,10 @@ public class BoardService : IBoardService
         column.Position    = request.Position;
         column.UpdatedAt   = DateTime.UtcNow;
 
-        await _context.SaveChangesAsync(ct);
-
         var board = await GetBoardOrThrowAsync(column.BoardId, ct);
-        await PublishAsync(board, "Column updated", previousName, column.Name, updatedBy, ct);
+        await EnqueueAsync(board, "Column updated", previousName, column.Name, updatedBy, ct);
+
+        await _repository.SaveChangesAsync(ct);
 
         return MapColumnDetail(column);
     }
@@ -130,10 +146,11 @@ public class BoardService : IBoardService
         var board = await GetBoardOrThrowAsync(column.BoardId, ct);
         var name = column.Name;
 
-        _context.BoardColumns.Remove(column);
-        await _context.SaveChangesAsync(ct);
+        _repository.RemoveColumn(column);
 
-        await PublishAsync(board, "Column removed", name, null, deletedBy, ct);
+        await EnqueueAsync(board, "Column removed", name, null, deletedBy, ct);
+
+        await _repository.SaveChangesAsync(ct);
     }
 
     public async Task ReorderColumnsAsync(
@@ -143,9 +160,7 @@ public class BoardService : IBoardService
     {
         _ = await GetBoardOrThrowAsync(boardId, ct);
 
-        var columns = await _context.BoardColumns
-            .Where(c => c.BoardId == boardId)
-            .ToListAsync(ct);
+        var columns = await _repository.GetColumnsAsync(boardId, ct);
 
         for (int i = 0; i < request.ColumnIds.Count; i++)
         {
@@ -154,8 +169,12 @@ public class BoardService : IBoardService
                 col.Position = i;
         }
 
-        await _context.SaveChangesAsync(ct);
+        await _repository.SaveChangesAsync(ct);
     }
+
+    public async Task<Guid> GetProjectIdForColumnAsync(Guid columnId, CancellationToken ct = default)
+        => await _repository.GetProjectIdForColumnAsync(columnId, ct)
+           ?? throw new NotFoundException("BoardColumn", columnId);
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
@@ -164,7 +183,7 @@ public class BoardService : IBoardService
     /// activity log files entries under. Skipped if the project has gone — there would be no
     /// organization to attribute the change to.
     /// </summary>
-    private async Task PublishAsync(
+    private async Task EnqueueAsync(
         Board board,
         string change,
         string? oldValue,
@@ -172,88 +191,68 @@ public class BoardService : IBoardService
         Guid changedBy,
         CancellationToken ct)
     {
-        var orgId = await _context.Projects
-            .Where(p => p.Id == board.ProjectId)
-            .Select(p => (Guid?)p.OrganizationId)
-            .FirstOrDefaultAsync(ct);
+        var orgId = await _repository.GetOrganizationIdForProjectAsync(board.ProjectId, ct);
 
         if (orgId is null) return;
 
-        await _eventBus.PublishAsync(new BoardChanged(
-            board.Id, board.ProjectId, orgId.Value, board.Name, change, oldValue, newValue, changedBy), ct);
+        _eventBus.Enqueue(new BoardChanged(
+            board.Id, board.ProjectId, orgId.Value, board.Name, change, oldValue, newValue, changedBy));
     }
 
     private async Task<Board> GetBoardOrThrowAsync(Guid boardId, CancellationToken ct)
-        => await _context.Boards
-               .Include(b => b.Columns)
-               .FirstOrDefaultAsync(b => b.Id == boardId, ct)
+        => await _repository.GetWithColumnsAsync(boardId, ct)
            ?? throw new NotFoundException("Board", boardId);
 
     private async Task<BoardColumn> GetColumnOrThrowAsync(Guid columnId, CancellationToken ct)
-        => await _context.BoardColumns.FirstOrDefaultAsync(c => c.Id == columnId, ct)
+        => await _repository.GetColumnAsync(columnId, ct)
            ?? throw new NotFoundException("BoardColumn", columnId);
+
+    /// <summary>
+    /// Builds the board, from cache when one is available for the project's current generation.
+    /// </summary>
+    /// <remarks>
+    /// Without Redis there is no generation to stamp keys with, and caching without one would serve
+    /// boards that never notice a card moved — so it reads through instead.
+    /// </remarks>
+    private async Task<BoardResponse> GetBoardResponseAsync(Board board, CancellationToken ct)
+    {
+        if (_version is null)
+            return await BuildBoardResponseAsync(board, ct);
+
+        var version = await _version.GetAsync(board.ProjectId);
+        var key = $"board:v1:{board.ProjectId}:{version}";
+
+        return await _cache.GetOrCreateAsync(
+            key,
+            (Service: this, board),
+            static (state, token) => new ValueTask<BoardResponse>(
+                state.Service.BuildBoardResponseAsync(state.board, token)),
+            SnapshotOptions,
+            cancellationToken: ct);
+    }
 
     private async Task<BoardResponse> BuildBoardResponseAsync(Board board, CancellationToken ct)
     {
-        // A board is scoped to a project, but sprints are scoped to a team, so the board's
-        // cards come from the active sprint of the project's *assigned* team. Resolving that
-        // team here is what makes the project-scoped board and the team-scoped sprint meet.
-        var teamId = await _context.Projects
-            .Where(p => p.Id == board.ProjectId)
-            .Select(p => p.AssignedTeamId)
-            .FirstOrDefaultAsync(ct);
+        // A board is scoped to a project, but sprints are scoped to a team, so the board's cards
+        // come from the active sprint of the project's *assigned* team. Resolving that team here is
+        // what makes the project-scoped board and the team-scoped sprint meet.
+        var context = await _repository.GetSprintContextAsync(board.ProjectId, ct);
 
-        var activeSprint = await _context.Sprints
-            .Where(s => s.TeamId == teamId && s.Status == SprintStatus.Active)
-            .Select(s => (Guid?)s.Id)
-            .FirstOrDefaultAsync(ct);
+        var teamId = context?.TeamId ?? Guid.Empty;
+        var activeSprint = context?.ActiveSprintId;
 
-        // Fetch cards from the active sprint (if any)
-        var cards = new List<(Guid WorkItemId, string Title,
-            string Type, string State, string Priority,
-            Guid? AssigneeId, int? StoryPoints, List<string> Tags)>();
-
-        if (activeSprint.HasValue)
-        {
-            var raw = await _context.SprintWorkItems
-                .Where(sw => sw.SprintId == activeSprint.Value)
-                .Join(_context.WorkItems,
-                    sw => sw.WorkItemId,
-                    w  => w.Id,
-                    (sw, w) => new
-                    {
-                        w.Id, w.Title,
-                        Type     = w.Type.ToString(),
-                        State    = w.State.ToString(),
-                        Priority = w.Priority.ToString(),
-                        w.AssigneeId, w.StoryPoints
-                    })
-                .ToListAsync(ct);
-
-            // Batch-load tags
-            var wids   = raw.Select(w => w.Id).ToList();
-            var tagMap = await _context.WorkItemTags
-                .Where(t => wids.Contains(t.WorkItemId))
-                .GroupBy(t => t.WorkItemId)
-                .ToDictionaryAsync(g => g.Key, g => g.Select(t => t.Name).ToList(), ct);
-
-            cards = raw.Select(w => (
-                w.Id, w.Title, w.Type, w.State, w.Priority,
-                w.AssigneeId, w.StoryPoints,
-                tagMap.GetValueOrDefault(w.Id, new List<string>())
-            )).ToList();
-        }
+        var cards = activeSprint.HasValue
+            ? await _repository.GetCardsForSprintAsync(activeSprint.Value, ct)
+            : [];
 
         var columns = board.Columns
             .OrderBy(c => c.Position)
             .Select(col =>
             {
                 var colCards = cards
-                    .Where(w => w.State == col.MappedState)
+                    .Where(w => w.State.ToString() == col.MappedState)
                     .Select(w => new BoardCardResponse(
-                        w.WorkItemId, w.Title,
-                        Enum.Parse<WorkItems.Models.WorkItemType>(w.Type),
-                        Enum.Parse<WorkItems.Models.WorkItemPriority>(w.Priority),
+                        w.WorkItemId, w.Title, w.Type, w.Priority,
                         w.AssigneeId, w.StoryPoints, w.Tags))
                     .ToList();
 
@@ -271,7 +270,7 @@ public class BoardService : IBoardService
     /// <summary>Creates a board with the four default columns mapped to WorkItemState values.</summary>
     private static Board BuildDefaultBoard(Guid projectId, Guid createdBy) => new()
     {
-        ProjectId    = projectId,
+        ProjectId = projectId,
         Name      = "Board",
         CreatedBy = createdBy,
         Columns   = new List<BoardColumn>

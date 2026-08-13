@@ -65,14 +65,13 @@ public class OrganizationService : IOrganizationService
                 UserId = createdBy,
                 CreatedBy = createdBy
             });
+            _eventBus.Enqueue(new OrganizationCreated(org.Id, org.Name, org.Slug, createdBy));
             await _organizationRepo.SaveChangesAsync(token);
 
             // Creator becomes OrgAdmin automatically. Saves through the RBAC module's own service,
             // which enlists in the transaction opened above.
             await _rbac.AssignRoleAsync(createdBy, RoleType.OrgAdmin, RoleScope.Organization, org.Id, createdBy, token);
         }, ct);
-
-        await _eventBus.PublishAsync(new OrganizationCreated(org.Id, org.Name, org.Slug, createdBy), ct);
 
         _logger.LogInformation("Organization '{Name}' ({Id}) created by {UserId}", org.Name, org.Id, createdBy);
 
@@ -150,13 +149,13 @@ public class OrganizationService : IOrganizationService
         org.AvatarUrl = newAvatarUrl;
         org.UpdatedAt = DateTime.UtcNow;
 
-        await _organizationRepo.SaveChangesAsync(ct);
-
         foreach (var (field, oldValue, newValue) in changes)
         {
-            await _eventBus.PublishAsync(
-                new OrganizationUpdated(org.Id, org.Name, field, oldValue, newValue, updatedBy), ct);
+            _eventBus.Enqueue(
+                new OrganizationUpdated(org.Id, org.Name, field, oldValue, newValue, updatedBy));
         }
+
+        await _organizationRepo.SaveChangesAsync(ct);
 
         var counts = await _organizationRepo.GetCountsAsync(orgId, ct);
         var userRole = await ResolveUserRoleAsync(updatedBy, orgId, ct);
@@ -187,9 +186,10 @@ public class OrganizationService : IOrganizationService
 
             if (!await _rbac.HasRoleAsync(userId, RoleType.Reader, RoleScope.Organization, orgId, token))
                 await _rbac.AssignRoleAsync(userId, RoleType.Reader, RoleScope.Organization, orgId, addedBy, token);
-        }, ct);
 
-        await _eventBus.PublishAsync(new MemberAddedToOrg(orgId, userId, addedBy), ct);
+            _eventBus.Enqueue(new MemberAddedToOrg(orgId, userId, addedBy));
+            await _organizationRepo.SaveChangesAsync(token);
+        }, ct);
     }
 
     public async Task RemoveMemberAsync(Guid orgId, Guid userId, Guid removedBy, CancellationToken ct = default)
@@ -200,12 +200,11 @@ public class OrganizationService : IOrganizationService
         await _organizationRepo.ExecuteInTransactionAsync(async token =>
         {
             _organizationRepo.RemoveMembership(membership);
+            _eventBus.Enqueue(new MemberRemovedFromOrg(orgId, userId, removedBy));
             await _organizationRepo.SaveChangesAsync(token);
 
             await _rbac.RemoveAllRolesAsync(userId, RoleScope.Organization, orgId, token);
         }, ct);
-
-        await _eventBus.PublishAsync(new MemberRemovedFromOrg(orgId, userId, removedBy), ct);
 
         _logger.LogInformation("User {UserId} removed from organization {OrgId}", userId, orgId);
     }
@@ -247,10 +246,10 @@ public class OrganizationService : IOrganizationService
             // stale one behind would keep granting the privileges we were asked to take away.
             await _rbac.RemoveAllRolesAsync(userId, RoleScope.Organization, orgId, token);
             await _rbac.AssignRoleAsync(userId, role, RoleScope.Organization, orgId, actingUserId, token);
-        }, ct);
 
-        await _eventBus.PublishAsync(
-            new OrgMemberRoleChanged(orgId, userId, previousRole, role, actingUserId), ct);
+            _eventBus.Enqueue(new OrgMemberRoleChanged(orgId, userId, previousRole, role, actingUserId));
+            await _organizationRepo.SaveChangesAsync(token);
+        }, ct);
 
         _logger.LogInformation("Org {OrgId} role for user {UserId} set to {Role} by {ActingUserId}",
             orgId, userId, role, actingUserId);

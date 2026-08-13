@@ -55,6 +55,16 @@ public class ReorderSprintWorkItemsRequest
     public List<Guid> WorkItemIds { get; init; } = new();
 }
 
+/// <summary>Move a single work item to a new position between two others (fractional ranking).</summary>
+public class MoveSprintWorkItemRequest
+{
+    /// <summary>Place the item immediately after this work item ID. Null = move to the top.</summary>
+    public Guid? AfterWorkItemId { get; init; }
+
+    /// <summary>Place the item immediately before this work item ID. Null = move to the bottom.</summary>
+    public Guid? BeforeWorkItemId { get; init; }
+}
+
 /// <summary>
 /// Options for closing a sprint.
 /// Incomplete items (not Resolved or Closed) will be handled according to

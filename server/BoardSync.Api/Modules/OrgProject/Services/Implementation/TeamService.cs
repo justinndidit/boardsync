@@ -78,12 +78,11 @@ public class TeamService : ITeamService
                 UserId = createdBy,
                 CreatedBy = createdBy
             });
+            _eventBus.Enqueue(new TeamCreated(team.Id, orgId, team.Name, createdBy));
             await _teamRepo.SaveChangesAsync(token);
 
             await _rbac.AssignRoleAsync(createdBy, RoleType.TeamMember, RoleScope.Team, team.Id, createdBy, token);
         }, ct);
-
-        await _eventBus.PublishAsync(new TeamCreated(team.Id, orgId, team.Name, createdBy), ct);
 
         _logger.LogInformation("Team '{Name}' ({Id}) created in organization {OrganizationId} by {UserId}",
             team.Name, team.Id, orgId, createdBy);
@@ -129,13 +128,13 @@ public class TeamService : ITeamService
         team.Description = newDescription;
         team.UpdatedAt = DateTime.UtcNow;
 
-        await _teamRepo.SaveChangesAsync(ct);
-
         foreach (var (field, oldValue, newValue) in changes)
         {
-            await _eventBus.PublishAsync(new TeamUpdated(
-                team.Id, team.OrganizationId, team.Name, field, oldValue, newValue, updatedBy), ct);
+            _eventBus.Enqueue(new TeamUpdated(
+                team.Id, team.OrganizationId, team.Name, field, oldValue, newValue, updatedBy));
         }
+
+        await _teamRepo.SaveChangesAsync(ct);
 
         return await MapToResponseAsync(team, ct);
     }
@@ -177,14 +176,15 @@ public class TeamService : ITeamService
             await _teamRepo.ExecuteInTransactionAsync(async token =>
             {
                 _teamMembershipRepo.AddMembership(membership);
+
+                // Only announce a genuinely new membership — re-adding an existing member is a
+                // no-op and must not emit a second event to subscribers. This block only runs when
+                // the membership did not already exist.
+                _eventBus.Enqueue(new MemberAddedToTeam(teamId, team.OrganizationId, userId, addedBy));
                 await _teamRepo.SaveChangesAsync(token);
 
                 await _rbac.AssignRoleAsync(userId, RoleType.TeamMember, RoleScope.Team, teamId, addedBy, token);
             }, ct);
-
-            // Only announce a genuinely new membership — re-adding an existing member is a no-op
-            // and must not emit a second event to subscribers.
-            await _eventBus.PublishAsync(new MemberAddedToTeam(teamId, team.OrganizationId, userId, addedBy), ct);
         }
 
         return new TeamMemberResponse(
@@ -206,14 +206,15 @@ public class TeamService : ITeamService
         await _teamRepo.ExecuteInTransactionAsync(async token =>
         {
             _teamMembershipRepo.RemoveMembership(membership);
+
+            if (team is not null)
+                _eventBus.Enqueue(
+                    new MemberRemovedFromTeam(teamId, team.OrganizationId, userId, removedBy));
+
             await _teamRepo.SaveChangesAsync(token);
 
             await _rbac.RemoveAllRolesAsync(userId, RoleScope.Team, teamId, token);
         }, ct);
-
-        if (team is not null)
-            await _eventBus.PublishAsync(
-                new MemberRemovedFromTeam(teamId, team.OrganizationId, userId, removedBy), ct);
     }
 
     public async Task<PagedResult<TeamMemberResponse>> GetMembersAsync(
@@ -250,10 +251,10 @@ public class TeamService : ITeamService
 
         team.IsActive = false;
         team.UpdatedAt = DateTime.UtcNow;
-        await _teamRepo.SaveChangesAsync(ct);
 
-        await _eventBus.PublishAsync(
-            new TeamArchived(team.Id, team.OrganizationId, team.Name, deactivatedBy), ct);
+        _eventBus.Enqueue(new TeamArchived(team.Id, team.OrganizationId, team.Name, deactivatedBy));
+
+        await _teamRepo.SaveChangesAsync(ct);
 
         _logger.LogInformation("Team {TeamId} archived by {UserId}", teamId, deactivatedBy);
     }

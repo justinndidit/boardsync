@@ -42,6 +42,24 @@ public enum WorkItemPriority
 /// </summary>
 public class WorkItem : BaseEntity
 {
+    /// <summary>
+    /// Row version, mapped to Postgres' <c>xmin</c> system column.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Postgres bumps <c>xmin</c> on every update by itself, so this needs no column, no trigger
+    /// and no migration — the value is already there on every row.
+    /// </para>
+    /// <para>
+    /// It exists so that two people editing the same work item cannot silently overwrite each
+    /// other. Note that EF's own check only spans load-to-save inside one request, which is not
+    /// where the conflict lives: the real race is A reads, B saves, A saves. Closing that needs the
+    /// client to send back the version it read — see
+    /// <c>IWorkItemService.UpdateAsync</c>.
+    /// </para>
+    /// </remarks>
+    public uint Version { get; set; }
+
     public Guid ProjectId { get; set; }
 
     /// <summary>Optional team scope (for board/sprint assignment).</summary>

@@ -102,6 +102,16 @@ public interface IWorkItemRepository
 
     // ── Unit of work ──────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Overrides the row version EF will check this update against.
+    /// </summary>
+    /// <remarks>
+    /// Belongs here because it reaches into the change tracker, which is the repository's business.
+    /// The service supplies the version its caller read so a concurrent edit is detected rather
+    /// than overwritten.
+    /// </remarks>
+    void SetOriginalVersion(WorkItem item, uint version);
+
     /// <summary>Persists everything staged since the last save.</summary>
     Task SaveChangesAsync(CancellationToken ct = default);
 }

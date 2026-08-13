@@ -13,12 +13,25 @@ public class PagedResult<T>
     public bool HasNextPage => Page < TotalPages;
     public bool HasPreviousPage => Page > 1;
 
-    public PagedResult(IReadOnlyList<T> items, int totalCount, int page, int pageSize)
+    /// <summary>
+    /// Opaque pointer at the last item on this page. Pass it back as <c>?cursor=</c> to get the next
+    /// page without an offset scan; null when the endpoint does not support cursor paging or there
+    /// is nothing after this page.
+    /// </summary>
+    /// <remarks>
+    /// Purely additive — <c>?page</c> keeps working exactly as before, and clients that ignore this
+    /// field see no change. It exists because offsets degrade with depth and, on a feed that is
+    /// still being written to, shift rows across page boundaries while a client is reading.
+    /// </remarks>
+    public string? NextCursor { get; init; }
+
+    public PagedResult(IReadOnlyList<T> items, int totalCount, int page, int pageSize, string? nextCursor = null)
     {
         Items = items;
         TotalCount = totalCount;
         Page = page;
         PageSize = pageSize;
+        NextCursor = nextCursor;
     }
 
     public static PagedResult<T> Empty(int page = 1, int pageSize = 20)
@@ -44,6 +57,12 @@ public class PaginationQuery
         get => _pageSize;
         set => _pageSize = value < 1 ? 1 : value > 100 ? 100 : value;
     }
+
+    /// <summary>
+    /// Opaque cursor from a previous response's <see cref="PagedResult{T}.NextCursor"/>. When set,
+    /// endpoints that support it page forward from that point and ignore <see cref="Page"/>.
+    /// </summary>
+    public string? Cursor { get; set; }
 
     public int Skip => (Page - 1) * PageSize;
 }

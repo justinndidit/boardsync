@@ -1,16 +1,15 @@
-using BoardSync.Api.Data;
 using BoardSync.Api.Shared.Auth.Configuration;
 using BoardSync.Api.Shared.Auth.DTOs;
 using BoardSync.Api.Shared.Auth.Models;
+using BoardSync.Api.Shared.Auth.Repositories;
 using BoardSync.Api.Shared.Auth.Services;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
 namespace BoardSync.Api.Shared.Auth.Services.Implementations;
 
 public class AuthenticationService : IAuthenticationService
 {
-    private readonly BoardSyncDbContext _context;
+    private readonly IUserRepository _users;
     private readonly IPasswordService _passwordService;
     private readonly ITokenService _tokenService;
     private readonly IEmailService _emailService;
@@ -20,7 +19,7 @@ public class AuthenticationService : IAuthenticationService
     private readonly ILogger<AuthenticationService> _logger;
 
     public AuthenticationService(
-        BoardSyncDbContext context,
+        IUserRepository users,
         IPasswordService passwordService,
         ITokenService tokenService,
         IEmailService emailService,
@@ -29,7 +28,7 @@ public class AuthenticationService : IAuthenticationService
         IOptions<EmailSettings> emailSettings,
         ILogger<AuthenticationService> logger)
     {
-        _context = context;
+        _users = users;
         _passwordService = passwordService;
         _tokenService = tokenService;
         _emailService = emailService;
@@ -44,7 +43,7 @@ public class AuthenticationService : IAuthenticationService
         try
         {
             var normalizedEmail = request.Email.Trim().ToLowerInvariant();
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == normalizedEmail);
+            var user = await _users.GetByEmailAsync(normalizedEmail);
             if (user == null)
             {
                 _logger.LogWarning("Login attempt with non-existent email: {Email}", request.Email);
@@ -94,10 +93,7 @@ public class AuthenticationService : IAuthenticationService
 
             if (!request.RememberMe)
             {
-                var oldTokens = await _context.RefreshTokens
-                    .Where(rt => rt.UserId == user.Id)
-                    .WhereActive()
-                    .ToListAsync();
+                var oldTokens = await _users.GetActiveRefreshTokensAsync(user.Id);
 
                 foreach (var oldToken in oldTokens)
                 {
@@ -115,8 +111,8 @@ public class AuthenticationService : IAuthenticationService
                 CreatedByIp = ipAddress
             };
 
-            _context.RefreshTokens.Add(refreshTokenEntity);
-            await _context.SaveChangesAsync();
+            _users.AddRefreshToken(refreshTokenEntity);
+            await _users.SaveChangesAsync();
 
             _logger.LogInformation("User logged in successfully: {Email}", request.Email);
 
@@ -149,22 +145,20 @@ public class AuthenticationService : IAuthenticationService
     {
         try
         {
-            var tokensToRevoke = _context.RefreshTokens.Where(rt => rt.UserId == userId).WhereActive();
+            var activeTokens = await _users.GetActiveRefreshTokensAsync(userId);
 
-            if (!string.IsNullOrEmpty(refreshToken))
-            {
-                var refreshTokenHash = _tokenService.HashToken(refreshToken);
-                tokensToRevoke = tokensToRevoke.Where(rt => rt.Token == refreshTokenHash);
-            }
-
-            var tokens = await tokensToRevoke.ToListAsync();
+            // Narrowing to the one presented token is what makes "log out of this device" different
+            // from "log out everywhere"; without a token, every session goes.
+            var tokens = string.IsNullOrEmpty(refreshToken)
+                ? activeTokens
+                : activeTokens.Where(rt => rt.Token == _tokenService.HashToken(refreshToken)).ToList();
             foreach (var token in tokens)
             {
                 token.Revoked = DateTime.UtcNow;
                 token.ReasonRevoked = "User logout";
             }
 
-            await _context.SaveChangesAsync();
+            await _users.SaveChangesAsync();
 
             _logger.LogInformation("User logged out successfully: {UserId}", userId);
             return new ApiResponse(true, "Logout successful");
@@ -182,9 +176,7 @@ public class AuthenticationService : IAuthenticationService
         {
             var refreshTokenHash = _tokenService.HashToken(request.RefreshToken);
 
-            var refreshToken = await _context.RefreshTokens
-                .Include(rt => rt.User)
-                .FirstOrDefaultAsync(rt => rt.Token == refreshTokenHash);
+            var refreshToken = await _users.GetRefreshTokenWithUserAsync(refreshTokenHash);
 
             if (refreshToken == null || !refreshToken.IsActive)
             {
@@ -217,9 +209,9 @@ public class AuthenticationService : IAuthenticationService
             };
 
             refreshToken.ReplacedByToken = newRefreshTokenHash;
-            _context.RefreshTokens.Add(newRefreshTokenEntity);
+            _users.AddRefreshToken(newRefreshTokenEntity);
 
-            await _context.SaveChangesAsync();
+            await _users.SaveChangesAsync();
 
             _logger.LogInformation("Token refreshed successfully for user: {UserId}", user.Id);
 
@@ -242,8 +234,7 @@ public class AuthenticationService : IAuthenticationService
         {
             var tokenHash = _tokenService.HashToken(token);
 
-            var refreshToken = await _context.RefreshTokens
-                .FirstOrDefaultAsync(rt => rt.Token == tokenHash && rt.UserId == userId);
+            var refreshToken = await _users.GetRefreshTokenForUserAsync(tokenHash, userId);
 
             if (refreshToken == null)
             {
@@ -259,7 +250,7 @@ public class AuthenticationService : IAuthenticationService
             refreshToken.RevokedByIp = ipAddress;
             refreshToken.ReasonRevoked = "Manual revocation";
 
-            await _context.SaveChangesAsync();
+            await _users.SaveChangesAsync();
 
             _logger.LogInformation("Token revoked successfully for user: {UserId}", userId);
             return new ApiResponse(true, "Token revoked successfully");
@@ -276,7 +267,7 @@ public class AuthenticationService : IAuthenticationService
         try
         {
             var normalizedEmail = request.Email.Trim().ToLowerInvariant();
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == normalizedEmail);
+            var user = await _users.GetByEmailAsync(normalizedEmail);
             if (user == null)
             {
                 _logger.LogInformation("Password reset requested for non-existent email: {Email}", request.Email);
@@ -294,7 +285,7 @@ public class AuthenticationService : IAuthenticationService
             user.PasswordResetTokenExpires = DateTime.UtcNow.AddHours(_securitySettings.PasswordResetTokenExpirationHours);
             user.UpdatedAt = DateTime.UtcNow;
 
-            await _context.SaveChangesAsync();
+            await _users.SaveChangesAsync();
 
             await _emailService.SendPasswordResetAsync(user.Email, resetToken, _emailSettings.BaseUrl);
 
@@ -313,7 +304,7 @@ public class AuthenticationService : IAuthenticationService
         try
         {
             var normalizedEmail = request.Email.Trim().ToLowerInvariant();
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == normalizedEmail);
+            var user = await _users.GetByEmailAsync(normalizedEmail);
             if (user == null)
             {
                 return new ApiResponse(false, "Invalid reset token");
@@ -345,14 +336,14 @@ public class AuthenticationService : IAuthenticationService
             user.PasswordResetTokenExpires = null;
             user.UpdatedAt = DateTime.UtcNow;
 
-            var refreshTokens = await _context.RefreshTokens.Where(rt => rt.UserId == user.Id).WhereActive().ToListAsync();
+            var refreshTokens = await _users.GetActiveRefreshTokensAsync(user.Id);
             foreach (var token in refreshTokens)
             {
                 token.Revoked = DateTime.UtcNow;
                 token.ReasonRevoked = "Password reset";
             }
 
-            await _context.SaveChangesAsync();
+            await _users.SaveChangesAsync();
 
             _logger.LogInformation("Password reset successfully for user: {Email}", request.Email);
             return new ApiResponse(true, "Password reset successfully");
@@ -376,6 +367,6 @@ public class AuthenticationService : IAuthenticationService
             _logger.LogWarning("Account locked due to failed login attempts: {Email}", user.Email);
         }
 
-        await _context.SaveChangesAsync();
+        await _users.SaveChangesAsync();
     }
 }

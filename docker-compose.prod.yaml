@@ -19,6 +19,21 @@ services:
     networks:
       - boardsync-network
 
+  redis:
+    image: redis:7-alpine
+    container_name: boardsync-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - boardsync-network
+
   api:
     build:
       context: ./server/BoardSync.Api
@@ -28,10 +43,17 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:8080
-      ConnectionStrings__DefaultConnection: Host=postgres;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD};Pooling=true;Minimum Pool Size=10;Maximum Pool Size=100
+      # This stack has no separate migration step, so the single api container applies the schema
+      # itself. A real deployment should leave this off and run migrations from the release
+      # pipeline instead — see docs/scaling-realtime-caching.md §6.1.
+      Database__AutoMigrate: "true"
+      ConnectionStrings__Redis: redis:6379
+      ConnectionStrings__DefaultConnection: Host=postgres;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD};Pooling=true
       AllowedOrigins__0: ${APP_ORIGIN}
       JwtSettings__Secret: ${JWT_SECRET}
       JwtSettings__Issuer: ${JWT_ISSUER}
@@ -63,6 +85,7 @@ services:
 
 volumes:
   pgdata:
+  redisdata:
 
 networks:
   boardsync-network:
