@@ -27,8 +27,11 @@ access control, and an activity feed.
 make dev-infra
 ```
 
-Starts PostgreSQL on port `7000` and MailHog (SMTP `1025`, web UI http://localhost:8025) for
-inspecting confirmation and password-reset mail.
+Starts PostgreSQL on port `7000`, Redis on `7001`, and MailHog (SMTP `1025`, web UI
+http://localhost:8025) for inspecting confirmation and password-reset mail.
+
+Redis is optional for a single instance — the API falls back to in-process caching and per-process
+rate limits and says so at startup — but required before running more than one.
 
 ### Run API migrations
 
@@ -65,7 +68,9 @@ make down-all     # stops dev containers and drops volumes
 
 The API is a modular monolith. Each module under `server/BoardSync.Api/Modules` owns its
 controllers, services, repositories, DTOs, and domain models; cross-module communication goes
-through domain events on an in-process bus (`IEventBus` / `InMemoryEventBus`).
+through domain events on a **transactional outbox** — `IEventBus.Enqueue` stages the event on the
+same unit of work as the change, and `OutboxDispatcher` delivers it after the commit. All data
+access lives behind a repository per module; no controller or service touches `BoardSyncDbContext`.
 
 | Module | Responsibility |
 | --- | --- |
@@ -74,8 +79,10 @@ through domain events on an in-process bus (`IEventBus` / `InMemoryEventBus`).
 | `Modules/WorkItems` | Work items, comments, history, links, tags |
 | `Modules/Rbac` | Role assignments and permission checks |
 | `Modules/Activity` | Activity log, built by subscribing to domain events |
+| `Modules/Notifications` | The notification bell, derived from work item history |
+| `Modules/Search` | Global search across organizations, projects, members, work items |
 | `Shared/Auth` | Users, JWT issuance/refresh, password and email flows |
-| `Shared/Kernel` | Event bus, typed configuration, domain exceptions |
+| `Shared/Kernel` | Outbox event bus and dispatcher, rate limiting, typed configuration, domain exceptions |
 | `Shared/Data` | `BoardSyncDbContext` and EF Core migrations |
 
 ### Domain model
@@ -83,7 +90,9 @@ through domain events on an in-process bus (`IEventBus` / `InMemoryEventBus`).
 An **Organization** owns **Teams** and **Projects**. A project is backed by one **Board** with
 ordered **BoardColumns**, and holds **WorkItems** (with comments, history, links, and tags).
 **Sprints** belong to a team and pull work items into an ordered sprint backlog. Every meaningful
-mutation emits a domain event that the Activity module turns into an **ActivityLog** entry.
+mutation emits a domain event that the Activity module turns into an **ActivityLog** entry. Events
+travel through the outbox, so the activity feed is **eventually consistent** — usually milliseconds
+behind the write, at worst one dispatcher poll interval.
 
 ### Roles
 
@@ -102,7 +111,8 @@ the authoritative reference; the table below is the map.
 | Auth (authenticated) | `POST /api/auth/{logout,revoke-token,change-password}`, `GET /api/auth/me`, `GET|PUT /api/auth/profile` |
 | Users | `GET /api/users/me`, `GET /api/users/{userId}`, `GET /api/users/by-email` |
 | Search | `GET /api/search` |
-| Workspace | `GET /api/workspace/{summary,notifications,activity}` |
+| Workspace | `GET /api/workspace/{summary,activity}` |
+| Notifications | `GET /api/notifications` (also served at `GET /api/workspace/notifications`) |
 | Organizations | `GET|PUT /api/orgs/{orgId}`, `GET /api/orgs/by-slug/{slug}`, `GET|POST /api/orgs/{orgId}/members`, `DELETE /api/orgs/{orgId}/members/{userId}`, `PUT /api/orgs/{orgId}/members/{userId}/role`, `GET /api/orgs/{orgId}/activity` |
 | Teams | `GET|POST /api/orgs/{orgId}/teams`, `GET|PUT|DELETE /api/teams/{teamId}`, `GET|POST /api/teams/{teamId}/members`, `GET|DELETE /api/teams/{teamId}/members/{userId}` |
 | Projects | `GET|POST /api/orgs/{orgId}/projects`, `GET|PUT /api/projects/{projectId}`, `PUT /api/projects/{projectId}/team`, `GET|POST /api/projects/{projectId}/roles`, `DELETE /api/projects/{projectId}/roles/{userId}` |
@@ -138,6 +148,11 @@ RFC 7807 problem details via the global exception handler.
 | `Database:AutoMigrate` | `true` outside Production, `false` in Production | Applies pending migrations at startup, under a Postgres advisory lock so concurrent instances cannot race. Leave off in real deployments and run `dotnet ef database update` as a release step; the local prod-like compose stack sets it to `true` because it has no separate migration step. |
 | `Database:MaxPoolSize` | `20` | Per *instance*, so the ceiling that matters is this × instance count against Postgres `max_connections` (100 by default). Raise only with `max_connections` raised to match, or put pgbouncer in front. |
 | `Database:MinPoolSize` | `2` | Connections held open when idle. |
+| `ConnectionStrings:Redis` | unset (dev: `localhost:7001`) | Enables the distributed cache and shared rate-limit counters. **Unset means in-process only** — correct for one instance, wrong for a deployment: each instance would hold its own cache and enforce its own separate rate-limit budget. |
+| `Outbox:Enabled` | `true` | Whether this instance drains the outbox. Turning it off everywhere means events are written but never delivered and the activity feed silently stops updating. |
+| `Outbox:BatchSize` | `50` | Messages claimed per pass. |
+| `Outbox:PollIntervalSeconds` | `5` | Fallback poll. Normal latency comes from Postgres `NOTIFY`; this is the safety net for a dropped listener. |
+| `Outbox:MaxAttempts` | `5` | Delivery attempts before a message is left alone — still in the table, visible, not deleted. |
 | `Telemetry:OtlpEndpoint` | unset | OTLP collector address, e.g. `http://localhost:4317`. Unset means OpenTelemetry is not registered at all — no spans built, nothing exported. `OTEL_EXPORTER_OTLP_ENDPOINT` works too. |
 | `Telemetry:ServiceName` | `boardsync-api` | `service.name` on exported traces and metrics. |
 

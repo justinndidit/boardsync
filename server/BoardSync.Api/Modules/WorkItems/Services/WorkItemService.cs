@@ -97,10 +97,9 @@ public class WorkItemService : IWorkItemService
         // Initial history entry
         AddHistory(item, createdBy, "State", null, WorkItemState.New.ToString());
 
-        await _repository.SaveChangesAsync(ct);
+        _eventBus.Enqueue(new WorkItemCreated(item.Id, projectId, item.Type, item.Title, createdBy));
 
-        await _eventBus.PublishAsync(
-            new WorkItemCreated(item.Id, projectId, item.Type, item.Title, createdBy), ct);
+        await _repository.SaveChangesAsync(ct);
 
         _logger.LogInformation("WorkItem '{Title}' ({Id}) created in project {ProjectId} by {UserId}",
             item.Title, item.Id, projectId, createdBy);
@@ -183,20 +182,20 @@ public class WorkItemService : IWorkItemService
         foreach (var added in newTagNames.Where(n => existingTags.All(t => t.Name != n)))
             _repository.AddTag(new WorkItemTag { WorkItemId = item.Id, Name = added, CreatedBy = updatedBy });
 
-        await _repository.SaveChangesAsync(ct);
-
         // Assignment gets its own event, so it is not also reported as a generic field change.
         foreach (var (field, oldValue, newValue) in changes.Where(c => c.Field != "AssigneeId"))
         {
-            await _eventBus.PublishAsync(
-                new WorkItemUpdated(item.Id, item.ProjectId, field, oldValue, newValue, updatedBy), ct);
+            _eventBus.Enqueue(
+                new WorkItemUpdated(item.Id, item.ProjectId, field, oldValue, newValue, updatedBy));
         }
 
         if (previousAssignee != request.AssigneeId)
         {
-            await _eventBus.PublishAsync(
-                new WorkItemAssigned(item.Id, item.ProjectId, previousAssignee, request.AssigneeId, updatedBy), ct);
+            _eventBus.Enqueue(
+                new WorkItemAssigned(item.Id, item.ProjectId, previousAssignee, request.AssigneeId, updatedBy));
         }
+
+        await _repository.SaveChangesAsync(ct);
 
         return await MapToResponseAsync(workItemId, ct);
     }
@@ -220,10 +219,10 @@ public class WorkItemService : IWorkItemService
         item.State = newState;
         item.UpdatedAt = DateTime.UtcNow;
 
-        await _repository.SaveChangesAsync(ct);
+        _eventBus.Enqueue(
+            new WorkItemStateChanged(item.Id, item.ProjectId, oldState, newState, updatedBy));
 
-        await _eventBus.PublishAsync(
-            new WorkItemStateChanged(item.Id, item.ProjectId, oldState, newState, updatedBy), ct);
+        await _repository.SaveChangesAsync(ct);
 
         return await MapToResponseAsync(workItemId, ct);
     }
@@ -236,9 +235,9 @@ public class WorkItemService : IWorkItemService
         item.IsActive = false;
         item.UpdatedAt = DateTime.UtcNow;
 
-        await _repository.SaveChangesAsync(ct);
+        _eventBus.Enqueue(new WorkItemDeleted(item.Id, item.ProjectId, deletedBy));
 
-        await _eventBus.PublishAsync(new WorkItemDeleted(item.Id, item.ProjectId, deletedBy), ct);
+        await _repository.SaveChangesAsync(ct);
 
         _logger.LogInformation("WorkItem {Id} soft-deleted by {UserId}", workItemId, deletedBy);
     }
@@ -263,10 +262,9 @@ public class WorkItemService : IWorkItemService
 
         _repository.AddComment(comment);
         item.UpdatedAt = DateTime.UtcNow;
-        await _repository.SaveChangesAsync(ct);
+        _eventBus.Enqueue(new WorkItemCommentAdded(comment.Id, workItemId, item.ProjectId, authorId));
 
-        await _eventBus.PublishAsync(
-            new WorkItemCommentAdded(comment.Id, workItemId, item.ProjectId, authorId), ct);
+        await _repository.SaveChangesAsync(ct);
 
         return MapCommentToResponse(comment);
     }
@@ -364,10 +362,9 @@ public class WorkItemService : IWorkItemService
         };
 
         _repository.AddLink(link);
-        await _repository.SaveChangesAsync(ct);
+        _eventBus.Enqueue(new WorkItemLinked(workItemId, request.TargetId, request.LinkType, createdBy));
 
-        await _eventBus.PublishAsync(
-            new WorkItemLinked(workItemId, request.TargetId, request.LinkType, createdBy), ct);
+        await _repository.SaveChangesAsync(ct);
 
         return new WorkItemLinkResponse(
             link.Id, link.SourceId, link.TargetId, link.LinkType,

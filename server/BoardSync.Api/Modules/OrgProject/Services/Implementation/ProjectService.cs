@@ -69,12 +69,11 @@ public class ProjectService : IProjectService
         };
 
         _projectRepo.Add(project);
+        _eventBus.Enqueue(new ProjectCreated(project.Id, orgId, project.Name, project.Slug, createdBy));
         await _projectRepo.SaveChangesAsync(ct);
 
         // Creator becomes ProjectAdmin
         await _rbac.AssignRoleAsync(createdBy, RoleType.ProjectAdmin, RoleScope.Project, project.Id, createdBy, ct);
-
-        await _eventBus.PublishAsync(new ProjectCreated(project.Id, orgId, project.Name, project.Slug, createdBy), ct);
 
         _logger.LogInformation("Project '{Name}' ({Id}) created in org {OrgId} by {UserId}",
             project.Name, project.Id, orgId, createdBy);
@@ -132,13 +131,13 @@ public class ProjectService : IProjectService
         project.Description = newDescription;
         project.UpdatedAt = DateTime.UtcNow;
 
-        await _projectRepo.SaveChangesAsync(ct);
-
         foreach (var (field, oldValue, newValue) in changes)
         {
-            await _eventBus.PublishAsync(new ProjectUpdated(
-                project.Id, project.OrganizationId, project.Name, field, oldValue, newValue, updatedBy), ct);
+            _eventBus.Enqueue(new ProjectUpdated(
+                project.Id, project.OrganizationId, project.Name, field, oldValue, newValue, updatedBy));
         }
+
+        await _projectRepo.SaveChangesAsync(ct);
 
         return await MapToResponseAsync(project, ct);
     }
@@ -160,10 +159,11 @@ public class ProjectService : IProjectService
 
         project.AssignedTeamId = teamId;
         project.UpdatedAt = DateTime.UtcNow;
-        await _projectRepo.SaveChangesAsync(ct);
 
-        await _eventBus.PublishAsync(new ProjectTeamAssigned(
-            project.Id, project.OrganizationId, project.Name, previousTeamId, teamId, updatedBy), ct);
+        _eventBus.Enqueue(new ProjectTeamAssigned(
+            project.Id, project.OrganizationId, project.Name, previousTeamId, teamId, updatedBy));
+
+        await _projectRepo.SaveChangesAsync(ct);
 
         _logger.LogInformation("Project {ProjectId} reassigned to team {TeamId} by {UserId}",
             projectId, teamId, updatedBy);

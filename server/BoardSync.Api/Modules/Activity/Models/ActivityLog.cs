@@ -50,6 +50,16 @@ public enum ActivityVerb
 /// </summary>
 public class ActivityLog : BaseEntity
 {
+    /// <summary>
+    /// The outbox event this entry was written from.
+    /// </summary>
+    /// <remarks>
+    /// Unique, and it is what makes recording idempotent. The outbox delivers at least once — a
+    /// dispatcher that crashes after running handlers but before marking the row dispatched will
+    /// redeliver — so without this key a redelivery would duplicate the feed line.
+    /// </remarks>
+    public Guid EventId { get; set; }
+
     /// <summary>Organization the activity belongs to. Always set — this is what the feeds filter on.</summary>
     public Guid OrganizationId { get; set; }
 

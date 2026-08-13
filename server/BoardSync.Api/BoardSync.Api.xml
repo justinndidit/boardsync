@@ -195,6 +195,32 @@
         <member name="M:BoardSync.Api.Controllers.UsersController.GetMe(System.Threading.CancellationToken)">
             <summary>Get the currently authenticated user's own profile.</summary>
         </member>
+        <member name="M:BoardSync.Api.Extensions.CachingExtensions.AddBoardSyncCaching(Microsoft.AspNetCore.Builder.WebApplicationBuilder)">
+            <summary>
+            Registers <c>HybridCache</c> — in-process L1 always, Redis L2 when a connection string is
+            configured.
+            </summary>
+            <remarks>
+            <para>
+            Without Redis this still works: L1 alone is correct for a single instance, just not shared.
+            That is deliberate so a developer can run the API with nothing but Postgres. It is also why
+            nothing cached here may be authoritative — with several instances and no L2, each holds its
+            own copy and they expire independently.
+            </para>
+            <para>
+            The default entry lifetime is deliberately short. Everything cached is derived data whose
+            source of truth is Postgres, and a stale permission is a security problem rather than a
+            performance one, so entries are also invalidated explicitly on write — see
+            <c>CachingRbacService</c>.
+            </para>
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Extensions.CachingExtensions.LogCacheStatus(Microsoft.AspNetCore.Builder.WebApplication)">
+            <summary>
+            Logs whether the distributed tier is live, so "the cache is not shared across instances" is
+            visible at startup rather than inferred from odd behaviour later.
+            </summary>
+        </member>
         <member name="F:BoardSync.Api.Extensions.DatabaseExtensions.MigrationLockKey">
             <summary>
             Arbitrary but fixed key identifying the migration lock. Any value works as long as every
@@ -297,10 +323,17 @@
             subscribers — the raising modules know nothing about the activity log.
             </summary>
             <remarks>
-            Recording is best-effort by construction: <see cref="T:BoardSync.Api.Shared.Kernel.Events.InMemoryEventBus"/> resolves handlers in a
-            fresh scope after the originating transaction has committed, and swallows whatever they throw.
-            A dropped row costs a line in the feed and nothing else, which is the right trade for never
-            failing a user's write because the audit trail was unavailable.
+            <para>
+            Recording is no longer best-effort. Events reach these handlers through the outbox, so a
+            failure here is retried rather than swallowed — the message stays queued until its handlers
+            succeed or it exhausts its attempts, at which point it is left in the table where it can be
+            found. Entries can no longer go missing because a handler happened to throw.
+            </para>
+            <para>
+            The other side of that guarantee is at-least-once delivery: a handler can be invoked twice for
+            the same event. Every write here is keyed on <see cref="P:BoardSync.Api.Shared.Kernel.Events.IDomainEvent.EventId"/>, and a
+            redelivery is recognised and skipped rather than duplicated.
+            </para>
             </remarks>
             <summary>
             Work item, sprint and board subscribers. Split from the OrgProject half of the class purely
@@ -342,6 +375,16 @@
              caller belongs to.
              </summary>
         </member>
+        <member name="P:BoardSync.Api.Modules.Activity.Models.ActivityLog.EventId">
+            <summary>
+            The outbox event this entry was written from.
+            </summary>
+            <remarks>
+            Unique, and it is what makes recording idempotent. The outbox delivers at least once — a
+            dispatcher that crashes after running handlers but before marking the row dispatched will
+            redeliver — so without this key a redelivery would duplicate the feed line.
+            </remarks>
+        </member>
         <member name="P:BoardSync.Api.Modules.Activity.Models.ActivityLog.OrganizationId">
             <summary>Organization the activity belongs to. Always set — this is what the feeds filter on.</summary>
         </member>
@@ -375,6 +418,12 @@
         <member name="T:BoardSync.Api.Modules.Activity.Repositories.Implementations.ActivityRepository">
             <inheritdoc />
         </member>
+        <member name="M:BoardSync.Api.Modules.Activity.Repositories.Implementations.ActivityRepository.IsDuplicateEventId(Microsoft.EntityFrameworkCore.DbUpdateException)">
+            <summary>
+            Whether the failure was the EventId uniqueness constraint specifically, rather than any
+            other write error — those must keep propagating so the dispatcher retries them.
+            </summary>
+        </member>
         <member name="M:BoardSync.Api.Modules.Activity.Repositories.Implementations.ActivityRepository.Ordered(System.Linq.IQueryable{BoardSync.Api.Modules.Activity.Models.ActivityLog})">
             <summary>
             Newest first, with Id as a tiebreaker. Id is not decoration: entries written in the same
@@ -393,8 +442,17 @@
             happened, and rewriting history is not a thing the product does.
             </remarks>
         </member>
-        <member name="M:BoardSync.Api.Modules.Activity.Repositories.Interfaces.IActivityRepository.AddAsync(BoardSync.Api.Modules.Activity.Models.ActivityLog,System.Threading.CancellationToken)">
-            <summary>Appends one entry and persists it immediately.</summary>
+        <member name="M:BoardSync.Api.Modules.Activity.Repositories.Interfaces.IActivityRepository.AddIfNewAsync(BoardSync.Api.Modules.Activity.Models.ActivityLog,System.Threading.CancellationToken)">
+            <summary>
+            Appends one entry, or does nothing if an entry for the same originating event already
+            exists.
+            </summary>
+            <remarks>
+            Idempotent by <see cref="P:BoardSync.Api.Modules.Activity.Models.ActivityLog.EventId"/>, because the outbox delivers at least once:
+            a dispatcher that runs the handlers and then dies before marking the message dispatched will
+            redeliver it. Without this, the feed would grow a duplicate line every time that happened.
+            </remarks>
+            <returns>True if a new entry was written, false if it was already recorded.</returns>
         </member>
         <member name="M:BoardSync.Api.Modules.Activity.Repositories.Interfaces.IActivityRepository.CountForOrganizationsAsync(System.Collections.Generic.IReadOnlyCollection{System.Guid},System.Threading.CancellationToken)">
             <summary>Total entries filed against the given organizations.</summary>
@@ -1301,6 +1359,53 @@
         <member name="M:BoardSync.Api.Modules.Rbac.Repositories.Interfaces.IRoleAssignmentRepository.SaveChangesAsync(System.Threading.CancellationToken)">
             <summary>Persists everything staged since the last save.</summary>
         </member>
+        <member name="T:BoardSync.Api.Modules.Rbac.Services.Implementations.CachingRbacService">
+            <summary>
+            Caches permission decisions across requests, in memory and in Redis.
+            </summary>
+            <remarks>
+            <para>
+            Role assignments are the most-read and least-written data in the system: every authorized action
+            asks, and almost nothing changes. Before this, each ask cost a query — two when the direct match
+            failed and org-admin inheritance had to be tested.
+            </para>
+            <para>
+            <b>Invalidation is by version stamp, not by deleting keys.</b> Each user has a counter in Redis
+            that is included in every decision key; bumping it makes every previously cached decision about
+            that user unreachable in one atomic operation, and the orphans expire on their own. This is the
+            pattern the scaling design calls for, and it is deliberately not tag-based eviction: that would
+            depend on the cache provider actually implementing tag removal across both tiers, and a silently
+            unimplemented eviction here means a revoked user keeps their access.
+            </para>
+            <para>
+            The version is read from Redis on every check, which is the cost of making revocation take
+            effect immediately rather than at the end of a TTL. It trades one Postgres round trip — often
+            two — for one Redis GET, and keeps the security-critical direction exact.
+            </para>
+            </remarks>
+        </member>
+        <member name="F:BoardSync.Api.Modules.Rbac.Services.Implementations.CachingRbacService.KeyVersion">
+            <summary>
+            Bumped when the cached shape or its meaning changes. A deploy that changes how a decision is
+            computed must not read entries written by the previous one.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Services.Implementations.CachingRbacService.GetVersionAsync(System.Guid)">
+            <summary>
+            The user's current cache generation. Absent means zero — a user nobody has ever revoked
+            anything from simply starts at generation 0.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Services.Implementations.CachingRbacService.InvalidateAsync(System.Guid)">
+            <summary>
+            Advances the user's generation, orphaning every decision cached about them.
+            </summary>
+            <remarks>
+            Failures are not swallowed. If the version cannot be advanced, previously cached decisions
+            stay reachable and a revoked user keeps their access until those entries expire — the caller
+            needs the write to fail rather than to quietly not take effect.
+            </remarks>
+        </member>
         <member name="T:BoardSync.Api.Modules.Rbac.Services.Implementations.MemoizingRbacService">
             <summary>
             Scoped decorator that answers a repeated permission question once per request.
@@ -1838,7 +1943,7 @@
             <c>Resolved</c> — the two states the board treats as done.
             </summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.Sprints.Services.BoardService.PublishAsync(BoardSync.Api.Modules.Sprints.Models.Board,System.String,System.String,System.String,System.Guid,System.Threading.CancellationToken)">
+        <member name="M:BoardSync.Api.Modules.Sprints.Services.BoardService.EnqueueAsync(BoardSync.Api.Modules.Sprints.Models.Board,System.String,System.String,System.String,System.Guid,System.Threading.CancellationToken)">
             <summary>
             Publishes a board change against the project's owning organization, which is what the
             activity log files entries under. Skipped if the project has gone — there would be no
@@ -1862,12 +1967,17 @@
             </remarks>
             <exception cref="T:BoardSync.Api.Shared.Kernel.Exceptions.NotFoundException">No such column.</exception>
         </member>
-        <member name="M:BoardSync.Api.Modules.Sprints.Services.SprintService.PublishAsync``1(BoardSync.Api.Modules.Sprints.Models.Sprint,System.Func{System.Guid,``0},System.Threading.CancellationToken)">
+        <member name="M:BoardSync.Api.Modules.Sprints.Services.SprintService.EnqueueAsync``1(BoardSync.Api.Modules.Sprints.Models.Sprint,System.Func{System.Guid,``0},System.Threading.CancellationToken)">
             <summary>
-            Sprints hang off a team, but activity is filed by organization, so every sprint event needs
-            the team's owning organization looked up first. If the team has vanished there is nothing to
-            file the event under and it is skipped rather than published half-formed.
+            Stages a sprint event. Still async because sprints hang off a team while activity is filed
+            by organization, so the team's owning organization has to be looked up first. If the team
+            has vanished there is nothing to file the event under and it is skipped rather than queued
+            half-formed.
             </summary>
+            <remarks>
+            Call this <b>before</b> saving — it stages the outbox row on the same unit of work, which is
+            what makes the event and the sprint change commit together.
+            </remarks>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Services.SprintService.SprintName(BoardSync.Api.Modules.Sprints.Models.Sprint)">
             <summary>Display name for a sprint — they are numbered per team, not named.</summary>
@@ -2314,9 +2424,59 @@
         <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase0_HotPathIndexes.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
             <inheritdoc />
         </member>
+        <member name="T:BoardSync.Api.Shared.Data.Migrations.Phase1_OutboxAndIdempotency">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase1_OutboxAndIdempotency.Up(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase1_OutboxAndIdempotency.Down(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase1_OutboxAndIdempotency.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
+            <inheritdoc />
+        </member>
         <member name="T:BoardSync.Api.Shared.Kernel.BaseEntity">
             <summary>
             Base class for all domain entities. Provides common audit fields.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Kernel.Configuration.OutboxSettings">
+            <summary>
+            Tuning for the outbox dispatcher.
+            </summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Kernel.Configuration.OutboxSettings.Enabled">
+            <summary>
+            Whether this instance drains the outbox. On by default.
+            </summary>
+            <remarks>
+            Turning it off is for running a dedicated dispatcher process, not for saving work — with
+            every instance disabled, events accumulate and the activity feed silently stops updating.
+            The dispatcher logs a warning at startup when it is off, for exactly that reason.
+            </remarks>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Kernel.Configuration.OutboxSettings.BatchSize">
+            <summary>Messages claimed per pass. Larger batches amortise the transaction, but hold locks longer.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Kernel.Configuration.OutboxSettings.PollIntervalSeconds">
+            <summary>
+            Fallback poll interval. Normal latency comes from Postgres NOTIFY; this is the safety net for
+            when the listener connection has dropped, so it trades a little idle querying for never
+            stalling the queue.
+            </summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Kernel.Configuration.OutboxSettings.MaxAttempts">
+            <summary>
+            Delivery attempts before a message is left alone. It stays in the table, undispatched and
+            visible, rather than being deleted or retried forever.
+            </summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Kernel.Configuration.OutboxSettings.RetentionHours">
+            <summary>
+            How long delivered messages are kept before cleanup. They are the replay log a real-time
+            client resumes from, so this is the practical ceiling on how far behind a client can fall
+            and still catch up without a full refetch.
             </summary>
         </member>
         <member name="T:BoardSync.Api.Shared.Kernel.Configuration.RateLimitSettings">
@@ -2352,35 +2512,235 @@
         <member name="P:BoardSync.Api.Shared.Kernel.Configuration.RateLimitPolicySettings.QueueLimit">
             <summary>How many requests may wait for the next window instead of being rejected outright.</summary>
         </member>
+        <member name="T:BoardSync.Api.Shared.Kernel.Events.EventDispatcher">
+            <summary>
+            Resolves and runs the handlers registered for a domain event.
+            </summary>
+            <remarks>
+            Handlers are registered against the closed interface (<c>IEventHandler&lt;WorkItemCreated&gt;</c>),
+            but the dispatcher only has an <see cref="T:BoardSync.Api.Shared.Kernel.Events.IDomainEvent"/> at runtime, so the closed type is
+            rebuilt reflectively to look them up.
+            </remarks>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Kernel.Events.EventTypeRegistry">
+            <summary>
+            Maps the event type names stored in the outbox back to CLR types.
+            </summary>
+            <remarks>
+            Outbox rows store the short type name rather than an assembly-qualified one, so moving an event
+            between namespaces does not strand messages already queued. The cost is that names must stay
+            unique across the assembly — <see cref="M:BoardSync.Api.Shared.Kernel.Events.EventTypeRegistry.Resolve(System.String)"/> refuses to guess between duplicates rather
+            than silently picking one and deserializing into the wrong shape.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Kernel.Events.EventTypeRegistry.Resolve(System.String)">
+            <summary>The CLR type for a stored event name, or null if nothing matches it.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Kernel.Events.EventTypeRegistry.KnownEventTypes">
+            <summary>Every domain event type known to this build. Exposed for the startup self-check.</summary>
+        </member>
         <member name="T:BoardSync.Api.Shared.Kernel.Events.IDomainEvent">
             <summary>
             Marker interface for all domain events published on the internal event bus.
             </summary>
         </member>
         <member name="T:BoardSync.Api.Shared.Kernel.Events.DomainEvent">
-            <summary>
-            Base record for domain events — provides EventId and OccurredAt automatically.
-            </summary>
+             <summary>
+             Base record for domain events — provides EventId and OccurredAt automatically.
+             </summary>
+             <remarks>
+             Both properties are <c>init</c>, not get-only, and that is load-bearing rather than stylistic.
+             Events round-trip through the outbox as JSON, and a get-only auto-property cannot be set by the
+             deserializer — it would silently fall back to the initializer and mint a <b>new</b> id every
+             time a message was read back. Identity would then differ on every redelivery, which defeats the
+             whole point of keying idempotency on <see cref="P:BoardSync.Api.Shared.Kernel.Events.DomainEvent.EventId"/>: the unique index would never see a
+             duplicate and handlers would happily record the same event twice.
+            
+             <c>init</c> keeps the record immutable to callers while still letting the deserializer restore
+             the original values.
+             </remarks>
         </member>
         <member name="T:BoardSync.Api.Shared.Kernel.Events.IEventBus">
             <summary>
-            In-process event bus abstraction.
-            Modules publish events here; other modules subscribe to react without direct coupling.
+            How modules tell the rest of the system that something happened.
+            </summary>
+            <remarks>
+            <para>
+            Enqueuing stages the event on the caller's unit of work. It is <b>not</b> delivered here —
+            it is written to the outbox by the next <c>SaveChangesAsync</c>, in the same transaction as the
+            domain change, and delivered afterwards by the dispatcher.
+            </para>
+            <para>
+            That ordering is the whole point, and it is the opposite of what this interface used to do.
+            Enqueue <b>before</b> saving:
+            </para>
+            <code>
+            _eventBus.Enqueue(new WorkItemStateChanged(...));
+            await _repository.SaveChangesAsync(ct);   // domain row + outbox row, one transaction
+            </code>
+            <para>
+            Enqueuing after the save still works — the event lands on the next save — but it is a trap: if
+            nothing saves again, the event never leaves. Put it before.
+            </para>
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Kernel.Events.IEventBus.Enqueue``1(``0)">
+            <summary>
+            Stages a domain event for durable delivery. Returns immediately; nothing is written until
+            the surrounding unit of work is saved.
             </summary>
         </member>
-        <member name="M:BoardSync.Api.Shared.Kernel.Events.IEventBus.PublishAsync``1(``0,System.Threading.CancellationToken)">
-            <summary>Publish a domain event to all registered handlers.</summary>
+        <member name="T:BoardSync.Api.Shared.Kernel.Events.IEventDispatcher">
+            <summary>
+            Invokes the handlers subscribed to a domain event. Used by the outbox dispatcher, not by the
+            modules that raise events.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Kernel.Events.IEventDispatcher.DispatchAsync(BoardSync.Api.Shared.Kernel.Events.IDomainEvent,System.Threading.CancellationToken)">
+            <summary>
+            Resolves and runs every handler registered for the event's type.
+            </summary>
+            <remarks>
+            Exceptions propagate. The dispatcher records the failure against the outbox row and retries
+            it, which is only possible because nothing is marked dispatched until the handlers succeed.
+            </remarks>
         </member>
         <member name="T:BoardSync.Api.Shared.Kernel.Events.IEventHandler`1">
+             <summary>
+             Handler for a specific domain event type.
+             </summary>
+             <remarks>
+             Subscription is DI registration: register an <see cref="T:BoardSync.Api.Shared.Kernel.Events.IEventHandler`1"/> and the
+             dispatcher will resolve and invoke it.
+            
+             Handlers must be <b>idempotent</b>. The outbox delivers at least once, so the same event can
+             arrive twice — after a dispatcher crash between running the handlers and marking the row
+             dispatched, for instance. Key any write on <see cref="P:BoardSync.Api.Shared.Kernel.Events.IDomainEvent.EventId"/>.
+             </remarks>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Kernel.Events.OutboxDispatcher">
             <summary>
-            Handler for a specific domain event type.
+            Drains the outbox: claims queued messages, runs their handlers, marks them delivered.
+            </summary>
+            <remarks>
+            <para>
+            Claiming uses <c>FOR UPDATE SKIP LOCKED</c>, so several instances can run this at once without
+            coordinating — each takes rows the others have not locked, and none of them block. That is what
+            makes the dispatcher safe to leave switched on across a whole deployment rather than nominating
+            a leader.
+            </para>
+            <para>
+            A message is marked dispatched only after its handlers succeed. Crash in between and it is
+            simply claimed again on the next pass, which is why handlers must be idempotent.
+            </para>
+            </remarks>
+        </member>
+        <member name="F:BoardSync.Api.Shared.Kernel.Events.OutboxDispatcher.NotifyChannel">
+            <summary>Postgres NOTIFY channel used to wake the dispatcher the moment a message is queued.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Kernel.Events.OutboxDispatcher.DispatchBatchAsync(System.Threading.CancellationToken)">
+            <summary>
+            Claims and delivers one batch. Returns how many messages were processed.
             </summary>
         </member>
-        <member name="T:BoardSync.Api.Shared.Kernel.Events.InMemoryEventBus">
+        <member name="M:BoardSync.Api.Shared.Kernel.Events.OutboxDispatcher.ClaimAndDeliverAsync(BoardSync.Api.Data.BoardSyncDbContext,BoardSync.Api.Shared.Kernel.Events.IEventDispatcher,System.Threading.CancellationToken)">
             <summary>
-            Simple in-process event bus backed by the DI container.
-            All handlers registered as IEventHandler&lt;TEvent&gt; in DI are resolved and invoked.
+            One claim-and-deliver cycle, retriable as a whole by the execution strategy above.
             </summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Kernel.Events.OutboxDispatcher.Deserialize(BoardSync.Api.Shared.Kernel.Events.OutboxMessage)">
+            <summary>
+            Rebuilds the domain event from its stored JSON, or null when the type no longer exists.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Kernel.Events.OutboxDispatcher.WaitForWorkAsync(System.Threading.CancellationToken)">
+            <summary>
+            Sleeps until the poll interval elapses or a NOTIFY arrives, whichever is first.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Kernel.Events.OutboxDispatcher.ListenForNotificationsAsync(System.Threading.CancellationToken)">
+            <summary>
+            Holds a dedicated connection open on the NOTIFY channel so a queued message is picked up in
+            milliseconds rather than at the next poll.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Kernel.Events.OutboxEventBus">
+            <summary>
+            Stages domain events as outbox rows on the caller's <c>DbContext</c>, so they commit in the same
+            transaction as the change that raised them.
+            </summary>
+            <remarks>
+            Scoped, and it shares the request's DbContext with every repository — that shared instance is
+            exactly what makes the event and the domain row land in one transaction. It does no I/O of its
+            own: <see cref="M:BoardSync.Api.Shared.Kernel.Events.OutboxEventBus.Enqueue``1(``0)"/> only adds to the change tracker.
+            </remarks>
+        </member>
+        <member name="F:BoardSync.Api.Shared.Kernel.Events.OutboxEventBus.SerializerOptions">
+            <summary>
+            Shared by the bus and the dispatcher — the two have to agree on the wire format or nothing
+            round-trips.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Kernel.Events.OutboxMessage">
+            <summary>
+            A domain event durably queued for delivery, written in the same transaction as the change that
+            raised it.
+            </summary>
+            <remarks>
+            <para>
+            This exists because the previous design could lose events silently. Services committed their
+            write, then published on an in-process bus that swallowed handler exceptions — so a crash, a
+            timeout, or a thrown handler between the two left the activity log with a hole and nobody the
+            wiser. Staging the event on the same <c>DbContext</c> makes the two atomic: no commit, no event;
+            commit, guaranteed event.
+            </para>
+            <para>
+            The cost is that delivery becomes at-least-once rather than at-most-once, so handlers must be
+            idempotent. That is the better half of the trade — a duplicate is recoverable, a silent loss is
+            not.
+            </para>
+            </remarks>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Kernel.Events.OutboxMessage.Sequence">
+            <summary>
+            Database-generated, monotonically increasing. This is the ordering authority for the whole
+            system: per-topic order follows from a global sequence, which is what will let a real-time
+            client say "I last saw 412, catch me up" without a second event store.
+            </summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Kernel.Events.OutboxMessage.EventId">
+            <summary>
+            The originating event's own id. Unique, and the key handlers deduplicate on — a redelivered
+            message carries the same EventId, so an idempotent handler can recognise it.
+            </summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Kernel.Events.OutboxMessage.EventType">
+            <summary>
+            The event's CLR type name (e.g. <c>WorkItemStateChanged</c>), used to resolve the handler.
+            Deliberately the short name and not an assembly-qualified one: a namespace reorganisation
+            should not strand messages already sitting in the queue.
+            </summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Kernel.Events.OutboxMessage.Payload">
+            <summary>The serialized event, as JSON.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Kernel.Events.OutboxMessage.OccurredAt">
+            <summary>When the event happened, copied off the event itself.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Kernel.Events.OutboxMessage.DispatchedAt">
+            <summary>
+            When the dispatcher finished with this message. Null means still queued — the partial index
+            on this column is what keeps claiming cheap as the table grows.
+            </summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Kernel.Events.OutboxMessage.Attempts">
+            <summary>
+            How many delivery attempts have been made. Incremented on failure so a message that cannot
+            ever succeed stops being retried forever and becomes visible instead.
+            </summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Kernel.Events.OutboxMessage.LastError">
+            <summary>Last failure, kept for diagnosis. Null while healthy.</summary>
         </member>
         <member name="T:BoardSync.Api.Shared.Kernel.Exceptions.DomainException">
             <summary>Base class for all domain-specific exceptions.</summary>
@@ -2424,6 +2784,48 @@
             Opaque cursor from a previous response's <see cref="P:BoardSync.Api.Shared.Kernel.PagedResult`1.NextCursor"/>. When set,
             endpoints that support it page forward from that point and ignore <see cref="P:BoardSync.Api.Shared.Kernel.PaginationQuery.Page"/>.
             </summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Kernel.RateLimiting.RedisFixedWindowRateLimiter">
+            <summary>
+            A fixed-window rate limiter whose counter lives in Redis, so the budget is shared by every
+            instance instead of being per-process.
+            </summary>
+            <remarks>
+            <para>
+            The in-process limiter multiplies the effective limit by the number of instances: the password
+            policy at 5 attempts per 5 minutes quietly becomes 15 across three replicas. That matters
+            because it is a brute-force control, and it fails open in exactly the situation — more capacity,
+            more traffic — where it should not.
+            </para>
+            <para>
+            Counting is done by a Lua script so the increment and the expiry are one atomic step. Doing them
+            as two round trips leaves a window where a crash between them creates a key with no TTL, which
+            would lock a caller out permanently.
+            </para>
+            <para>
+            <b>Fails open.</b> If Redis is unreachable the request is allowed through. A cache outage should
+            degrade a protection, not take the whole API down with it — the alternative is that losing Redis
+            rejects every request in the deployment.
+            </para>
+            </remarks>
+        </member>
+        <member name="F:BoardSync.Api.Shared.Kernel.RateLimiting.RedisFixedWindowRateLimiter.IncrementScript">
+            <summary>
+            Increments the window's counter and sets its expiry on first use, atomically.
+            Returns the count after incrementing.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Kernel.RateLimiting.RedisFixedWindowRateLimiter.AttemptAcquireCore(System.Int32)">
+            <summary>
+            Always declines, which routes every decision through <see cref="M:BoardSync.Api.Shared.Kernel.RateLimiting.RedisFixedWindowRateLimiter.AcquireAsyncCore(System.Int32,System.Threading.CancellationToken)"/>.
+            </summary>
+            <remarks>
+            This must not grant. The counter lives across the network and cannot be consulted without
+            awaiting, and ASP.NET Core's rate limiting middleware tries the synchronous path first and
+            only falls back to the async one when it does not acquire. A lease granted here would
+            therefore short-circuit the middleware into allowing every request without Redis ever being
+            asked — the limiter would look wired up and enforce nothing.
+            </remarks>
         </member>
         <member name="T:Program">
             <summary>

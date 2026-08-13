@@ -2,6 +2,7 @@ using BoardSync.Api.Data;
 using BoardSync.Api.Modules.Activity.Models;
 using BoardSync.Api.Modules.Activity.Repositories.Interfaces;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace BoardSync.Api.Modules.Activity.Repositories.Implementations;
 
@@ -17,11 +18,33 @@ public class ActivityRepository : IActivityRepository
 
     // ── Write ─────────────────────────────────────────────────────────────────
 
-    public async Task AddAsync(ActivityLog entry, CancellationToken ct = default)
+    public async Task<bool> AddIfNewAsync(ActivityLog entry, CancellationToken ct = default)
     {
         _context.ActivityLogs.Add(entry);
-        await _context.SaveChangesAsync(ct);
+
+        try
+        {
+            await _context.SaveChangesAsync(ct);
+            return true;
+        }
+        catch (DbUpdateException ex) when (IsDuplicateEventId(ex))
+        {
+            // Insert-and-catch rather than check-then-insert: two dispatchers can pass a check at
+            // the same moment, but only one can win the unique index. The index is the arbiter, so
+            // losing the race is the expected path, not an error.
+            _context.Entry(entry).State = EntityState.Detached;
+            return false;
+        }
     }
+
+    /// <summary>
+    /// Whether the failure was the EventId uniqueness constraint specifically, rather than any
+    /// other write error — those must keep propagating so the dispatcher retries them.
+    /// </summary>
+    private static bool IsDuplicateEventId(DbUpdateException ex) =>
+        ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation } pg
+        && pg.ConstraintName is not null
+        && pg.ConstraintName.Contains("EventId", StringComparison.OrdinalIgnoreCase);
 
     // ── Read ──────────────────────────────────────────────────────────────────
 

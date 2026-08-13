@@ -13,6 +13,24 @@ services:
     networks:
       - boardsync-network
 
+  redis:
+    image: redis:7-alpine
+    container_name: boardsync-redis-dev
+    # appendonly keeps the cache warm across restarts. Nothing here is a source of truth — losing
+    # the whole instance costs a slow first request, not data.
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "7001:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - boardsync-network
+
   mailhog:
     image: mailhog/mailhog:latest
     container_name: boardsync-mailhog-dev
@@ -26,6 +44,7 @@ services:
 
 volumes:
   pgdata:
+  redisdata:
 
 networks:
   boardsync-network:

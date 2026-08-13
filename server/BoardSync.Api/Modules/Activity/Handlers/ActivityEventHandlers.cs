@@ -12,10 +12,17 @@ namespace BoardSync.Api.Modules.Activity.Handlers;
 /// subscribers — the raising modules know nothing about the activity log.
 /// </summary>
 /// <remarks>
-/// Recording is best-effort by construction: <see cref="InMemoryEventBus"/> resolves handlers in a
-/// fresh scope after the originating transaction has committed, and swallows whatever they throw.
-/// A dropped row costs a line in the feed and nothing else, which is the right trade for never
-/// failing a user's write because the audit trail was unavailable.
+/// <para>
+/// Recording is no longer best-effort. Events reach these handlers through the outbox, so a
+/// failure here is retried rather than swallowed — the message stays queued until its handlers
+/// succeed or it exhausts its attempts, at which point it is left in the table where it can be
+/// found. Entries can no longer go missing because a handler happened to throw.
+/// </para>
+/// <para>
+/// The other side of that guarantee is at-least-once delivery: a handler can be invoked twice for
+/// the same event. Every write here is keyed on <see cref="IDomainEvent.EventId"/>, and a
+/// redelivery is recognised and skipped rather than duplicated.
+/// </para>
 /// </remarks>
 public partial class ActivityEventHandlers :
     IEventHandler<OrganizationCreated>,
@@ -135,6 +142,9 @@ public partial class ActivityEventHandlers :
         string? newValue = null) =>
         _recorder.RecordAsync(new ActivityLog
         {
+            // Carrying the originating event id is what makes recording idempotent — the outbox
+            // delivers at least once, and this is the key a redelivery is recognised by.
+            EventId = e.EventId,
             OrganizationId = organizationId,
             ProjectId = projectId,
             TeamId = teamId,

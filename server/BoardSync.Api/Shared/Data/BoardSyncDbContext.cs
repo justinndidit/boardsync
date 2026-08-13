@@ -4,6 +4,7 @@ using BoardSync.Api.Modules.Rbac.Models;
 using BoardSync.Api.Modules.Sprints.Models;
 using BoardSync.Api.Modules.WorkItems.Models;
 using BoardSync.Api.Shared.Auth.Models;
+using BoardSync.Api.Shared.Kernel.Events;
 using Microsoft.EntityFrameworkCore;
 
 namespace BoardSync.Api.Data;
@@ -43,6 +44,9 @@ public class BoardSyncDbContext : DbContext
 
     // ---- Activity module ----
     public DbSet<ActivityLog> ActivityLogs { get; set; } = null!;
+
+    // ── Shared kernel ─────────────────────────────────────────────────────────
+    public DbSet<OutboxMessage> OutboxMessages { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -368,6 +372,10 @@ public class BoardSyncDbContext : DbContext
             // feed a small IN-list, and either way the sort comes out of the index.
             entity.HasIndex(a => new { a.OrganizationId, a.OccurredAt })
                 .IsDescending(false, true);
+
+            // The idempotency key. A redelivered outbox message carries the same EventId, and this
+            // index is what turns "write it twice" into a no-op instead of a duplicate feed line.
+            entity.HasIndex(a => a.EventId).IsUnique();
             entity.HasIndex(a => a.ProjectId);
             entity.HasIndex(a => a.TeamId);
             entity.HasIndex(a => a.EntityId);
@@ -479,5 +487,30 @@ public class BoardSyncDbContext : DbContext
             entity.HasIndex(rt => rt.Revoked);
             entity.HasIndex(rt => rt.Created);
         });
+        // ----------------------------------------------------------------
+        // Shared kernel — schema: kernel
+        // ----------------------------------------------------------------
+        modelBuilder.Entity<OutboxMessage>(entity =>
+        {
+            entity.ToTable("OutboxMessages", "kernel");
+            entity.HasKey(m => m.Sequence);
+
+            // Database-generated so the ordering authority is the database, not the application.
+            // Several instances write concurrently; only the sequence can order them.
+            entity.Property(m => m.Sequence).ValueGeneratedOnAdd();
+
+            entity.HasIndex(m => m.EventId).IsUnique();
+
+            // Partial: the dispatcher only ever asks for undelivered rows, and once the table has
+            // months of delivered history a full index on DispatchedAt would be mostly dead weight.
+            entity.HasIndex(m => m.Sequence)
+                .HasFilter("\"DispatchedAt\" IS NULL")
+                .HasDatabaseName("IX_OutboxMessages_Undispatched");
+
+            entity.Property(m => m.EventType).IsRequired().HasMaxLength(200);
+            entity.Property(m => m.Payload).IsRequired().HasColumnType("jsonb");
+            entity.Property(m => m.LastError).HasMaxLength(2000);
+        });
+
     }
 }

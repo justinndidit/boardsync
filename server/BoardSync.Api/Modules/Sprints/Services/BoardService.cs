@@ -58,10 +58,11 @@ public class BoardService : IBoardService
 
         board.Name = request.Name.Trim();
         board.UpdatedAt = DateTime.UtcNow;
-        await _repository.SaveChangesAsync(ct);
 
         if (previousName != board.Name)
-            await PublishAsync(board, "Name", previousName, board.Name, updatedBy, ct);
+            await EnqueueAsync(board, "Name", previousName, board.Name, updatedBy, ct);
+
+        await _repository.SaveChangesAsync(ct);
 
         return await BuildBoardResponseAsync(board, ct);
     }
@@ -87,9 +88,10 @@ public class BoardService : IBoardService
         };
 
         _repository.AddColumn(column);
-        await _repository.SaveChangesAsync(ct);
 
-        await PublishAsync(board, "Column added", null, column.Name, createdBy, ct);
+        await EnqueueAsync(board, "Column added", null, column.Name, createdBy, ct);
+
+        await _repository.SaveChangesAsync(ct);
 
         return MapColumnDetail(column);
     }
@@ -109,10 +111,10 @@ public class BoardService : IBoardService
         column.Position    = request.Position;
         column.UpdatedAt   = DateTime.UtcNow;
 
-        await _repository.SaveChangesAsync(ct);
-
         var board = await GetBoardOrThrowAsync(column.BoardId, ct);
-        await PublishAsync(board, "Column updated", previousName, column.Name, updatedBy, ct);
+        await EnqueueAsync(board, "Column updated", previousName, column.Name, updatedBy, ct);
+
+        await _repository.SaveChangesAsync(ct);
 
         return MapColumnDetail(column);
     }
@@ -124,9 +126,10 @@ public class BoardService : IBoardService
         var name = column.Name;
 
         _repository.RemoveColumn(column);
-        await _repository.SaveChangesAsync(ct);
 
-        await PublishAsync(board, "Column removed", name, null, deletedBy, ct);
+        await EnqueueAsync(board, "Column removed", name, null, deletedBy, ct);
+
+        await _repository.SaveChangesAsync(ct);
     }
 
     public async Task ReorderColumnsAsync(
@@ -159,7 +162,7 @@ public class BoardService : IBoardService
     /// activity log files entries under. Skipped if the project has gone — there would be no
     /// organization to attribute the change to.
     /// </summary>
-    private async Task PublishAsync(
+    private async Task EnqueueAsync(
         Board board,
         string change,
         string? oldValue,
@@ -171,8 +174,8 @@ public class BoardService : IBoardService
 
         if (orgId is null) return;
 
-        await _eventBus.PublishAsync(new BoardChanged(
-            board.Id, board.ProjectId, orgId.Value, board.Name, change, oldValue, newValue, changedBy), ct);
+        _eventBus.Enqueue(new BoardChanged(
+            board.Id, board.ProjectId, orgId.Value, board.Name, change, oldValue, newValue, changedBy));
     }
 
     private async Task<Board> GetBoardOrThrowAsync(Guid boardId, CancellationToken ct)
