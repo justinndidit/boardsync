@@ -48,7 +48,36 @@ public class SprintWorkItem : BaseEntity
     public Guid WorkItemId { get; set; }
 
     /// <summary>Display position within the sprint backlog (0-based).</summary>
+    /// <remarks>
+    /// Superseded by <see cref="Rank"/> for ordering; kept so the existing whole-list reorder
+    /// endpoint and any client reading it keep working. Written alongside Rank, never read for
+    /// sort order.
+    /// </remarks>
     public int Position { get; set; }
+
+    /// <summary>
+    /// Fractional sort key. Ordering is by this, ascending.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Fractional so that moving a card is a single-row update: to place it between two neighbours,
+    /// take the midpoint of their ranks. Nothing else in the backlog is touched.
+    /// </para>
+    /// <para>
+    /// That property is what makes concurrent editing safe. Rewriting every row's integer position
+    /// meant two people dragging different cards each wrote back a complete ordering computed
+    /// before the other's move existed, so whoever saved second silently reverted the first. With
+    /// ranks, two people moving different cards touch different rows and cannot collide at all;
+    /// two people moving the *same* card resolve as last-write-wins on one row, which is both
+    /// correct and what users expect.
+    /// </para>
+    /// <para>
+    /// <c>numeric</c> rather than a float: repeated midpoints need exact arithmetic, and binary
+    /// floating point runs out of precision after about 50 subdivisions of the same gap. A
+    /// rebalance is still needed eventually, just far less often.
+    /// </para>
+    /// </remarks>
+    public decimal Rank { get; set; }
 
     // Navigation
     public virtual Sprint Sprint { get; set; } = null!;

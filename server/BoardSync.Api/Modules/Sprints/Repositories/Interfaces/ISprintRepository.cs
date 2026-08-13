@@ -84,6 +84,19 @@ public interface ISprintRepository
     /// <summary>Position that appends to the end of the backlog.</summary>
     Task<int> GetNextPositionAsync(Guid sprintId, CancellationToken ct = default);
 
+    /// <summary>Highest rank currently in the backlog, or null when it is empty.</summary>
+    Task<decimal?> GetMaxRankAsync(Guid sprintId, CancellationToken ct = default);
+
+    /// <summary>
+    /// The ranks of two specific backlog entries, used to compute a midpoint for a move.
+    /// A null id yields a null rank, meaning "the end of the list in that direction".
+    /// </summary>
+    Task<(decimal? Before, decimal? After)> GetNeighbourRanksAsync(
+        Guid sprintId,
+        Guid? beforeWorkItemId,
+        Guid? afterWorkItemId,
+        CancellationToken ct = default);
+
     /// <summary>Paginated backlog in display order, joined to the work items it points at.</summary>
     Task<(IReadOnlyList<SprintWorkItemResponse> Items, int TotalCount)> GetWorkItemsAsync(
         Guid sprintId,

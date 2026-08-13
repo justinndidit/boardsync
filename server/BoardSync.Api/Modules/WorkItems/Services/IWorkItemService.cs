@@ -11,7 +11,12 @@ public interface IWorkItemService
     Task<WorkItemResponse> GetByIdAsync(Guid workItemId, CancellationToken ct = default);
     Task<PagedResult<WorkItemSummaryResponse>> GetForProjectAsync(Guid projectId, WorkItemFilterQuery filter, CancellationToken ct = default);
     Task<WorkItemResponse> UpdateAsync(Guid workItemId, UpdateWorkItemRequest request, Guid updatedBy, CancellationToken ct = default);
-    Task<WorkItemResponse> UpdateStateAsync(Guid workItemId, WorkItemState newState, Guid updatedBy, CancellationToken ct = default);
+    Task<WorkItemResponse> UpdateStateAsync(
+        Guid workItemId,
+        WorkItemState newState,
+        Guid updatedBy,
+        long? expectedVersion = null,
+        CancellationToken ct = default);
     Task DeleteAsync(Guid workItemId, Guid deletedBy, CancellationToken ct = default);
 
     // ── Comments ──────────────────────────────────────────────────────────────

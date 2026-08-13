@@ -1,3 +1,4 @@
+using BoardSync.Api.Modules.Sprints.Domain;
 using BoardSync.Api.Modules.Sprints.DTOs;
 using BoardSync.Api.Modules.Sprints.Events;
 using BoardSync.Api.Modules.Sprints.Models;
@@ -204,11 +205,16 @@ public class SprintService : ISprintService
 
         var position = request.Position ?? await _repository.GetNextPositionAsync(sprintId, ct);
 
+        // Appended to the end by rank regardless of the legacy Position, which is only still
+        // written so existing readers keep working.
+        var maxRank = await _repository.GetMaxRankAsync(sprintId, ct);
+
         var entry = new SprintWorkItem
         {
             SprintId = sprintId,
             WorkItemId = request.WorkItemId,
             Position = position,
+            Rank = Ranking.Between(maxRank, null),
             CreatedBy = addedBy
         };
 
@@ -255,6 +261,57 @@ public class SprintService : ISprintService
         return new PagedResult<SprintWorkItemResponse>(items, total, pagination.Page, pagination.PageSize);
     }
 
+    public async Task<decimal> MoveWorkItemAsync(
+        Guid sprintId,
+        Guid workItemId,
+        MoveSprintWorkItemRequest request,
+        CancellationToken ct = default)
+    {
+        _ = await GetOrThrowAsync(sprintId, ct);
+
+        var entry = await _repository.GetBacklogEntryAsync(sprintId, workItemId, ct)
+            ?? throw new NotFoundException("SprintWorkItem", workItemId);
+
+        var (before, after) = await _repository.GetNeighbourRanksAsync(
+            sprintId, request.AfterWorkItemId, request.BeforeWorkItemId, ct);
+
+        if (Ranking.NeedsRebalance(before, after))
+        {
+            // The gap between these two has collapsed to where further midpoints would start
+            // losing precision. Renumbering the backlog restores room; it is the one operation
+            // that touches every row, and it is rare by construction.
+            await RebalanceAsync(sprintId, ct);
+
+            (before, after) = await _repository.GetNeighbourRanksAsync(
+                sprintId, request.AfterWorkItemId, request.BeforeWorkItemId, ct);
+        }
+
+        entry.Rank = Ranking.Between(before, after);
+        entry.UpdatedAt = DateTime.UtcNow;
+
+        await _repository.SaveChangesAsync(ct);
+
+        return entry.Rank;
+    }
+
+    /// <summary>
+    /// Spreads the backlog back out over evenly spaced ranks, preserving current order.
+    /// </summary>
+    private async Task RebalanceAsync(Guid sprintId, CancellationToken ct)
+    {
+        var entries = await _repository.GetBacklogEntriesAsync(sprintId, ct);
+
+        var ordered = entries.OrderBy(e => e.Rank).ToList();
+
+        for (var i = 0; i < ordered.Count; i++)
+            ordered[i].Rank = Ranking.RankAt(i);
+
+        await _repository.SaveChangesAsync(ct);
+
+        _logger.LogInformation("Rebalanced {Count} backlog ranks for sprint {SprintId}",
+            ordered.Count, sprintId);
+    }
+
     public async Task ReorderWorkItemsAsync(
         Guid sprintId,
         ReorderSprintWorkItemsRequest request,
@@ -264,11 +321,17 @@ public class SprintService : ISprintService
 
         var entries = await _repository.GetBacklogEntriesAsync(sprintId, ct);
 
+        // Writes ranks as well as positions, so the two orderings cannot drift apart. This whole-
+        // list form is still last-writer-wins across the entire backlog — see MoveWorkItemAsync for
+        // the single-row alternative that concurrent editors should use.
         for (int i = 0; i < request.WorkItemIds.Count; i++)
         {
             var entry = entries.FirstOrDefault(sw => sw.WorkItemId == request.WorkItemIds[i]);
             if (entry is not null)
+            {
                 entry.Position = i;
+                entry.Rank = Ranking.RankAt(i);
+            }
         }
 
         await _repository.SaveChangesAsync(ct);

@@ -1,6 +1,8 @@
 using System.Text.Json;
 using BoardSync.Api.Data;
 using BoardSync.Api.Shared.Kernel.Configuration;
+using BoardSync.Api.Modules.Sprints.Services;
+using BoardSync.Api.Shared.Realtime;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Npgsql;
@@ -100,13 +102,16 @@ public class OutboxDispatcher : BackgroundService
         using var scope = _scopeFactory.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<BoardSyncDbContext>();
         var dispatcher = scope.ServiceProvider.GetRequiredService<IEventDispatcher>();
+        var notifier = scope.ServiceProvider.GetRequiredService<IRealtimeNotifier>();
+        var boardVersion = scope.ServiceProvider.GetService<IBoardCacheVersion>();
 
         // The connection is configured with EnableRetryOnFailure, and that execution strategy
         // refuses user-initiated transactions unless the whole unit is handed to it — otherwise a
         // retry would resume mid-transaction against a connection that no longer has one.
         var strategy = context.Database.CreateExecutionStrategy();
 
-        return await strategy.ExecuteAsync(() => ClaimAndDeliverAsync(context, dispatcher, ct));
+        return await strategy.ExecuteAsync(
+            () => ClaimAndDeliverAsync(context, dispatcher, notifier, boardVersion, ct));
     }
 
     /// <summary>
@@ -115,6 +120,8 @@ public class OutboxDispatcher : BackgroundService
     private async Task<int> ClaimAndDeliverAsync(
         BoardSyncDbContext context,
         IEventDispatcher dispatcher,
+        IRealtimeNotifier notifier,
+        IBoardCacheVersion? boardVersion,
         CancellationToken ct)
     {
         await using var transaction = await context.Database.BeginTransactionAsync(ct);
@@ -156,6 +163,16 @@ public class OutboxDispatcher : BackgroundService
                 }
 
                 await dispatcher.DispatchAsync(domainEvent, ct);
+
+                // After the handlers, so a client is never told about a change before the state it
+                // describes has been recorded. NotifyAsync does not throw: a hub failure must not
+                // retry the message and re-run handlers that already succeeded.
+                await notifier.NotifyAsync(message, ct);
+
+                // Anything on a project topic can change what that project's board renders, so the
+                // board's generation advances here rather than at each of the dozen call sites that
+                // could have caused it. One place to get right instead of twelve.
+                await InvalidateBoardsAsync(boardVersion, message);
 
                 message.DispatchedAt = DateTime.UtcNow;
                 message.LastError = null;
@@ -252,6 +269,20 @@ public class OutboxDispatcher : BackgroundService
                     return;
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// Advances the board cache generation for every project this message touched.
+    /// </summary>
+    private static async Task InvalidateBoardsAsync(IBoardCacheVersion? boardVersion, OutboxMessage message)
+    {
+        if (boardVersion is null) return;
+
+        foreach (var topic in message.Topics)
+        {
+            if (Topic.TryParse(topic, out var kind, out var id) && kind == TopicKind.Project)
+                await boardVersion.BumpAsync(id);
         }
     }
 

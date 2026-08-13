@@ -43,6 +43,16 @@ public class OutboxMessage
     /// <summary>The serialized event, as JSON.</summary>
     public string Payload { get; set; } = string.Empty;
 
+    /// <summary>
+    /// The real-time channels this event should reach, resolved once at enqueue time.
+    /// </summary>
+    /// <remarks>
+    /// Stored rather than derived at dispatch so that "what did this topic miss since sequence N?"
+    /// — the question a reconnecting client asks — is an indexed array containment filter instead
+    /// of a scan that deserializes every candidate message to find out.
+    /// </remarks>
+    public string[] Topics { get; set; } = [];
+
     /// <summary>When the event happened, copied off the event itself.</summary>
     public DateTime OccurredAt { get; set; }
 

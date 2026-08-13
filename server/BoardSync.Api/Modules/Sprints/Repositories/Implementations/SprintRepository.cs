@@ -121,6 +121,40 @@ public class SprintRepository : ISprintRepository
             .Where(sw => sw.SprintId == sprintId)
             .MaxAsync(sw => (int?)sw.Position, ct) ?? -1) + 1;
 
+    public async Task<decimal?> GetMaxRankAsync(Guid sprintId, CancellationToken ct = default) =>
+        await _context.SprintWorkItems
+            .Where(sw => sw.SprintId == sprintId)
+            .MaxAsync(sw => (decimal?)sw.Rank, ct);
+
+    public async Task<(decimal? Before, decimal? After)> GetNeighbourRanksAsync(
+        Guid sprintId,
+        Guid? beforeWorkItemId,
+        Guid? afterWorkItemId,
+        CancellationToken ct = default)
+    {
+        // Both neighbours in one query — they are two rows of the same table, and asking twice
+        // would let the backlog change between the two reads.
+        var ids = new[] { beforeWorkItemId, afterWorkItemId }
+            .Where(id => id.HasValue)
+            .Select(id => id!.Value)
+            .ToList();
+
+        if (ids.Count == 0) return (null, null);
+
+        var ranks = await _context.SprintWorkItems
+            .Where(sw => sw.SprintId == sprintId && ids.Contains(sw.WorkItemId))
+            .Select(sw => new { sw.WorkItemId, sw.Rank })
+            .ToDictionaryAsync(x => x.WorkItemId, x => x.Rank, ct);
+
+        decimal? before = beforeWorkItemId.HasValue && ranks.TryGetValue(beforeWorkItemId.Value, out var b)
+            ? b : null;
+
+        decimal? after = afterWorkItemId.HasValue && ranks.TryGetValue(afterWorkItemId.Value, out var a)
+            ? a : null;
+
+        return (before, after);
+    }
+
     public async Task<(IReadOnlyList<SprintWorkItemResponse> Items, int TotalCount)> GetWorkItemsAsync(
         Guid sprintId,
         int skip,
@@ -132,7 +166,7 @@ public class SprintRepository : ISprintRepository
         var total = await query.CountAsync(ct);
 
         var items = await query
-            .OrderBy(sw => sw.Position)
+            .OrderBy(sw => sw.Rank)
             .Skip(skip)
             .Take(take)
             .Join(_context.WorkItems,

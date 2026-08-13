@@ -1,4 +1,5 @@
 using BoardSync.Api.Modules.Sprints.DTOs;
+using Microsoft.Extensions.Caching.Hybrid;
 using BoardSync.Api.Modules.Sprints.Events;
 using BoardSync.Api.Modules.Sprints.Models;
 using BoardSync.Api.Modules.Sprints.Repositories.Interfaces;
@@ -11,12 +12,32 @@ public class BoardService : IBoardService
 {
     private readonly IBoardRepository _repository;
     private readonly IEventBus _eventBus;
+    private readonly HybridCache _cache;
+    private readonly IBoardCacheVersion? _version;
     private readonly ILogger<BoardService> _logger;
 
-    public BoardService(IBoardRepository repository, IEventBus eventBus, ILogger<BoardService> logger)
+    /// <summary>
+    /// Short on purpose. The version stamp is what makes a change visible immediately; this only
+    /// bounds how long an untouched board can sit cached, and a board nobody is changing is a board
+    /// nobody minds reading slightly late.
+    /// </summary>
+    private static readonly HybridCacheEntryOptions SnapshotOptions = new()
+    {
+        Expiration = TimeSpan.FromMinutes(2),
+        LocalCacheExpiration = TimeSpan.FromSeconds(20)
+    };
+
+    public BoardService(
+        IBoardRepository repository,
+        IEventBus eventBus,
+        HybridCache cache,
+        ILogger<BoardService> logger,
+        IBoardCacheVersion? version = null)
     {
         _repository = repository;
         _eventBus = eventBus;
+        _cache = cache;
+        _version = version;
         _logger = logger;
     }
 
@@ -38,13 +59,13 @@ public class BoardService : IBoardService
             _logger.LogInformation("Board auto-created for project {ProjectId}", projectId);
         }
 
-        return await BuildBoardResponseAsync(board, ct);
+        return await GetBoardResponseAsync(board, ct);
     }
 
     public async Task<BoardResponse> GetByIdAsync(Guid boardId, CancellationToken ct = default)
     {
         var board = await GetBoardOrThrowAsync(boardId, ct);
-        return await BuildBoardResponseAsync(board, ct);
+        return await GetBoardResponseAsync(board, ct);
     }
 
     public async Task<BoardResponse> UpdateAsync(
@@ -185,6 +206,30 @@ public class BoardService : IBoardService
     private async Task<BoardColumn> GetColumnOrThrowAsync(Guid columnId, CancellationToken ct)
         => await _repository.GetColumnAsync(columnId, ct)
            ?? throw new NotFoundException("BoardColumn", columnId);
+
+    /// <summary>
+    /// Builds the board, from cache when one is available for the project's current generation.
+    /// </summary>
+    /// <remarks>
+    /// Without Redis there is no generation to stamp keys with, and caching without one would serve
+    /// boards that never notice a card moved — so it reads through instead.
+    /// </remarks>
+    private async Task<BoardResponse> GetBoardResponseAsync(Board board, CancellationToken ct)
+    {
+        if (_version is null)
+            return await BuildBoardResponseAsync(board, ct);
+
+        var version = await _version.GetAsync(board.ProjectId);
+        var key = $"board:v1:{board.ProjectId}:{version}";
+
+        return await _cache.GetOrCreateAsync(
+            key,
+            (Service: this, board),
+            static (state, token) => new ValueTask<BoardResponse>(
+                state.Service.BuildBoardResponseAsync(state.board, token)),
+            SnapshotOptions,
+            cancellationToken: ct);
+    }
 
     private async Task<BoardResponse> BuildBoardResponseAsync(Board board, CancellationToken ct)
     {

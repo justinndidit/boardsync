@@ -119,6 +119,8 @@ the authoritative reference; the table below is the map.
 | Boards | `GET /api/projects/{projectId}/board`, `GET|PUT /api/boards/{boardId}`, `POST /api/boards/{boardId}/columns`, `PUT|DELETE /api/boards/columns/{columnId}`, `PATCH /api/boards/{boardId}/columns/reorder` |
 | Sprints | `GET|POST /api/teams/{teamId}/sprints`, `GET /api/teams/{teamId}/sprints/active`, `GET|PUT|DELETE /api/sprints/{sprintId}`, `PATCH /api/sprints/{sprintId}/status`, `GET|POST /api/sprints/{sprintId}/workitems`, `DELETE /api/sprints/{sprintId}/workitems/{workItemId}`, `PATCH /api/sprints/{sprintId}/workitems/reorder` |
 | Work items | `GET|POST /api/projects/{projectId}/workitems`, `GET|PUT|DELETE /api/workitems/{workItemId}`, `PATCH /api/workitems/{workItemId}/state`, `GET|POST /api/workitems/{workItemId}/comments`, `PUT|DELETE /api/workitems/comments/{commentId}`, `GET /api/workitems/{workItemId}/history`, `GET|POST /api/workitems/{workItemId}/links`, `DELETE /api/workitems/links/{linkId}` |
+| Sprint backlog move | `PATCH /api/sprints/{sprintId}/workitems/{workItemId}/move` — single-row drag-and-drop |
+| Real-time hub | `WS /hubs/workspace` — see `docs/realtime-frontend.md` |
 | Health (anonymous) | `GET /healthz` |
 
 Enums serialize as strings (`"OrgAdmin"`, not `10`) on every endpoint. Errors are returned as
@@ -154,6 +156,8 @@ RFC 7807 problem details via the global exception handler.
 | `Outbox:PollIntervalSeconds` | `5` | Fallback poll. Normal latency comes from Postgres `NOTIFY`; this is the safety net for a dropped listener. |
 | `Outbox:MaxAttempts` | `5` | Delivery attempts before a message is left alone — still in the table, visible, not deleted. |
 | `Telemetry:OtlpEndpoint` | unset | OTLP collector address, e.g. `http://localhost:4317`. Unset means OpenTelemetry is not registered at all — no spans built, nothing exported. `OTEL_EXPORTER_OTLP_ENDPOINT` works too. |
+| `Realtime:Enabled` | `true` | Whether the hub is mapped. Off means clients cannot connect; the REST API is unaffected. |
+| `Realtime:MaxReplayMessages` | `200` | How far a reconnecting client can be caught up before it is told to resync instead. |
 | `Telemetry:ServiceName` | `boardsync-api` | `service.name` on exported traces and metrics. |
 
 With a collector configured you get per-endpoint `http.server.request.duration` (bucketed by route),

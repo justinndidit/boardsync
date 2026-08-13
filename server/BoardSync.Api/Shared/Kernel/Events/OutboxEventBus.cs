@@ -35,6 +35,7 @@ public class OutboxEventBus : IEventBus
             EventId = domainEvent.EventId,
             EventType = domainEvent.GetType().Name,
             Payload = payload,
+            Topics = EventTopics.For(domainEvent),
             OccurredAt = domainEvent.OccurredAt
         });
 

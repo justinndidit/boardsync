@@ -34,6 +34,17 @@ public class CreateWorkItemRequest
 
 public class UpdateWorkItemRequest
 {
+    /// <summary>
+    /// The <c>version</c> from the work item you read, when you want conflicts reported.
+    /// </summary>
+    /// <remarks>
+    /// Optional, and omitting it keeps the previous behaviour — last write wins, no conflict
+    /// signal. Supplying it turns "somebody else changed this while you were editing" from a silent
+    /// overwrite into a <c>409</c> carrying the current state, which is the only way a client can
+    /// reconcile rather than clobber.
+    /// </remarks>
+    public long? ExpectedVersion { get; init; }
+
     [Required]
     [MaxLength(255)]
     public string Title { get; init; } = string.Empty;
@@ -57,6 +68,9 @@ public class UpdateWorkItemStateRequest
 {
     [Required]
     public WorkItemState State { get; init; }
+
+    /// <inheritdoc cref="UpdateWorkItemRequest.ExpectedVersion" />
+    public long? ExpectedVersion { get; init; }
 }
 
 public class AddWorkItemCommentRequest
