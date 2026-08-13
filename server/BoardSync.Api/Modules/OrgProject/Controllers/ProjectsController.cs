@@ -174,11 +174,13 @@ public class ProjectsController : ControllerBase
         foreach (var held in existing.Where(r => r.UserId == request.UserId))
             await _rbac.RemoveRoleAsync(request.UserId, held.Role, RoleScope.Project, projectId, ct);
 
+        // Staged before the assignment, not after: AssignRoleAsync saves the shared unit of work,
+        // so enqueuing first is what makes the outbox row and the role change commit together.
+        _eventBus.Enqueue(new ProjectRoleChanged(
+            projectId, project.OrganizationId, project.Name, request.UserId, request.Role, _currentUser.UserId));
+
         var assignment = await _rbac.AssignRoleAsync(
             request.UserId, request.Role, RoleScope.Project, projectId, _currentUser.UserId, ct);
-
-        await _eventBus.PublishAsync(new ProjectRoleChanged(
-            projectId, project.OrganizationId, project.Name, request.UserId, request.Role, _currentUser.UserId), ct);
 
         return Ok(new ApiResponse<ProjectRoleResponse>(true, $"Role updated to {request.Role}.",
             new ProjectRoleResponse(assignment.UserId, assignment.Role, assignment.CreatedAt)));
@@ -208,12 +210,15 @@ public class ProjectsController : ControllerBase
             existing.Count(r => r.Role == RoleType.ProjectAdmin) == 1)
             return BadRequest(new ApiResponse(false, "Cannot revoke the last ProjectAdmin of a project."));
 
+        // Read the project and stage the event before the revocations — each RemoveRoleAsync saves
+        // the shared unit of work, so the outbox row commits with the first of them rather than
+        // being left stranded in the change tracker with nothing left to save it.
+        var project = await _projectService.GetByIdAsync(projectId, ct);
+        _eventBus.Enqueue(new ProjectRoleChanged(
+            projectId, project.OrganizationId, project.Name, userId, null, _currentUser.UserId));
+
         foreach (var role in held)
             await _rbac.RemoveRoleAsync(userId, role.Role, RoleScope.Project, projectId, ct);
-
-        var project = await _projectService.GetByIdAsync(projectId, ct);
-        await _eventBus.PublishAsync(new ProjectRoleChanged(
-            projectId, project.OrganizationId, project.Name, userId, null, _currentUser.UserId), ct);
 
         return Ok(new ApiResponse(true, "Project role revoked."));
     }

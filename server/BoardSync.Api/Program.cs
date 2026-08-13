@@ -27,10 +27,13 @@ using BoardSync.Api.Shared.Auth.Services;
 using BoardSync.Api.Shared.Auth.Services.Implementations;
 using BoardSync.Api.Shared.Kernel.Configuration;
 using BoardSync.Api.Shared.Kernel.Events;
+using BoardSync.Api.Shared.Kernel.RateLimiting;
+using StackExchange.Redis;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
 using Npgsql;
@@ -68,6 +71,18 @@ builder.Services.AddHealthChecks();
 
 // Traces and metrics. No-op unless an OTLP endpoint is configured.
 builder.AddBoardSyncTelemetry();
+
+// HybridCache: in-process L1, Redis L2 when configured.
+builder.AddBoardSyncCaching();
+
+// One multiplexer per process — it is designed to be shared and is expensive to create per use.
+// Registered only when configured, so the rate limiter can detect its absence and fall back.
+var redisConnectionString = builder.Configuration.GetConnectionString("Redis");
+if (!string.IsNullOrWhiteSpace(redisConnectionString))
+{
+    builder.Services.AddSingleton<IConnectionMultiplexer>(
+        _ => ConnectionMultiplexer.Connect(redisConnectionString));
+}
 
 // Add OpenAPI/Swagger services
 builder.Services.AddEndpointsApiExplorer();
@@ -118,16 +133,39 @@ builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddScoped<ICurrentUserContext, CurrentUserContext>();
 
 // Shared Kernel — Event Bus
-builder.Services.AddScoped<IEventBus, InMemoryEventBus>();
+// Enqueue stages the event on the request's DbContext; the dispatcher below delivers it after the
+// transaction commits. Both halves are required — an instance with no dispatcher writes events
+// that are never handled.
+builder.Services.Configure<OutboxSettings>(builder.Configuration.GetSection("Outbox"));
+builder.Services.AddScoped<IEventBus, OutboxEventBus>();
+builder.Services.AddScoped<IEventDispatcher, EventDispatcher>();
+builder.Services.AddHostedService<OutboxDispatcher>();
 
 // RBAC Module
 // RbacService is registered concretely and reached through the memoizing decorator, so a scope that
 // authorizes the same question twice — which is most requests, once for the controller guard and
 // again inside the service — pays for it once.
+// Three layers, outermost first: per-request memoization, then the shared L1/L2 cache, then the
+// database. A repeated question inside one request costs nothing; a repeated question across
+// requests costs a cache read; only a genuine miss reaches Postgres.
 builder.Services.AddScoped<IRoleAssignmentRepository, RoleAssignmentRepository>();
 builder.Services.AddScoped<RbacService>();
+// The distributed layer only goes in when Redis is there to hold the version stamps that make
+// revocation immediate. Without it, per-request memoization alone — correct, just less effective.
 builder.Services.AddScoped<IRbacService>(sp =>
-    new MemoizingRbacService(sp.GetRequiredService<RbacService>()));
+{
+    var redis = sp.GetService<IConnectionMultiplexer>();
+
+    IRbacService inner = redis is null
+        ? sp.GetRequiredService<RbacService>()
+        : new CachingRbacService(
+            sp.GetRequiredService<RbacService>(),
+            sp.GetRequiredService<HybridCache>(),
+            redis,
+            sp.GetRequiredService<ILogger<CachingRbacService>>());
+
+    return new MemoizingRbacService(inner);
+});
 
 // OrgProject Module
 builder.Services.AddScoped<IOrganizationRepository, OrganizationRepository>();
@@ -171,9 +209,9 @@ var rateLimitSettings = builder.Configuration.GetSection("RateLimiting").Get<Rat
 builder.Services.AddRateLimiter(options =>
 {
     // Each policy is partitioned per caller, so one caller can never consume another's budget.
-    options.AddPolicy("api", ctx => PartitionFor(ctx, rateLimitSettings.Api, rateLimitSettings.Enabled));
-    options.AddPolicy("auth", ctx => PartitionFor(ctx, rateLimitSettings.Auth, rateLimitSettings.Enabled));
-    options.AddPolicy("password", ctx => PartitionFor(ctx, rateLimitSettings.Password, rateLimitSettings.Enabled));
+    options.AddPolicy("api", ctx => PartitionFor(ctx, rateLimitSettings.Api, rateLimitSettings.Enabled, "api"));
+    options.AddPolicy("auth", ctx => PartitionFor(ctx, rateLimitSettings.Auth, rateLimitSettings.Enabled, "auth"));
+    options.AddPolicy("password", ctx => PartitionFor(ctx, rateLimitSettings.Password, rateLimitSettings.Enabled, "password"));
 
     // The general API budget applies to every request, including endpoints that declare no policy
     // of their own — which was previously all of them outside AuthController.
@@ -184,7 +222,7 @@ builder.Services.AddRateLimiter(options =>
     // AuthController's tighter "auth"/"password" budgets instead of adding to them. The global
     // limiter composes — a request must satisfy this *and* any endpoint policy.
     options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(
-        ctx => PartitionFor(ctx, rateLimitSettings.Api, rateLimitSettings.Enabled));
+        ctx => PartitionFor(ctx, rateLimitSettings.Api, rateLimitSettings.Enabled, "api"));
 
     options.OnRejected = async (context, cancellationToken) =>
     {
@@ -362,6 +400,7 @@ builder.Services.AddCors(options =>
 var app = builder.Build();
 
 app.LogTelemetryStatus();
+app.LogCacheStatus();
 
 // Auto-migrate database on startup
 await app.MigrateDatabaseAsync();
@@ -434,7 +473,11 @@ app.Run();
 // Builds a rate limit partition for a single caller. Authenticated requests are keyed by user ID
 // so that users sharing an IP (NAT, office network, mobile carrier) get independent budgets;
 // anonymous requests fall back to the client IP.
-static RateLimitPartition<string> PartitionFor(HttpContext httpContext, RateLimitPolicySettings policy, bool enabled)
+static RateLimitPartition<string> PartitionFor(
+    HttpContext httpContext,
+    RateLimitPolicySettings policy,
+    bool enabled,
+    string policyName)
 {
     var userId = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
 
@@ -444,6 +487,28 @@ static RateLimitPartition<string> PartitionFor(HttpContext httpContext, RateLimi
 
     if (!enabled)
         return RateLimitPartition.GetNoLimiter(partitionKey);
+
+    // Shared counters when Redis is available, so N instances enforce one budget rather than N.
+    // Without it the limiter is per-process and the effective limit multiplies by instance count —
+    // fine for a single instance, wrong for a deployment.
+    var redis = httpContext.RequestServices.GetService<IConnectionMultiplexer>();
+
+    if (redis is not null)
+    {
+        var window = TimeSpan.FromSeconds(policy.WindowSeconds);
+
+        // The window is part of the key, so a new window is a new counter and old ones expire on
+        // their own rather than needing a sweep.
+        var windowStart = DateTimeOffset.UtcNow.ToUnixTimeSeconds() / policy.WindowSeconds;
+        var redisKey = $"ratelimit:{policyName}:{partitionKey}:{windowStart}";
+
+        var logger = httpContext.RequestServices
+            .GetRequiredService<ILoggerFactory>()
+            .CreateLogger("BoardSync.RateLimiting");
+
+        return RateLimitPartition.Get(partitionKey, _ =>
+            new RedisFixedWindowRateLimiter(redis, redisKey, policy.PermitLimit, window, logger));
+    }
 
     return RateLimitPartition.GetFixedWindowLimiter(partitionKey, _ => new FixedWindowRateLimiterOptions
     {

@@ -1,21 +1,24 @@
-# Repository Refactor — What Changed and What It Means for the Frontend
+# Backend Changes — What They Mean for the Frontend
 
-Status: merged to `fix/conflict` · Scope: `server/BoardSync.Api` · Backend-only refactor
+Status: merged to `fix/conflict` · Scope: `server/BoardSync.Api` · Backend-only
+
+Covers two pieces of work that landed together: the **repository refactor** (§1–§2) and the
+**transactional outbox** from Phase 1 of the scaling plan (§3).
 
 ---
 
 ## TL;DR for the frontend team
 
-**Nothing you have already built breaks.** Every existing route, request shape and response shape is
-unchanged. There are two additions you may want, and neither is required:
+**No route, request shape or response shape changed.** Two optional additions, and **one real
+behaviour change** you do need to know about:
 
 | | What | Action |
 | --- | --- | --- |
-| 1 | `GET /api/notifications` — a new, shorter route for the bell | Optional. `GET /api/workspace/notifications` still works and returns a byte-identical body. |
-| 2 | `?limit=` on the bell (default 20, max 50) | Optional. Omit it and you get exactly what you got before. |
+| 1 | **The activity feed is now eventually consistent** | ⚠️ **Read §3.** Do not assume an entry appears the instant a write returns 200. |
+| 2 | `GET /api/notifications` — a new, shorter route for the bell | Optional. `GET /api/workspace/notifications` still works and returns a byte-identical body. |
+| 3 | `?limit=` on the bell (default 20, max 50) | Optional. Omit it and you get exactly what you got before. |
 
-If you stop reading here, you have what you need. The rest is context on why the backend moved and
-what it means for the work ahead.
+Item 1 is the only one that can bite you. Everything else is additive.
 
 ---
 
@@ -109,7 +112,65 @@ state changes. If you already switch on those strings, keep doing so.
 
 ---
 
-## 3. Things worth knowing about the bell
+## 3. The activity feed is now eventually consistent
+
+This is the one change that can break an assumption, so it gets its own section.
+
+### What changed
+
+Domain events used to be handled inline, on the same request that caused them. A work item write and
+its activity entry happened back to back, so by the time the write returned 200 the feed entry was
+already there.
+
+Events now go through a **transactional outbox**: the event is written in the same database
+transaction as the change, and a background dispatcher delivers it immediately afterwards.
+
+### What that means for you
+
+**A feed read immediately after a write may not show that write yet.** In practice the gap is
+milliseconds — the dispatcher is woken by a Postgres notification the moment the transaction
+commits — but it is not zero, and under load or during a restart it can stretch to a few seconds.
+
+Concretely, this pattern is now a race:
+
+```ts
+await createWorkItem(...);                     // 200 OK
+const feed = await getActivity(orgId);         // may not contain it yet
+expect(feed.items[0].entityId).toBe(newId);    // ⚠️ flaky
+```
+
+### What to do instead
+
+- **Don't refetch the feed to confirm your own write.** The write's own 200 response is the
+  confirmation. If you need the new entity on screen, use the response body you already have.
+- **Render optimistically.** You know what the user just did; show it, and let the feed catch up on
+  its next natural refresh.
+- **If you poll, keep polling.** A missing entry is not an error — the next poll will have it. Do
+  not treat one empty result as "the write failed".
+- **In tests, don't assert on the feed straight after a write.** Assert on the write's own response,
+  or poll the feed with a short retry.
+
+Endpoints affected: `GET /api/orgs/{orgId}/activity` and `GET /api/workspace/activity`.
+
+**Not affected:** everything else. Work items, boards, sprints, projects, teams and the notification
+bell are all still read-your-own-writes — they read the tables you just wrote directly, with no
+dispatcher in between. Only the activity feed is built from events.
+
+### Why it is worth the trade
+
+The old design could **silently lose entries**. The write committed, then the activity row was
+written in a separate transaction by a handler whose exceptions were swallowed — so a crash, a
+timeout or a thrown handler left a hole in history that nobody was told about. The event and the
+change are now atomic: no commit, no event; commit, guaranteed event. A few milliseconds of lag buys
+a feed that cannot quietly go wrong.
+
+It is also the delivery path the real-time work depends on. When boards go live, the push you
+receive over the socket and the entry you see in the feed will come from this same ordered log,
+which is what will let them agree.
+
+---
+
+## 4. Things worth knowing about the bell
 
 Moving notifications into their own module made its current limitations explicit rather than
 incidental. All three predate this refactor — none of them are new — but they are now written down
@@ -131,7 +192,7 @@ raise it — that is a schema change, not a UI tweak.
 
 ---
 
-## 4. One bug found and fixed during this work
+## 5. One bug found and fixed during this work
 
 `GET /api/users/me` and `/api/users/by-email` briefly returned **400** with a LINQ translation error.
 The cause was mine: a repository helper applied the `UserProfile` projection before the `WHERE`, so
@@ -144,7 +205,7 @@ this kind of refactor produces: **a green build proves nothing about EF query tr
 
 ---
 
-## 5. Why this was worth doing
+## 6. Why this was worth doing
 
 Three reasons, in the order they will matter to you:
 
@@ -163,7 +224,7 @@ across controllers there was no seam to put it in; with repositories there is ex
 
 ---
 
-## 6. Verification
+## 7. Verification
 
 Backend was exercised end to end against a live database, not just compiled:
 
@@ -176,14 +237,24 @@ Backend was exercised end to end against a live database, not just compiled:
 - Activity paging: cursor page 2 identical to offset page 2, zero overlap with page 1, malformed
   cursor falls back to 200.
 
+For the outbox specifically (§3), the properties that matter to you were proven rather than assumed:
+
+- **Nothing is lost.** A rejected write (duplicate slug → 409) left zero queued events; a successful
+  one was delivered and its feed entry written.
+- **Nothing is duplicated.** A message forced into redelivery produced no second feed entry.
+- **Nothing stalls.** A full run drained 23 messages with 0 pending and 0 failed attempts, and the
+  feed showed all 18 resulting entries within seconds.
+
 Build is clean: 0 warnings, 0 errors.
 
 ---
 
-## 7. What we need from the frontend team
+## 8. What we need from the frontend team
 
-Nothing urgent. When you get to it:
+One thing that matters, then the optional ones:
 
+- [ ] **Check nothing refetches the activity feed to confirm its own write** (§3). This is the only
+      item that can produce a real bug — everything below is housekeeping.
 - [ ] Point the bell at `GET /api/notifications` (optional, cosmetic)
 - [ ] Decide whether you want `?limit` other than the default 20
 - [ ] Confirm you are **not** sharing a component between the bell and the activity feed

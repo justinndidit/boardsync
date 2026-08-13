@@ -1,6 +1,6 @@
 # Scaling, Caching, and Real-Time Design
 
-Status: Phase 0 shipped, Phases 1–3 proposed · Scope: `server/BoardSync.Api` ·
+Status: Phases 0–1 shipped, Phases 2–3 proposed · Scope: `server/BoardSync.Api` ·
 Companion to `docs/activity-feed-frontend.md`
 
 ---
@@ -514,15 +514,51 @@ first page rather than erroring.
 
 *Outcome: materially faster on the same hardware, and safe to run more than one copy of.*
 
-### Phase 1 — Redis and the outbox
+### Phase 1 — Redis and the outbox ✅ **shipped**
 
-- Redis deployed; `HybridCache` wired
-- RBAC + membership + display-name caching (§5.2) with explicit invalidation
-- Redis-backed rate limiting
-- Outbox table, `Enqueue`-before-`Save`, dispatcher `BackgroundService`
-- Idempotent handlers keyed on `EventId`
+- [x] Redis in dev and prod compose; `HybridCache` wired (L1 memory + L2 Redis)
+- [x] RBAC decision caching with **version-stamp** invalidation (see the deviation below)
+- [x] Redis-backed rate limiting via an atomic Lua increment, failing open on a Redis outage
+- [x] Outbox table, `Enqueue`-before-`Save`, dispatcher `BackgroundService` with
+      `FOR UPDATE SKIP LOCKED` and `LISTEN`/`NOTIFY` wakeup
+- [x] Idempotent activity recording keyed on `EventId`
+
+**Verified against a live stack**, not just compiled:
+
+| Property | How it was proven |
+| --- | --- |
+| Atomic | A rejected write (duplicate slug → 409) left **zero** outbox rows |
+| Delivered | Queued message dispatched, activity entry written, `EventId` identical end to end |
+| Idempotent | Message reset to undispatched and redelivered → **no** duplicate feed entry |
+| Retried, not lost | Handler failures increment `Attempts` and stay queued rather than vanishing |
+| Rate limit shared | 6 requests → Redis counter at 6 with a 60s TTL (never `-1`) |
+| Revocation immediate | Role write advanced the user's generation; every prior decision key orphaned |
+
+Full regression also passed: 23 outbox messages drained with 0 pending and 0 failed attempts,
+board rendering 6 cards with tags, cursor and offset paging still agreeing.
+
+**Three deviations from the design above, all deliberate:**
+
+1. **Invalidation is by version stamp, not tag eviction.** §5.3 already preferred this, and it
+   turned out to be necessary rather than merely preferable: `HybridCache.RemoveByTagAsync` did not
+   evict the L2 entry in testing, so a revoked user kept their cached permission. Each user now has
+   a Redis counter included in every decision key; bumping it orphans every prior decision
+   atomically. This was caught by an end-to-end test, not by the compiler.
+2. **Grants and denials share one expiry.** §5.4 wanted denials to expire faster. `HybridCache`
+   fixes an entry's lifetime at call time, before the answer is known. The security-critical
+   direction — revocation — does not depend on expiry at all now, so this costs only slightly more
+   re-asking for denials.
+3. **No `topics` column on the outbox yet.** Nothing consumes it until the hub exists in Phase 2,
+   and an always-empty column reads like a bug. Phase 2 adds it, or derives topics from the payload
+   at dispatch time.
 
 *Outcome: activity can no longer be lost; the largest query load is gone; genuinely multi-instance ready.*
+
+> **Behaviour change worth knowing:** the activity feed is now **eventually consistent**. Events are
+> delivered after the transaction commits, so a feed read immediately after a write may not show it
+> yet — typically milliseconds via `NOTIFY`, at worst one poll interval. This is the necessary cost
+> of the write and the event being atomic, and it is the same delivery path the real-time work in
+> Phase 2 builds on.
 
 ### Phase 2 — Real-time
 

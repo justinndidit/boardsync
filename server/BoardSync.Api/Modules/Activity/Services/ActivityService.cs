@@ -19,10 +19,20 @@ public class ActivityRecorder : IActivityRecorder
 
     public async Task RecordAsync(ActivityLog entry, CancellationToken ct = default)
     {
-        await _repository.AddAsync(entry, ct);
+        var written = await _repository.AddIfNewAsync(entry, ct);
 
-        _logger.LogDebug("Recorded activity {Verb} on {EntityType} {EntityId} in org {OrgId}",
-            entry.Verb, entry.EntityType, entry.EntityId, entry.OrganizationId);
+        if (written)
+        {
+            _logger.LogDebug("Recorded activity {Verb} on {EntityType} {EntityId} in org {OrgId}",
+                entry.Verb, entry.EntityType, entry.EntityId, entry.OrganizationId);
+        }
+        else
+        {
+            // Expected whenever the outbox redelivers. Logged so a *storm* of them is visible —
+            // that would mean messages are not being marked dispatched.
+            _logger.LogDebug("Activity for event {EventId} already recorded; skipping duplicate.",
+                entry.EventId);
+        }
     }
 }
 

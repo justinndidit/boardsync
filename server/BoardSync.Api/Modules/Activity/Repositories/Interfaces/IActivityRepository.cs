@@ -14,8 +14,17 @@ public interface IActivityRepository
 {
     // ── Write ─────────────────────────────────────────────────────────────────
 
-    /// <summary>Appends one entry and persists it immediately.</summary>
-    Task AddAsync(ActivityLog entry, CancellationToken ct = default);
+    /// <summary>
+    /// Appends one entry, or does nothing if an entry for the same originating event already
+    /// exists.
+    /// </summary>
+    /// <remarks>
+    /// Idempotent by <see cref="ActivityLog.EventId"/>, because the outbox delivers at least once:
+    /// a dispatcher that runs the handlers and then dies before marking the message dispatched will
+    /// redeliver it. Without this, the feed would grow a duplicate line every time that happened.
+    /// </remarks>
+    /// <returns>True if a new entry was written, false if it was already recorded.</returns>
+    Task<bool> AddIfNewAsync(ActivityLog entry, CancellationToken ct = default);
 
     // ── Read ──────────────────────────────────────────────────────────────────
 

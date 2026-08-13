@@ -57,10 +57,11 @@ public class SprintService : ISprintService
         };
 
         _repository.Add(sprint);
-        await _repository.SaveChangesAsync(ct);
 
-        await PublishAsync(sprint, orgId => new SprintCreated(
+        await EnqueueAsync(sprint, orgId => new SprintCreated(
             sprint.Id, sprint.TeamId, orgId, SprintName(sprint), createdBy), ct);
+
+        await _repository.SaveChangesAsync(ct);
 
         _logger.LogInformation("Sprint {Number} created for team {TeamId} by {UserId}",
             sprint.Number, teamId, createdBy);
@@ -120,13 +121,13 @@ public class SprintService : ISprintService
         sprint.EndDate = request.EndDate;
         sprint.UpdatedAt = DateTime.UtcNow;
 
-        await _repository.SaveChangesAsync(ct);
-
         foreach (var (field, oldValue, newValue) in changes)
         {
-            await PublishAsync(sprint, orgId => new SprintUpdated(
+            await EnqueueAsync(sprint, orgId => new SprintUpdated(
                 sprint.Id, sprint.TeamId, orgId, SprintName(sprint), field, oldValue, newValue, updatedBy), ct);
         }
+
+        await _repository.SaveChangesAsync(ct);
 
         return await BuildResponseAsync(sprintId, ct);
     }
@@ -151,10 +152,11 @@ public class SprintService : ISprintService
         var oldStatus = sprint.Status;
         sprint.Status = newStatus;
         sprint.UpdatedAt = DateTime.UtcNow;
-        await _repository.SaveChangesAsync(ct);
 
-        await PublishAsync(sprint, orgId => new SprintStatusChanged(
+        await EnqueueAsync(sprint, orgId => new SprintStatusChanged(
             sprint.Id, sprint.TeamId, orgId, SprintName(sprint), oldStatus, newStatus, updatedBy), ct);
+
+        await _repository.SaveChangesAsync(ct);
 
         _logger.LogInformation("Sprint {SprintId} → {Status} by {UserId}", sprintId, newStatus, updatedBy);
 
@@ -172,10 +174,11 @@ public class SprintService : ISprintService
             throw new BusinessRuleException("Remove all work items from the sprint before deleting it.");
 
         _repository.Remove(sprint);
-        await _repository.SaveChangesAsync(ct);
 
-        await PublishAsync(sprint, orgId => new SprintDeleted(
+        await EnqueueAsync(sprint, orgId => new SprintDeleted(
             sprint.Id, sprint.TeamId, orgId, SprintName(sprint), deletedBy), ct);
+
+        await _repository.SaveChangesAsync(ct);
 
         _logger.LogInformation("Sprint {SprintId} deleted by {UserId}", sprintId, deletedBy);
     }
@@ -210,11 +213,12 @@ public class SprintService : ISprintService
         };
 
         _repository.AddBacklogEntry(entry);
-        await _repository.SaveChangesAsync(ct);
 
-        await PublishAsync(sprint, orgId => new SprintWorkItemAdded(
+        await EnqueueAsync(sprint, orgId => new SprintWorkItemAdded(
             sprint.Id, sprint.TeamId, orgId, SprintName(sprint),
             workItem.Id, workItem.Title, addedBy), ct);
+
+        await _repository.SaveChangesAsync(ct);
 
         return new SprintWorkItemResponse(
             workItem.Id, workItem.Title, workItem.Type,
@@ -231,10 +235,11 @@ public class SprintService : ISprintService
         var title = (await _workItems.GetActiveAsync(workItemId, ct))?.Title ?? string.Empty;
 
         _repository.RemoveBacklogEntry(entry);
-        await _repository.SaveChangesAsync(ct);
 
-        await PublishAsync(sprint, orgId => new SprintWorkItemRemoved(
+        await EnqueueAsync(sprint, orgId => new SprintWorkItemRemoved(
             sprint.Id, sprint.TeamId, orgId, SprintName(sprint), workItemId, title, removedBy), ct);
+
+        await _repository.SaveChangesAsync(ct);
     }
 
     public async Task<PagedResult<SprintWorkItemResponse>> GetWorkItemsAsync(
@@ -276,11 +281,16 @@ public class SprintService : ISprintService
            ?? throw new NotFoundException("Sprint", sprintId);
 
     /// <summary>
-    /// Sprints hang off a team, but activity is filed by organization, so every sprint event needs
-    /// the team's owning organization looked up first. If the team has vanished there is nothing to
-    /// file the event under and it is skipped rather than published half-formed.
+    /// Stages a sprint event. Still async because sprints hang off a team while activity is filed
+    /// by organization, so the team's owning organization has to be looked up first. If the team
+    /// has vanished there is nothing to file the event under and it is skipped rather than queued
+    /// half-formed.
     /// </summary>
-    private async Task PublishAsync<TEvent>(
+    /// <remarks>
+    /// Call this <b>before</b> saving — it stages the outbox row on the same unit of work, which is
+    /// what makes the event and the sprint change commit together.
+    /// </remarks>
+    private async Task EnqueueAsync<TEvent>(
         Sprint sprint,
         Func<Guid, TEvent> build,
         CancellationToken ct) where TEvent : IDomainEvent
@@ -289,7 +299,7 @@ public class SprintService : ISprintService
 
         if (orgId is null) return;
 
-        await _eventBus.PublishAsync(build(orgId.Value), ct);
+        _eventBus.Enqueue(build(orgId.Value));
     }
 
     /// <summary>Display name for a sprint — they are numbered per team, not named.</summary>
