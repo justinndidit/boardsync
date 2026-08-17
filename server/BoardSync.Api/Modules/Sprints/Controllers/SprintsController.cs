@@ -3,6 +3,7 @@ using BoardSync.Api.Modules.Rbac.Services.Interfaces;
 using BoardSync.Api.Modules.Sprints.DTOs;
 using BoardSync.Api.Modules.Sprints.Services;
 using BoardSync.Api.Shared.Auth;
+using BoardSync.Api.Shared.Auth.Authorization;
 using BoardSync.Api.Shared.Auth.DTOs;
 using BoardSync.Api.Shared.Kernel;
 using BoardSync.Api.Shared.Kernel.Exceptions;
@@ -40,6 +41,7 @@ public class SprintsController : ControllerBase
 
     /// <summary>List all sprints for a team, newest first.</summary>
     [HttpGet("api/teams/{teamId:guid}/sprints")]
+    [RequirePermission(Permissions.SprintRead, From = "teamId")]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<SprintSummaryResponse>>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -48,19 +50,18 @@ public class SprintsController : ControllerBase
         [FromQuery] PaginationQuery pagination,
         CancellationToken ct)
     {
-        await RequireTeamRoleAsync(teamId, RoleType.Reader, ct);
         var result = await _sprintService.GetForTeamAsync(teamId, pagination, ct);
         return Ok(new ApiResponse<PagedResult<SprintSummaryResponse>>(true, "Sprints retrieved.", result));
     }
 
     /// <summary>Get the currently active sprint for a team. Returns null data if none is active.</summary>
     [HttpGet("api/teams/{teamId:guid}/sprints/active")]
+    [RequirePermission(Permissions.SprintRead, From = "teamId")]
     [ProducesResponseType(typeof(ApiResponse<SprintResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetActive(Guid teamId, CancellationToken ct)
     {
-        await RequireTeamRoleAsync(teamId, RoleType.Reader, ct);
         var sprint = await _sprintService.GetActiveForTeamAsync(teamId, ct);
         return Ok(new ApiResponse<SprintResponse?>(true,
             sprint is null ? "No active sprint." : "Active sprint retrieved.", sprint));
@@ -68,18 +69,19 @@ public class SprintsController : ControllerBase
 
     /// <summary>Get a sprint by ID.</summary>
     [HttpGet("api/sprints/{sprintId:guid}")]
+    [RequirePermission(Permissions.SprintRead, From = "sprintId")]
     [ProducesResponseType(typeof(ApiResponse<SprintResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetById(Guid sprintId, CancellationToken ct)
     {
         var sprint = await _sprintService.GetByIdAsync(sprintId, ct);
-        await RequireTeamRoleAsync(sprint.TeamId, RoleType.Reader, ct);
         return Ok(new ApiResponse<SprintResponse>(true, "Sprint retrieved.", sprint));
     }
 
     /// <summary>Create a new sprint for a team. Requires ProjectAdmin.</summary>
     [HttpPost("api/teams/{teamId:guid}/sprints")]
+    [RequirePermission(Permissions.SprintManage, From = "teamId")]
     [ProducesResponseType(typeof(ApiResponse<SprintResponse>), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
@@ -89,7 +91,6 @@ public class SprintsController : ControllerBase
         [FromBody] CreateSprintRequest request,
         CancellationToken ct)
     {
-        await RequireTeamRoleAsync(teamId, RoleType.ProjectAdmin, ct);
         var sprint = await _sprintService.CreateAsync(teamId, request, _currentUser.UserId, ct);
         return CreatedAtAction(nameof(GetById), new { sprintId = sprint.Id },
             new ApiResponse<SprintResponse>(true, "Sprint created.", sprint));
@@ -97,6 +98,7 @@ public class SprintsController : ControllerBase
 
     /// <summary>Update a sprint's goal and dates. Only allowed while Planning. Requires ProjectAdmin.</summary>
     [HttpPut("api/sprints/{sprintId:guid}")]
+    [RequirePermission(Permissions.SprintManage, From = "sprintId")]
     [ProducesResponseType(typeof(ApiResponse<SprintResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
@@ -107,7 +109,6 @@ public class SprintsController : ControllerBase
         CancellationToken ct)
     {
         var sprint = await _sprintService.GetByIdAsync(sprintId, ct);
-        await RequireTeamRoleAsync(sprint.TeamId, RoleType.ProjectAdmin, ct);
         var updated = await _sprintService.UpdateAsync(sprintId, request, _currentUser.UserId, ct);
         return Ok(new ApiResponse<SprintResponse>(true, "Sprint updated.", updated));
     }
@@ -118,6 +119,7 @@ public class SprintsController : ControllerBase
     /// Requires ProjectAdmin.
     /// </summary>
     [HttpPatch("api/sprints/{sprintId:guid}/status")]
+    [RequirePermission(Permissions.SprintManage, From = "sprintId")]
     [ProducesResponseType(typeof(ApiResponse<SprintResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
@@ -129,13 +131,13 @@ public class SprintsController : ControllerBase
         CancellationToken ct)
     {
         var sprint = await _sprintService.GetByIdAsync(sprintId, ct);
-        await RequireTeamRoleAsync(sprint.TeamId, RoleType.ProjectAdmin, ct);
         var updated = await _sprintService.UpdateStatusAsync(sprintId, request.Status, _currentUser.UserId, ct);
         return Ok(new ApiResponse<SprintResponse>(true, $"Sprint status updated to {request.Status}.", updated));
     }
 
     /// <summary>Delete a Planning sprint with no work items. Requires ProjectAdmin.</summary>
     [HttpDelete("api/sprints/{sprintId:guid}")]
+    [RequirePermission(Permissions.SprintManage, From = "sprintId")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
@@ -143,7 +145,6 @@ public class SprintsController : ControllerBase
     public async Task<IActionResult> Delete(Guid sprintId, CancellationToken ct)
     {
         var sprint = await _sprintService.GetByIdAsync(sprintId, ct);
-        await RequireTeamRoleAsync(sprint.TeamId, RoleType.ProjectAdmin, ct);
         await _sprintService.DeleteAsync(sprintId, _currentUser.UserId, ct);
         return NoContent();
     }
@@ -174,6 +175,7 @@ public class SprintsController : ControllerBase
 
     /// <summary>List work items in a sprint ordered by position.</summary>
     [HttpGet("api/sprints/{sprintId:guid}/workitems")]
+    [RequirePermission(Permissions.SprintRead, From = "sprintId")]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<SprintWorkItemResponse>>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -183,13 +185,14 @@ public class SprintsController : ControllerBase
         CancellationToken ct)
     {
         var sprint = await _sprintService.GetByIdAsync(sprintId, ct);
-        await RequireTeamRoleAsync(sprint.TeamId, RoleType.Reader, ct);
         var result = await _sprintService.GetWorkItemsAsync(sprintId, pagination, ct);
         return Ok(new ApiResponse<PagedResult<SprintWorkItemResponse>>(true, "Sprint backlog retrieved.", result));
     }
 
     /// <summary>Add a work item to the sprint backlog. Requires TeamMember.</summary>
     [HttpPost("api/sprints/{sprintId:guid}/workitems")]
+    [PermissionCheckedInAction(
+        "sprint:scope, unless the item decomposes work already in the sprint — depends on the item, not the caller alone.")]
     [ProducesResponseType(typeof(ApiResponse<SprintWorkItemResponse>), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
@@ -201,7 +204,7 @@ public class SprintsController : ControllerBase
         CancellationToken ct)
     {
         var sprint = await _sprintService.GetByIdAsync(sprintId, ct);
-        await RequireTeamRoleAsync(sprint.TeamId, RoleType.TeamMember, ct);
+        await RequireSprintScopeAsync(sprint.TeamId, sprintId, request.WorkItemId, ct);
         var item = await _sprintService.AddWorkItemAsync(sprintId, request, _currentUser.UserId, ct);
         return StatusCode(StatusCodes.Status201Created,
             new ApiResponse<SprintWorkItemResponse>(true, "Work item added to sprint.", item));
@@ -209,6 +212,8 @@ public class SprintsController : ControllerBase
 
     /// <summary>Remove a work item from the sprint backlog. Requires TeamMember.</summary>
     [HttpDelete("api/sprints/{sprintId:guid}/workitems/{workItemId:guid}")]
+    [PermissionCheckedInAction(
+        "sprint:scope, unless the item decomposes work already in the sprint.")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -218,7 +223,7 @@ public class SprintsController : ControllerBase
         CancellationToken ct)
     {
         var sprint = await _sprintService.GetByIdAsync(sprintId, ct);
-        await RequireTeamRoleAsync(sprint.TeamId, RoleType.TeamMember, ct);
+        await RequireSprintScopeAsync(sprint.TeamId, sprintId, workItemId, ct);
         await _sprintService.RemoveWorkItemAsync(sprintId, workItemId, _currentUser.UserId, ct);
         return NoContent();
     }
@@ -233,6 +238,7 @@ public class SprintsController : ControllerBase
     /// Omit <c>afterWorkItemId</c> to move to the top, or <c>beforeWorkItemId</c> to move to the end.
     /// </remarks>
     [HttpPatch("api/sprints/{sprintId:guid}/workitems/{workItemId:guid}/move")]
+    [RequirePermission(Permissions.SprintOrder, From = "sprintId")]
     [ProducesResponseType(typeof(ApiResponse<MoveSprintWorkItemResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -243,7 +249,6 @@ public class SprintsController : ControllerBase
         CancellationToken ct)
     {
         var sprint = await _sprintService.GetByIdAsync(sprintId, ct);
-        await RequireTeamRoleAsync(sprint.TeamId, RoleType.TeamMember, ct);
 
         var rank = await _sprintService.MoveWorkItemAsync(sprintId, workItemId, request, ct);
 
@@ -260,6 +265,7 @@ public class SprintsController : ControllerBase
     /// prefer the move endpoint above wherever more than one person can drag at once.
     /// </remarks>
     [HttpPatch("api/sprints/{sprintId:guid}/workitems/reorder")]
+    [RequirePermission(Permissions.SprintOrder, From = "sprintId")]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
@@ -270,16 +276,51 @@ public class SprintsController : ControllerBase
         CancellationToken ct)
     {
         var sprint = await _sprintService.GetByIdAsync(sprintId, ct);
-        await RequireTeamRoleAsync(sprint.TeamId, RoleType.TeamMember, ct);
         await _sprintService.ReorderWorkItemsAsync(sprintId, request, ct);
         return Ok(new ApiResponse(true, "Sprint backlog reordered."));
     }
 
     // ── Helper ────────────────────────────────────────────────────────────────
 
-    private async Task RequireTeamRoleAsync(Guid teamId, RoleType minimum, CancellationToken ct)
+    /// <summary>
+    /// Guards changing what a sprint contains, allowing a team member to decompose work that is
+    /// already committed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// What is in a sprint is a commitment, so it belongs to <see cref="Permissions.SprintScope"/> —
+    /// the Product Owner, Scrum Master, Team Lead or an org admin. Breaking committed work down is
+    /// not a commitment, though: if the parent is already in the sprint, adding a child changes
+    /// nothing about what the team promised, and gating that on the Product Owner would put them in
+    /// the middle of ordinary task breakdown.
+    /// </para>
+    /// <para>
+    /// A work item with no parent, or whose parent is not in this sprint, is new scope and needs the
+    /// permission. That includes a bug found mid-sprint — which is deliberate, if debatable: an
+    /// unplanned bug genuinely does change the commitment. Exempting a type is easy to add later and
+    /// hard to remove once people rely on it.
+    /// </para>
+    /// </remarks>
+    private async Task RequireSprintScopeAsync(
+        Guid teamId, Guid sprintId, Guid workItemId, CancellationToken ct)
     {
-        if (!await _rbac.HasRoleAsync(_currentUser.UserId, minimum, RoleScope.Team, teamId, ct))
+        if (await _rbac.HasPermissionAsync(
+                _currentUser.UserId, Permissions.SprintScope, RoleScope.Team, teamId, ct))
+            return;
+
+        if (!await _rbac.HasPermissionAsync(
+                _currentUser.UserId, Permissions.SprintOrder, RoleScope.Team, teamId, ct))
+            throw new ForbiddenException();
+
+        if (!await _sprintService.IsDecompositionOfSprintWorkAsync(sprintId, workItemId, ct))
+            throw new ForbiddenException(
+                "Changing what a sprint commits to requires the Product Owner, Scrum Master or Team Lead. " +
+                "Breaking down work already in the sprint does not.");
+    }
+
+    private async Task RequireTeamAsync(Guid teamId, string permission, CancellationToken ct)
+    {
+        if (!await _rbac.HasPermissionAsync(_currentUser.UserId, permission, RoleScope.Team, teamId, ct))
             throw new ForbiddenException();
     }
 }

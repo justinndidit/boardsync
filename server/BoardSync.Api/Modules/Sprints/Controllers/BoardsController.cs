@@ -4,6 +4,7 @@ using BoardSync.Api.Modules.Sprints.Domain.Helpers;
 using BoardSync.Api.Modules.Sprints.DTOs;
 using BoardSync.Api.Modules.Sprints.Services;
 using BoardSync.Api.Shared.Auth;
+using BoardSync.Api.Shared.Auth.Authorization;
 using BoardSync.Api.Shared.Auth.DTOs;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -46,30 +47,31 @@ public class BoardsController : ControllerBase
     /// Requires Reader.
     /// </summary>
     [HttpGet("api/projects/{projectId:guid}/board")]
+    [RequirePermission(Permissions.BoardRead, From = "projectId")]
     [ProducesResponseType(typeof(ApiResponse<BoardResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetForProject(Guid projectId, CancellationToken ct)
     {
-        await _authHelpers.RequireProjectRoleAsync(projectId, RoleType.Reader, ct);
         var board = await _boardService.GetOrCreateForProjectAsync(projectId, _currentUser.UserId, ct);
         return Ok(new ApiResponse<BoardResponse>(true, "Board retrieved.", board));
     }
 
     /// <summary>Get a board by ID with all columns and cards. Requires Reader.</summary>
     [HttpGet("api/boards/{boardId:guid}")]
+    [RequirePermission(Permissions.BoardRead, From = "boardId")]
     [ProducesResponseType(typeof(ApiResponse<BoardResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetById(Guid boardId, CancellationToken ct)
     {
         var board = await _boardService.GetByIdAsync(boardId, ct);
-        await _authHelpers.RequireProjectRoleAsync(board.ProjectId, RoleType.Reader, ct);
         return Ok(new ApiResponse<BoardResponse>(true, "Board retrieved.", board));
     }
 
     /// <summary>Rename a board. Requires ProjectAdmin.</summary>
     [HttpPut("api/boards/{boardId:guid}")]
+    [RequirePermission(Permissions.BoardConfigure, From = "boardId")]
     [ProducesResponseType(typeof(ApiResponse<BoardResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
@@ -80,7 +82,6 @@ public class BoardsController : ControllerBase
         CancellationToken ct)
     {
         var board = await _boardService.GetByIdAsync(boardId, ct);
-        await _authHelpers.RequireProjectRoleAsync(board.ProjectId, RoleType.ProjectAdmin, ct);
         var updated = await _boardService.UpdateAsync(boardId, request, _currentUser.UserId, ct);
         return Ok(new ApiResponse<BoardResponse>(true, "Board updated.", updated));
     }
@@ -89,6 +90,7 @@ public class BoardsController : ControllerBase
 
     /// <summary>Add a column to a board. Requires ProjectAdmin.</summary>
     [HttpPost("api/boards/{boardId:guid}/columns")]
+    [RequirePermission(Permissions.BoardConfigure, From = "boardId")]
     [ProducesResponseType(typeof(ApiResponse<BoardColumnDetailResponse>), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
@@ -99,7 +101,6 @@ public class BoardsController : ControllerBase
         CancellationToken ct)
     {
         var board = await _boardService.GetByIdAsync(boardId, ct);
-        await _authHelpers.RequireProjectRoleAsync(board.ProjectId, RoleType.ProjectAdmin, ct);
         var column = await _boardService.AddColumnAsync(boardId, request, _currentUser.UserId, ct);
         return StatusCode(StatusCodes.Status201Created,
             new ApiResponse<BoardColumnDetailResponse>(true, "Column added.", column));
@@ -107,6 +108,7 @@ public class BoardsController : ControllerBase
 
     /// <summary>Update a column's name, mapped state, WIP limit, or position. Requires ProjectAdmin.</summary>
     [HttpPut("api/boards/columns/{columnId:guid}")]
+    [RequirePermission(Permissions.BoardConfigure, From = "columnId")]
     [ProducesResponseType(typeof(ApiResponse<BoardColumnDetailResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
@@ -116,25 +118,25 @@ public class BoardsController : ControllerBase
         [FromBody] UpdateBoardColumnRequest request,
         CancellationToken ct)
     {
-        await RequireColumnProjectRoleAsync(columnId, RoleType.ProjectAdmin, ct);
         var updated = await _boardService.UpdateColumnAsync(columnId, request, _currentUser.UserId, ct);
         return Ok(new ApiResponse<BoardColumnDetailResponse>(true, "Column updated.", updated));
     }
 
     /// <summary>Delete a column from a board. Requires ProjectAdmin.</summary>
     [HttpDelete("api/boards/columns/{columnId:guid}")]
+    [RequirePermission(Permissions.BoardConfigure, From = "columnId")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteColumn(Guid columnId, CancellationToken ct)
     {
-        await RequireColumnProjectRoleAsync(columnId, RoleType.ProjectAdmin, ct);
         await _boardService.DeleteColumnAsync(columnId, _currentUser.UserId, ct);
         return NoContent();
     }
 
     /// <summary>Reorder columns by providing the desired left-to-right column ID sequence. Requires ProjectAdmin.</summary>
     [HttpPatch("api/boards/{boardId:guid}/columns/reorder")]
+    [RequirePermission(Permissions.BoardConfigure, From = "boardId")]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
@@ -145,7 +147,6 @@ public class BoardsController : ControllerBase
         CancellationToken ct)
     {
         var board = await _boardService.GetByIdAsync(boardId, ct);
-        await _authHelpers.RequireProjectRoleAsync(board.ProjectId, RoleType.ProjectAdmin, ct);
         await _boardService.ReorderColumnsAsync(boardId, request, ct);
         return Ok(new ApiResponse(true, "Columns reordered."));
     }
@@ -155,9 +156,9 @@ public class BoardsController : ControllerBase
     /// <summary>
     /// Resolves the project owning a column (column → board → project) then checks the role.
     /// </summary>
-    private async Task RequireColumnProjectRoleAsync(Guid columnId, RoleType minimum, CancellationToken ct)
+    private async Task RequireColumnProjectAsync(Guid columnId, string permission, CancellationToken ct)
     {
         var projectId = await _boardService.GetProjectIdForColumnAsync(columnId, ct);
-        await _authHelpers.RequireProjectRoleAsync(projectId, minimum, ct);
+        await _authHelpers.RequireProjectAsync(projectId, permission, ct);
     }
 }

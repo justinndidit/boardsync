@@ -90,3 +90,9 @@ public class AddTeamMemberRequest
     [Required]
     public Guid UserId { get; init; }
 }
+
+/// <summary>
+/// Who should hold a team position. No <c>[Required]</c>: a Guid cannot be absent, and an empty one
+/// fails the team-membership check with a message that says what is actually wrong.
+/// </summary>
+public record AssignTeamPositionRequest(Guid UserId);

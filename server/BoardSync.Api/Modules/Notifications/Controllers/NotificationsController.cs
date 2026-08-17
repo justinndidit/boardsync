@@ -1,6 +1,7 @@
 using BoardSync.Api.Modules.Notifications.DTOs;
 using BoardSync.Api.Modules.Notifications.Services;
 using BoardSync.Api.Shared.Auth;
+using BoardSync.Api.Shared.Auth.Authorization;
 using BoardSync.Api.Shared.Auth.DTOs;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -39,6 +40,8 @@ public class NotificationsController : ControllerBase
     /// <param name="ct">Cancellation token.</param>
     [HttpGet("api/notifications")]
     [HttpGet("api/workspace/notifications")]
+    [NoPermissionRequired(
+        "Returns only the caller\u0027s own notifications.")]
     [ProducesResponseType(typeof(ApiResponse<IReadOnlyList<NotificationResponse>>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetMyNotifications(
         [FromQuery] int limit = NotificationDefaults.DefaultLimit,

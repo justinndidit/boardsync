@@ -85,6 +85,14 @@ public class RoleAssignmentRepository : IRoleAssignmentRepository
             .Select(m => m.UserId)
             .ToListAsync(ct);
 
+    public async Task<IReadOnlyList<RoleAssignment>> GetHoldersOfTeamPositionAsync(
+        Guid teamId,
+        RoleType position,
+        CancellationToken ct = default) =>
+        await _context.RoleAssignments
+            .Where(ra => ra.TeamId == teamId && ra.Role == position)
+            .ToListAsync(ct);
+
     public Task<ProjectLocation?> GetProjectLocationAsync(
         Guid projectId,
         CancellationToken ct = default) =>

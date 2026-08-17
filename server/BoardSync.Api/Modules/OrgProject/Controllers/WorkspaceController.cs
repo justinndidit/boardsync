@@ -3,6 +3,7 @@ using BoardSync.Api.Modules.Activity.Services;
 using BoardSync.Api.Modules.OrgProject.Domain.DTOs;
 using BoardSync.Api.Modules.OrgProject.Services.Interfaces;
 using BoardSync.Api.Shared.Auth;
+using BoardSync.Api.Shared.Auth.Authorization;
 using BoardSync.Api.Shared.Auth.DTOs;
 using BoardSync.Api.Shared.Kernel;
 using Microsoft.AspNetCore.Authorization;
@@ -45,6 +46,8 @@ public class WorkspaceController : ControllerBase
     /// and the number of active (non-closed) work items across all projects.
     /// </summary>
     [HttpGet("summary")]
+    [NoPermissionRequired(
+        "Aggregates only over the organizations the caller belongs to; the query is scoped to their id.")]
     [ProducesResponseType(typeof(ApiResponse<WorkspaceSummaryResponse>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetSummary(CancellationToken ct)
     {
@@ -63,6 +66,8 @@ public class WorkspaceController : ControllerBase
     /// they came from.
     /// </remarks>
     [HttpGet("activity")]
+    [NoPermissionRequired(
+        "Reads activity only for the organizations the caller belongs to; the query is scoped to their id.")]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<ActivityResponse>>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetActivity([FromQuery] PaginationQuery pagination, CancellationToken ct)
     {

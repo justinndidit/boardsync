@@ -13,14 +13,18 @@ using BoardSync.Api.Modules.OrgProject.Services.Interfaces;
 using BoardSync.Api.Modules.Sprints.Repositories.Implementations;
 using BoardSync.Api.Modules.Sprints.Repositories.Interfaces;
 using BoardSync.Api.Modules.Sprints.Services;
+using BoardSync.Api.Modules.Rbac.Models;
 using BoardSync.Api.Modules.Rbac.Repositories.Implementations;
 using BoardSync.Api.Modules.Rbac.Repositories.Interfaces;
+using BoardSync.Api.Modules.WorkItems;
+using BoardSync.Api.Modules.Sprints;
 using BoardSync.Api.Modules.Rbac.Services;
 using BoardSync.Api.Modules.Rbac.Services.Interfaces;
 using BoardSync.Api.Modules.Rbac.Services.Implementations;
 using BoardSync.Api.Modules.WorkItems.Repository;
 using BoardSync.Api.Modules.WorkItems.Services;
 using BoardSync.Api.Shared.Auth;
+using BoardSync.Api.Shared.Auth.Authorization;
 using BoardSync.Api.Shared.Auth.Configuration;
 using BoardSync.Api.Shared.Auth.DTOs;
 using BoardSync.Api.Shared.Auth.Handlers;
@@ -61,7 +65,12 @@ if (builder.Environment.IsProduction() && configuredOrigins.Length == 0)
 }
 
 //Dependency Injection
-builder.Services.AddControllers()
+builder.Services.AddControllers(options =>
+    {
+        // Global, so it sees every action. Actions carrying no [RequirePermission] pass straight
+        // through — the coverage test in BoardSync.Api.Tests is what makes sure none do by accident.
+        options.Filters.Add<PermissionAuthorizationFilter>();
+    })
     .AddJsonOptions(options =>
     {
         // Serialize all enums as their string names (e.g. "OrgAdmin" not 10).
@@ -187,6 +196,20 @@ builder.Services.AddScoped<MemoizingAccessResolver>(sp =>
 // One instance behind both interfaces: the read side asks it questions, the write side drops it.
 builder.Services.AddScoped<IAccessResolver>(sp => sp.GetRequiredService<MemoizingAccessResolver>());
 builder.Services.AddScoped<IAccessMemo>(sp => sp.GetRequiredService<MemoizingAccessResolver>());
+
+// Scope resolution for [RequirePermission]. The three that already name a scope resolve to
+// themselves; the rest walk one hop, and are declared by the module that owns the data.
+builder.Services.AddScoped<IScopeResolver>(_ => new DirectScopeResolver("orgId", RoleScope.Organization));
+builder.Services.AddScoped<IScopeResolver>(_ => new DirectScopeResolver("teamId", RoleScope.Team));
+builder.Services.AddScoped<IScopeResolver>(_ => new DirectScopeResolver("projectId", RoleScope.Project));
+builder.Services.AddScoped<IScopeResolver, WorkItemScopeResolver>();
+builder.Services.AddScoped<IScopeResolver, WorkItemCommentScopeResolver>();
+builder.Services.AddScoped<IScopeResolver, WorkItemLinkScopeResolver>();
+builder.Services.AddScoped<IScopeResolver, SprintScopeResolver>();
+builder.Services.AddScoped<IScopeResolver, BoardScopeResolver>();
+builder.Services.AddScoped<IScopeResolver, BoardColumnScopeResolver>();
+builder.Services.AddScoped<ScopeResolverRegistry>();
+builder.Services.AddScoped<PermissionAuthorizationFilter>();
 
 builder.Services.AddScoped<RbacService>();
 // Always decorated, in both configurations: even with no distributed cache, a write has to drop the

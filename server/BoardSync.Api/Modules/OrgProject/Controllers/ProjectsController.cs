@@ -4,6 +4,7 @@ using BoardSync.Api.Modules.OrgProject.Services.Interfaces;
 using BoardSync.Api.Modules.Rbac.Models;
 using BoardSync.Api.Modules.Rbac.Services.Interfaces;
 using BoardSync.Api.Shared.Auth;
+using BoardSync.Api.Shared.Auth.Authorization;
 using BoardSync.Api.Shared.Auth.DTOs;
 using BoardSync.Api.Shared.Kernel;
 using BoardSync.Api.Shared.Kernel.Events;
@@ -51,23 +52,23 @@ public class ProjectsController : ControllerBase
 
     /// <summary>List all projects in an organization.</summary>
     [HttpGet("api/orgs/{orgId:guid}/projects")]
+    [RequirePermission(Permissions.OrgRead, From = "orgId")]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<ProjectSummaryResponse>>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> GetForOrg(Guid orgId, [FromQuery] PaginationQuery pagination, CancellationToken ct)
     {
-        await RequireOrgRoleAsync(orgId, RoleType.Reader, ct);
         var result = await _projectService.GetForOrgAsync(orgId, pagination, ct);
         return Ok(new ApiResponse<PagedResult<ProjectSummaryResponse>>(true, "Projects retrieved.", result));
     }
 
     /// <summary>Create a new project within an organization. Requires OrgAdmin.</summary>
     [HttpPost("api/orgs/{orgId:guid}/projects")]
+    [RequirePermission(Permissions.OrgAdmin, From = "orgId")]
     [ProducesResponseType(typeof(ApiResponse<ProjectResponse>), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Create(Guid orgId, [FromBody] CreateProjectRequest request, CancellationToken ct)
     {
-        await RequireOrgRoleAsync(orgId, RoleType.OrgAdmin, ct);
         var project = await _projectService.CreateAsync(orgId, request, _currentUser.UserId, ct);
         return CreatedAtAction(nameof(GetById), new { projectId = project.Id },
             new ApiResponse<ProjectResponse>(true, "Project created.", project));
@@ -75,23 +76,23 @@ public class ProjectsController : ControllerBase
 
     /// <summary>Get a project by ID.</summary>
     [HttpGet("api/projects/{projectId:guid}")]
+    [RequirePermission(Permissions.ProjectRead, From = "projectId")]
     [ProducesResponseType(typeof(ApiResponse<ProjectResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetById(Guid projectId, CancellationToken ct)
     {
-        await RequireProjectRoleAsync(projectId, RoleType.Reader, ct);
         var project = await _projectService.GetByIdAsync(projectId, ct);
         return Ok(new ApiResponse<ProjectResponse>(true, "Project retrieved.", project));
     }
 
     /// <summary>Update project details. Requires ProjectAdmin.</summary>
     [HttpPut("api/projects/{projectId:guid}")]
+    [RequirePermission(Permissions.ProjectAdmin, From = "projectId")]
     [ProducesResponseType(typeof(ApiResponse<ProjectResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Update(Guid projectId, [FromBody] UpdateProjectRequest request, CancellationToken ct)
     {
-        await RequireProjectRoleAsync(projectId, RoleType.ProjectAdmin, ct);
         var project = await _projectService.UpdateAsync(projectId, request, _currentUser.UserId, ct);
         return Ok(new ApiResponse<ProjectResponse>(true, "Project updated.", project));
     }
@@ -101,6 +102,7 @@ public class ProjectsController : ControllerBase
     /// The project's board follows the new team, so its cards come from that team's active sprint.
     /// </summary>
     [HttpPut("api/projects/{projectId:guid}/team")]
+    [RequirePermission(Permissions.ProjectAdmin, From = "projectId")]
     [ProducesResponseType(typeof(ApiResponse<ProjectResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -109,7 +111,6 @@ public class ProjectsController : ControllerBase
         [FromBody] AssignProjectTeamRequest request,
         CancellationToken ct)
     {
-        await RequireProjectRoleAsync(projectId, RoleType.ProjectAdmin, ct);
         var project = await _projectService.AssignTeamAsync(
             projectId, request.AssignedTeamId, _currentUser.UserId, ct);
         return Ok(new ApiResponse<ProjectResponse>(true, "Project team reassigned.", project));
@@ -121,11 +122,11 @@ public class ProjectsController : ControllerBase
     /// List the project-scope role assignments for a project. Requires Reader.
     /// </summary>
     [HttpGet("api/projects/{projectId:guid}/roles")]
+    [RequirePermission(Permissions.ProjectRead, From = "projectId")]
     [ProducesResponseType(typeof(ApiResponse<IReadOnlyList<ProjectRoleResponse>>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> GetRoles(Guid projectId, CancellationToken ct)
     {
-        await RequireProjectRoleAsync(projectId, RoleType.Reader, ct);
 
         var assignments = await _rbac.GetScopeRolesAsync(RoleScope.Project, projectId, ct);
         var items = assignments
@@ -145,6 +146,7 @@ public class ProjectsController : ControllerBase
     /// organization membership alone deliberately grants nothing inside a project.
     /// </remarks>
     [HttpPost("api/projects/{projectId:guid}/roles")]
+    [RequirePermission(Permissions.ProjectMemberManage, From = "projectId")]
     [ProducesResponseType(typeof(ApiResponse<ProjectRoleResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
@@ -154,7 +156,6 @@ public class ProjectsController : ControllerBase
         [FromBody] AssignProjectRoleRequest request,
         CancellationToken ct)
     {
-        await RequireProjectRoleAsync(projectId, RoleType.ProjectAdmin, ct);
 
         if (!AssignableProjectRoles.Contains(request.Role))
             return BadRequest(new ApiResponse(false,
@@ -191,13 +192,13 @@ public class ProjectsController : ControllerBase
     /// The last remaining ProjectAdmin cannot be revoked.
     /// </summary>
     [HttpDelete("api/projects/{projectId:guid}/roles/{userId:guid}")]
+    [RequirePermission(Permissions.ProjectMemberManage, From = "projectId")]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> RemoveRole(Guid projectId, Guid userId, CancellationToken ct)
     {
-        await RequireProjectRoleAsync(projectId, RoleType.ProjectAdmin, ct);
 
         var existing = await _rbac.GetScopeRolesAsync(RoleScope.Project, projectId, ct);
         var held = existing.Where(r => r.UserId == userId).ToList();
@@ -224,15 +225,15 @@ public class ProjectsController : ControllerBase
     }
 
     // -------------------------------------------------------------------------
-    private async Task RequireOrgRoleAsync(Guid orgId, RoleType minimum, CancellationToken ct)
+    private async Task RequireOrgAsync(Guid orgId, string permission, CancellationToken ct)
     {
-        if (!await _rbac.HasRoleAsync(_currentUser.UserId, minimum, RoleScope.Organization, orgId, ct))
+        if (!await _rbac.HasPermissionAsync(_currentUser.UserId, permission, RoleScope.Organization, orgId, ct))
             throw new ForbiddenException();
     }
 
-    private async Task RequireProjectRoleAsync(Guid projectId, RoleType minimum, CancellationToken ct)
+    private async Task RequireProjectAsync(Guid projectId, string permission, CancellationToken ct)
     {
-        if (!await _rbac.HasRoleAsync(_currentUser.UserId, minimum, RoleScope.Project, projectId, ct))
+        if (!await _rbac.HasPermissionAsync(_currentUser.UserId, permission, RoleScope.Project, projectId, ct))
             throw new ForbiddenException();
     }
 }

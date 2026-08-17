@@ -9,5 +9,5 @@ namespace BoardSync.Api.Modules.Sprints.Domain.Helpers;
 
 public interface IAuthHelpers
 {
-    Task RequireProjectRoleAsync(Guid projectId, RoleType minimum, CancellationToken ct);
+    Task RequireProjectAsync(Guid projectId, string permission, CancellationToken ct);
 }
