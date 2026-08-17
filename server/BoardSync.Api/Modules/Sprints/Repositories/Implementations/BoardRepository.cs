@@ -55,10 +55,11 @@ public class BoardRepository : IBoardRepository
 
     public async Task<IReadOnlyList<BoardCardRow>> GetCardsForSprintAsync(
         Guid sprintId,
+        Guid projectId,
         CancellationToken ct = default) =>
         await _context.SprintWorkItems
             .Where(sw => sw.SprintId == sprintId)
-            .Join(_context.WorkItems,
+            .Join(_context.WorkItems.Where(w => w.ProjectId == projectId),
                 sw => sw.WorkItemId,
                 w => w.Id,
                 (sw, w) => new BoardCardRow(

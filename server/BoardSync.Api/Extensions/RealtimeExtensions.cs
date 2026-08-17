@@ -1,5 +1,6 @@
 using BoardSync.Api.Modules.Sprints.Services;
 using BoardSync.Api.Shared.Kernel.Configuration;
+using BoardSync.Api.Shared.Kernel.Events;
 using BoardSync.Api.Shared.Realtime;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 
@@ -45,6 +46,25 @@ public static class RealtimeExtensions
         // through to the database rather than caching something it cannot invalidate.
         if (!string.IsNullOrWhiteSpace(redisConnection))
             builder.Services.AddScoped<IBoardCacheVersion, BoardCacheVersion>();
+
+        // Singleton: it holds this instance's live connections, which outlive any request.
+        builder.Services.AddSingleton<IConnectionRegistry, ConnectionRegistry>();
+
+        // Subscriptions are authorized when made; these keep them honest afterwards, so a revoked
+        // permission stops a live feed instead of running until the tab closes.
+        builder.Services.AddScoped<ISubscriptionAuditor, SubscriptionAuditor>();
+        builder.Services.AddScoped<IAccessChangeNotifier, AccessChangeNotifier>();
+        builder.Services.AddHostedService<SubscriptionAuditService>();
+
+        builder.Services.AddScoped<AccessChangeHandlers>();
+
+        foreach (var handlerInterface in typeof(AccessChangeHandlers)
+                     .GetInterfaces()
+                     .Where(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEventHandler<>)))
+        {
+            builder.Services.AddScoped(handlerInterface,
+                sp => sp.GetRequiredService<AccessChangeHandlers>());
+        }
 
         builder.Services.AddScoped<ITopicAuthorizer, TopicAuthorizer>();
         builder.Services.AddScoped<IRealtimeReplay, RealtimeReplay>();

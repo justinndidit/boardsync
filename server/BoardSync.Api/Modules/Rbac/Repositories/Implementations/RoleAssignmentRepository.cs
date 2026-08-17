@@ -24,16 +24,6 @@ public class RoleAssignmentRepository : IRoleAssignmentRepository
         WhereScope(_context.RoleAssignments, scope, scopeId)
             .FirstOrDefaultAsync(ra => ra.UserId == userId && ra.Role == role, ct);
 
-    public async Task<IReadOnlyList<RoleType>> GetRolesAtScopeAsync(
-        Guid userId,
-        RoleScope scope,
-        Guid scopeId,
-        CancellationToken ct = default) =>
-        await WhereScope(_context.RoleAssignments, scope, scopeId)
-            .Where(ra => ra.UserId == userId)
-            .Select(ra => ra.Role)
-            .ToListAsync(ct);
-
     public async Task<IReadOnlyList<RoleAssignment>> GetForUserAsync(
         Guid userId,
         CancellationToken ct = default) =>
@@ -56,34 +46,60 @@ public class RoleAssignmentRepository : IRoleAssignmentRepository
             .Where(ra => ra.UserId == userId)
             .ToListAsync(ct);
 
-    public Task<bool> IsOrgAdminForScopeAsync(
+    public Task<int> RemoveAllInOrganizationAsync(
         Guid userId,
-        RoleScope scope,
-        Guid scopeId,
+        Guid organizationId,
         CancellationToken ct = default)
     {
-        // The organizations this user administers, left as a subquery so the check below is one
-        // statement rather than a fetch followed by an in-memory Contains.
-        var adminOrgIds = _context.RoleAssignments
+        // Left as subqueries so the whole cascade is one DELETE rather than a fetch of every team
+        // and project id followed by an IN list shipped back to the server.
+        var teamIds = _context.Teams
+            .Where(t => t.OrganizationId == organizationId)
+            .Select(t => t.Id);
+
+        var projectIds = _context.Projects
+            .Where(p => p.OrganizationId == organizationId)
+            .Select(p => p.Id);
+
+        return _context.RoleAssignments
             .Where(ra => ra.UserId == userId
-                         && ra.Role == RoleType.OrgAdmin
-                         && ra.Scope == RoleScope.Organization
-                         && ra.OrganizationId != null)
-            .Select(ra => ra.OrganizationId!.Value);
-
-        return scope switch
-        {
-            RoleScope.Project => _context.Projects
-                .AnyAsync(p => p.Id == scopeId && adminOrgIds.Contains(p.OrganizationId), ct),
-
-            RoleScope.Team => _context.Teams
-                .AnyAsync(t => t.Id == scopeId && adminOrgIds.Contains(t.OrganizationId), ct),
-
-            // Organization scope has no parent to inherit from — a direct assignment is the only
-            // way to hold a role there.
-            _ => Task.FromResult(false)
-        };
+                         && (ra.OrganizationId == organizationId
+                             || (ra.TeamId != null && teamIds.Contains(ra.TeamId.Value))
+                             || (ra.ProjectId != null && projectIds.Contains(ra.ProjectId.Value))))
+            .ExecuteDeleteAsync(ct);
     }
+
+    public async Task<IReadOnlyList<Guid>> GetMemberTeamIdsAsync(
+        Guid userId,
+        CancellationToken ct = default) =>
+        await _context.TeamMemberships
+            .Where(m => m.UserId == userId)
+            .Select(m => m.TeamId)
+            .ToListAsync(ct);
+
+    public async Task<IReadOnlyList<Guid>> GetTeamMemberUserIdsAsync(
+        Guid teamId,
+        CancellationToken ct = default) =>
+        await _context.TeamMemberships
+            .Where(m => m.TeamId == teamId)
+            .Select(m => m.UserId)
+            .ToListAsync(ct);
+
+    public Task<ProjectLocation?> GetProjectLocationAsync(
+        Guid projectId,
+        CancellationToken ct = default) =>
+        _context.Projects
+            .Where(p => p.Id == projectId)
+            .Select(p => new ProjectLocation(p.OrganizationId, p.AssignedTeamId))
+            .FirstOrDefaultAsync(ct);
+
+    public async Task<Guid?> GetTeamOrganizationIdAsync(
+        Guid teamId,
+        CancellationToken ct = default) =>
+        await _context.Teams
+            .Where(t => t.Id == teamId)
+            .Select(t => (Guid?)t.OrganizationId)
+            .FirstOrDefaultAsync(ct);
 
     public void Add(RoleAssignment assignment) => _context.RoleAssignments.Add(assignment);
 

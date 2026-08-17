@@ -34,7 +34,19 @@ public interface IBoardRepository
     Task<BoardSprintContext?> GetSprintContextAsync(Guid projectId, CancellationToken ct = default);
 
     /// <summary>Every card in a sprint, with its tags, ready to be dealt into columns.</summary>
-    Task<IReadOnlyList<BoardCardRow>> GetCardsForSprintAsync(Guid sprintId, CancellationToken ct = default);
+    /// <summary>
+    /// The cards a project's board should show from one sprint.
+    /// </summary>
+    /// <remarks>
+    /// Filtered to <paramref name="projectId"/> because a sprint is team-scoped while a board is
+    /// project-scoped, and a team can hold several projects — so one sprint legitimately contains
+    /// items belonging to boards other than this one. Without the filter a project's board renders
+    /// its sibling projects' cards, and anything wrongly added to the sprint is rendered too.
+    /// </remarks>
+    Task<IReadOnlyList<BoardCardRow>> GetCardsForSprintAsync(
+        Guid sprintId,
+        Guid projectId,
+        CancellationToken ct = default);
 
     void Add(Board board);
 

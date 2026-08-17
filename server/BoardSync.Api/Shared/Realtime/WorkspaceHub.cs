@@ -25,6 +25,7 @@ public class WorkspaceHub : Hub
     private readonly ITopicAuthorizer _authorizer;
     private readonly IRealtimeReplay _replay;
     private readonly IPresenceTracker? _presence;
+    private readonly IConnectionRegistry _registry;
     private readonly ILogger<WorkspaceHub> _logger;
 
     /// <summary>
@@ -42,11 +43,13 @@ public class WorkspaceHub : Hub
     public WorkspaceHub(
         ITopicAuthorizer authorizer,
         IRealtimeReplay replay,
+        IConnectionRegistry registry,
         ILogger<WorkspaceHub> logger,
         IPresenceTracker? presence = null)
     {
         _authorizer = authorizer;
         _replay = replay;
+        _registry = registry;
         _presence = presence;
         _logger = logger;
     }
@@ -56,7 +59,14 @@ public class WorkspaceHub : Hub
         // Every connection joins its own user topic without asking — it is theirs by definition,
         // and notifications should not require the client to remember to subscribe.
         if (TryGetUserId(out var userId))
+        {
+            // Registered so the server can find this connection later — re-checking whether its
+            // subscriptions are still allowed is something only the instance holding it can do.
+            _registry.Track(Context.ConnectionId, userId);
+
             await Groups.AddToGroupAsync(Context.ConnectionId, Topic.User(userId));
+            _registry.AddTopic(Context.ConnectionId, Topic.User(userId));
+        }
 
         await base.OnConnectedAsync();
     }
@@ -97,6 +107,7 @@ public class WorkspaceHub : Hub
         await Groups.AddToGroupAsync(Context.ConnectionId, topic, Context.ConnectionAborted);
 
         JoinedTopics.Add(topic);
+        _registry.AddTopic(Context.ConnectionId, topic);
         await AnnounceJoinAsync(topic, userId);
 
         var currentSequence = await _replay.GetCurrentSequenceAsync(Context.ConnectionAborted);
@@ -131,6 +142,7 @@ public class WorkspaceHub : Hub
         await Groups.RemoveFromGroupAsync(Context.ConnectionId, topic, Context.ConnectionAborted);
 
         JoinedTopics.Remove(topic);
+        _registry.RemoveTopic(Context.ConnectionId, topic);
         await AnnounceLeaveAsync(topic);
     }
 
@@ -169,6 +181,8 @@ public class WorkspaceHub : Hub
         // Best effort: if this does not run, the entries age out of the sorted set anyway.
         foreach (var topic in JoinedTopics.ToList())
             await AnnounceLeaveAsync(topic);
+
+        _registry.Forget(Context.ConnectionId);
 
         await base.OnDisconnectedAsync(exception);
     }

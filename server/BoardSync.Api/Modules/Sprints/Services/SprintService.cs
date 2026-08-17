@@ -223,6 +223,20 @@ public class SprintService : ISprintService
         var workItem = await _workItems.GetActiveAsync(request.WorkItemId, ct)
             ?? throw new NotFoundException("WorkItem", request.WorkItemId);
 
+        // The caller was authorized against the *sprint's* team; nothing so far has authorized the
+        // *work item*. Without this check any team member could name any work item id in the system
+        // — including one in another organization — and read its title, assignee and points back
+        // off their own backlog and board. The sprint's team is the boundary: a team can hold
+        // several projects and one sprint spans all of them, so a sibling project is fine and
+        // anything outside the team is not.
+        //
+        // Reported as not-found rather than forbidden on purpose. The caller cannot see this work
+        // item, and answering "forbidden" would confirm the id names something real.
+        var owningTeamId = await _repository.GetAssignedTeamForProjectAsync(workItem.ProjectId, ct);
+
+        if (owningTeamId != sprint.TeamId)
+            throw new NotFoundException("WorkItem", request.WorkItemId);
+
         if (await _repository.BacklogContainsAsync(sprintId, request.WorkItemId, ct))
             throw new ConflictException("Work item is already in this sprint.");
 

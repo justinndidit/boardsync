@@ -1305,6 +1305,18 @@
         <member name="M:BoardSync.Api.Modules.OrgProject.Repositories.Interfaces.ITeamMembershipRepository.GetMembersAsync(System.Guid,System.Int32,System.Int32,System.Threading.CancellationToken)">
             <summary>Members of a team ordered by display name, joined to their user profiles.</summary>
         </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Repositories.Interfaces.ITeamMembershipRepository.RemoveAllInOrganizationAsync(System.Guid,System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Deletes a user's membership of every team in one organization.
+            </summary>
+            <returns>How many rows were deleted.</returns>
+            <remarks>
+            Executes immediately rather than staging, for the same reason as
+            <see cref="M:BoardSync.Api.Modules.Rbac.Repositories.Interfaces.IRoleAssignmentRepository.RemoveAllInOrganizationAsync(System.Guid,System.Guid,System.Threading.CancellationToken)"/>:
+            the alternative loads every membership across the organization to mark each one deleted.
+            Run it inside a transaction, which it enlists in.
+            </remarks>
+        </member>
         <member name="T:BoardSync.Api.Modules.OrgProject.Repositories.Interfaces.ITeamRepository">
             <summary>
             Persistence for the Team aggregate and its memberships. Pure unit of work — see
@@ -1427,6 +1439,85 @@
             the set before it can query.
             </summary>
         </member>
+        <member name="T:BoardSync.Api.Modules.Rbac.Models.ProjectLocation">
+            <summary>
+            Where a project sits in the scope tree: the organization that owns it and the team that works
+            on it.
+            </summary>
+            <remarks>
+            <c>Project.AssignedTeamId</c> is a required, restricting foreign key, so every project has
+            exactly one of each. Both are needed to answer a project permission question: the organization
+            carries OrgAdmin inheritance, the team carries the membership edge.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Models.ProjectLocation.#ctor(System.Guid,System.Guid)">
+            <summary>
+            Where a project sits in the scope tree: the organization that owns it and the team that works
+            on it.
+            </summary>
+            <remarks>
+            <c>Project.AssignedTeamId</c> is a required, restricting foreign key, so every project has
+            exactly one of each. Both are needed to answer a project permission question: the organization
+            carries OrgAdmin inheritance, the team carries the membership edge.
+            </remarks>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Rbac.Models.AccessSnapshot">
+            <summary>
+            Everything the system knows about what one user has been granted, in a form that answers
+            permission questions without touching the database.
+            </summary>
+            <remarks>
+            <para>
+            Each dictionary maps a scope id to the <em>most privileged</em> role the user holds directly at
+            that scope — lowest <see cref="T:BoardSync.Api.Modules.Rbac.Models.RoleType"/> value wins. Team membership is folded into
+            <see cref="P:BoardSync.Api.Modules.Rbac.Models.AccessSnapshot.TeamRoles"/> when the snapshot is built, because membership of a team is a grant on
+            that team whether or not a matching role row exists.
+            </para>
+            <para>
+            <b>This holds grants, not their consequences.</b> It deliberately does not expand OrgAdmin into
+            every project of the organization, or team membership into every project of the team. Expanding
+            would make the snapshot grow with the size of the organization rather than with the size of the
+            user's access, and would mean every new project invalidated every admin's snapshot. Instead the
+            expansion happens at question time in <see cref="T:BoardSync.Api.Modules.Rbac.Services.AccessEvaluator"/>, which needs only
+            the one scope being asked about and its position in the tree.
+            </para>
+            <para>
+            Consequently a snapshot is invalidated by changes to <em>this user's</em> grants and by nothing
+            else — with one exception, reassigning a project to a different team, which changes the tree
+            underneath everyone on both teams. See <c>AccessChangeHandlers</c>.
+            </para>
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Models.AccessSnapshot.#ctor(System.Collections.Generic.Dictionary{System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType},System.Collections.Generic.Dictionary{System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType},System.Collections.Generic.Dictionary{System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType})">
+            <summary>
+            Everything the system knows about what one user has been granted, in a form that answers
+            permission questions without touching the database.
+            </summary>
+            <remarks>
+            <para>
+            Each dictionary maps a scope id to the <em>most privileged</em> role the user holds directly at
+            that scope — lowest <see cref="T:BoardSync.Api.Modules.Rbac.Models.RoleType"/> value wins. Team membership is folded into
+            <see cref="P:BoardSync.Api.Modules.Rbac.Models.AccessSnapshot.TeamRoles"/> when the snapshot is built, because membership of a team is a grant on
+            that team whether or not a matching role row exists.
+            </para>
+            <para>
+            <b>This holds grants, not their consequences.</b> It deliberately does not expand OrgAdmin into
+            every project of the organization, or team membership into every project of the team. Expanding
+            would make the snapshot grow with the size of the organization rather than with the size of the
+            user's access, and would mean every new project invalidated every admin's snapshot. Instead the
+            expansion happens at question time in <see cref="T:BoardSync.Api.Modules.Rbac.Services.AccessEvaluator"/>, which needs only
+            the one scope being asked about and its position in the tree.
+            </para>
+            <para>
+            Consequently a snapshot is invalidated by changes to <em>this user's</em> grants and by nothing
+            else — with one exception, reassigning a project to a different team, which changes the tree
+            underneath everyone on both teams. See <c>AccessChangeHandlers</c>.
+            </para>
+            </remarks>
+        </member>
+        <member name="P:BoardSync.Api.Modules.Rbac.Models.AccessSnapshot.Empty">
+            <summary>A user with no grants anywhere. Every question against it answers no.</summary>
+        </member>
         <member name="T:BoardSync.Api.Modules.Rbac.Models.RoleType">
             <summary>
             Roles available in the system, ordered from most to least privileged within a scope.
@@ -1494,20 +1585,18 @@
             A user's exact role assignment at one scope, tracked for mutation, or null.
             </summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.Rbac.Repositories.Interfaces.IRoleAssignmentRepository.GetRolesAtScopeAsync(System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid,System.Threading.CancellationToken)">
+        <member name="M:BoardSync.Api.Modules.Rbac.Repositories.Interfaces.IRoleAssignmentRepository.GetForUserAsync(System.Guid,System.Threading.CancellationToken)">
             <summary>
-            Just the roles a user holds at one scope.
+            Every role assignment held by a user, across all scopes — the raw material for an
+            <see cref="T:BoardSync.Api.Modules.Rbac.Models.AccessSnapshot"/>.
             </summary>
             <remarks>
-            Returns the roles rather than a yes/no answer because the privilege comparison cannot happen
-            in SQL: <see cref="T:BoardSync.Api.Modules.Rbac.Models.RoleType"/> is persisted with <c>HasConversion&lt;string&gt;()</c>, so a
-            database-side <c>&lt;=</c> would compare the *names*. 'TeamMember' &lt;= 'Reader' is false
-            and 'Reader' &lt;= 'TeamMember' is true, which would both deny team members read access and
-            let readers perform team-member writes.
+            Returns the assignments rather than a yes/no answer because the privilege comparison cannot
+            happen in SQL: <see cref="T:BoardSync.Api.Modules.Rbac.Models.RoleType"/> is persisted with <c>HasConversion&lt;string&gt;()</c>,
+            so a database-side <c>&lt;=</c> would compare the *names*. 'TeamMember' &lt;= 'Reader' is
+            false and 'Reader' &lt;= 'TeamMember' is true, which would both deny team members read access
+            and let readers perform team-member writes. See <c>AccessEvaluator.Satisfies</c>.
             </remarks>
-        </member>
-        <member name="M:BoardSync.Api.Modules.Rbac.Repositories.Interfaces.IRoleAssignmentRepository.GetForUserAsync(System.Guid,System.Threading.CancellationToken)">
-            <summary>Every role assignment held by a user, across all scopes.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Rbac.Repositories.Interfaces.IRoleAssignmentRepository.GetForScopeAsync(BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid,System.Threading.CancellationToken)">
             <summary>Every role assignment attached to one scope resource.</summary>
@@ -1515,104 +1604,326 @@
         <member name="M:BoardSync.Api.Modules.Rbac.Repositories.Interfaces.IRoleAssignmentRepository.GetUserAssignmentsAtScopeAsync(System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid,System.Threading.CancellationToken)">
             <summary>All of a user's assignments at one scope, tracked — used when revoking in bulk.</summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.Rbac.Repositories.Interfaces.IRoleAssignmentRepository.IsOrgAdminForScopeAsync(System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid,System.Threading.CancellationToken)">
+        <member name="M:BoardSync.Api.Modules.Rbac.Repositories.Interfaces.IRoleAssignmentRepository.RemoveAllInOrganizationAsync(System.Guid,System.Guid,System.Threading.CancellationToken)">
             <summary>
-            Whether the user is an OrgAdmin of the organization owning the given project or team.
+            Deletes every assignment a user holds anywhere inside one organization — the organization
+            itself, and every team and project belonging to it.
+            </summary>
+            <returns>How many rows were deleted.</returns>
+            <remarks>
+            <para>
+            Used when someone leaves an organization. Org membership is what every grant underneath it
+            hangs off, so losing it has to take the whole subtree with it.
+            </para>
+            <para>
+            Unlike the rest of this interface this executes immediately rather than staging a change for
+            <see cref="M:BoardSync.Api.Modules.Rbac.Repositories.Interfaces.IRoleAssignmentRepository.SaveChangesAsync(System.Threading.CancellationToken)"/>. The alternative is loading every assignment across every
+            project and team in the organization only to mark each one deleted, which is unbounded work
+            for a result nobody reads. Callers must therefore run it inside their own transaction, which
+            it enlists in, and must not be holding a tracked instance of anything it deletes.
+            </para>
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Repositories.Interfaces.IRoleAssignmentRepository.GetMemberTeamIdsAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            The teams a user is a member of, across every organization.
             </summary>
             <remarks>
-            Org admins implicitly satisfy every project and team check inside their organization, so
-            this is the fallback consulted when no direct assignment matches. Resolved in one query
-            rather than fetching the admin's organizations and testing them in memory.
+            Membership is a grant in its own right — it is what gives someone access to the projects
+            their team works on — so resolving access has to read it alongside the role table. It lives
+            on this interface, rather than reaching into the OrgProject module's repositories, for the
+            same reason <see cref="M:BoardSync.Api.Modules.Rbac.Repositories.Interfaces.IRoleAssignmentRepository.GetProjectLocationAsync(System.Guid,System.Threading.CancellationToken)"/> queries Projects directly: the RBAC module
+            owns its own reads.
             </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Repositories.Interfaces.IRoleAssignmentRepository.GetTeamMemberUserIdsAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            The users who are members of one team.
+            </summary>
+            <remarks>
+            The inverse of <see cref="M:BoardSync.Api.Modules.Rbac.Repositories.Interfaces.IRoleAssignmentRepository.GetMemberTeamIdsAsync(System.Guid,System.Threading.CancellationToken)"/>, needed when something changes the tree
+            rather than a grant — reassigning a project moves it under a different team, which changes
+            what both teams' members may see without touching anyone's role assignments.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Repositories.Interfaces.IRoleAssignmentRepository.GetProjectLocationAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Where a project sits in the scope tree, or null if it does not exist.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Repositories.Interfaces.IRoleAssignmentRepository.GetTeamOrganizationIdAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            The organization owning a team, or null if the team does not exist.
+            </summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Rbac.Repositories.Interfaces.IRoleAssignmentRepository.SaveChangesAsync(System.Threading.CancellationToken)">
             <summary>Persists everything staged since the last save.</summary>
         </member>
-        <member name="T:BoardSync.Api.Modules.Rbac.Services.Implementations.CachingRbacService">
+        <member name="T:BoardSync.Api.Modules.Rbac.Services.IAccessCacheVersion">
             <summary>
-            Caches permission decisions across requests, in memory and in Redis.
+            The generation counter that makes a revocation take effect immediately.
             </summary>
             <remarks>
             <para>
-            Role assignments are the most-read and least-written data in the system: every authorized action
-            asks, and almost nothing changes. Before this, each ask cost a query — two when the direct match
-            failed and org-admin inheritance had to be tested.
+            Each user has a counter in Redis that is folded into every cache key holding something about
+            them. Advancing it makes everything previously cached about that user unreachable in one atomic
+            operation, and the orphans expire on their own.
             </para>
             <para>
-            <b>Invalidation is by version stamp, not by deleting keys.</b> Each user has a counter in Redis
-            that is included in every decision key; bumping it makes every previously cached decision about
-            that user unreachable in one atomic operation, and the orphans expire on their own. This is the
-            pattern the scaling design calls for, and it is deliberately not tag-based eviction: that would
-            depend on the cache provider actually implementing tag removal across both tiers, and a silently
-            unimplemented eviction here means a revoked user keeps their access.
-            </para>
-            <para>
-            The version is read from Redis on every check, which is the cost of making revocation take
-            effect immediately rather than at the end of a TTL. It trades one Postgres round trip — often
-            two — for one Redis GET, and keeps the security-critical direction exact.
+            Deliberately not tag-based eviction: that depends on the cache provider actually implementing tag
+            removal across both tiers, and a silently unimplemented eviction here means a revoked user keeps
+            their access. A key nobody can name is a key nobody can read.
             </para>
             </remarks>
         </member>
-        <member name="F:BoardSync.Api.Modules.Rbac.Services.Implementations.CachingRbacService.KeyVersion">
+        <member name="M:BoardSync.Api.Modules.Rbac.Services.IAccessCacheVersion.GetAsync(System.Guid)">
             <summary>
-            Bumped when the cached shape or its meaning changes. A deploy that changes how a decision is
-            computed must not read entries written by the previous one.
+            The user's current generation.
             </summary>
+            <exception cref="T:StackExchange.Redis.RedisConnectionException">
+            The counter could not be read. Callers must treat this as "cache unusable" and go to the
+            database — serving an entry whose generation cannot be confirmed risks honouring a grant
+            that has since been revoked.
+            </exception>
         </member>
-        <member name="M:BoardSync.Api.Modules.Rbac.Services.Implementations.CachingRbacService.GetVersionAsync(System.Guid)">
+        <member name="M:BoardSync.Api.Modules.Rbac.Services.IAccessCacheVersion.BumpAsync(System.Guid)">
             <summary>
-            The user's current cache generation. Absent means zero — a user nobody has ever revoked
-            anything from simply starts at generation 0.
-            </summary>
-        </member>
-        <member name="M:BoardSync.Api.Modules.Rbac.Services.Implementations.CachingRbacService.InvalidateAsync(System.Guid)">
-            <summary>
-            Advances the user's generation, orphaning every decision cached about them.
+            Advances the user's generation, orphaning everything cached about them.
             </summary>
             <remarks>
-            Failures are not swallowed. If the version cannot be advanced, previously cached decisions
+            Failures are not swallowed. If the generation cannot be advanced, previously cached entries
             stay reachable and a revoked user keeps their access until those entries expire — the caller
             needs the write to fail rather than to quietly not take effect.
             </remarks>
         </member>
-        <member name="T:BoardSync.Api.Modules.Rbac.Services.Implementations.MemoizingRbacService">
+        <member name="T:BoardSync.Api.Modules.Rbac.Services.AccessCacheVersion">
+            <inheritdoc />
+        </member>
+        <member name="F:BoardSync.Api.Modules.Rbac.Services.AccessCacheVersion.KeyVersion">
             <summary>
-            Scoped decorator that answers a repeated permission question once per request.
+            Bumped when the cached shape or its meaning changes. A deploy that changes how access is
+            computed must not read entries written by the previous one.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Services.AccessCacheVersion.GetAsync(System.Guid)">
+            <summary>
+            Absent means zero — a user nobody has ever revoked anything from starts at generation 0.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Rbac.Services.NullAccessCacheVersion">
+            <summary>
+            The generation counter when there is no Redis to hold it.
+            </summary>
+            <remarks>
+            Without Redis nothing is cached across requests, so there is no generation to advance and
+            nothing for a bump to orphan. Registering this rather than leaving the dependency null keeps the
+            write path identical in both configurations — in particular it keeps the per-request memo being
+            dropped on every write, which matters whether or not a distributed cache exists.
+            </remarks>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Rbac.Services.AccessEvaluator">
+            <summary>
+            Turns a user's grants into an answer about one scope. Pure: no I/O, no state, no dependencies.
             </summary>
             <remarks>
             <para>
-            Nearly every action authorizes twice or more against the same scope: the controller guard runs
-            <see cref="M:BoardSync.Api.Modules.Rbac.Services.Implementations.MemoizingRbacService.HasRoleAsync(System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType,BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid,System.Threading.CancellationToken)"/>, then a service method re-resolves the same scope to decide what it is
-            allowed to touch. Each of those calls costs one query, and two when the direct role match fails
-            and org-admin inheritance has to be tested. Memoizing collapses them to the first one.
+            This is where the scope tree is interpreted. The tree, as the schema defines it:
+            </para>
+            <code>
+            Organization
+            └── Team                      Team.OrganizationId
+                ├── Sprint                Sprint.TeamId
+                └── Project               Project.AssignedTeamId  (required, exactly one team per project)
+                    ├── Board
+                    └── WorkItem
+            </code>
+            <para>
+            Inheritance runs <b>down</b> the tree only. A project role never reaches the project's team —
+            a team can serve several projects, so letting one project's administrator reach the shared team
+            would hand them the sprints of every sibling project.
             </para>
             <para>
-            The cache lives exactly as long as the request. That is deliberate: it is short enough that role
-            changes made elsewhere are picked up on the caller's next request without any invalidation
-            machinery, which is what keeps this safe to add before the distributed cache exists. Anything
-            longer-lived needs the explicit invalidation described in the caching design, because a stale
-            grant outliving a revocation is a security bug rather than a cache miss.
+            Being pure is what makes this testable without a database and what lets both the cached and
+            uncached paths share one definition of the rules. Anything needing I/O — loading the snapshot,
+            locating a project in the tree — happens before this is called.
+            </para>
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Services.AccessEvaluator.EffectiveOrganizationRole(BoardSync.Api.Modules.Rbac.Models.AccessSnapshot,System.Guid)">
+            <summary>
+            The user's effective role at an organization, or null if they hold none.
+            </summary>
+            <remarks>
+            Organizations are the root, so there is nothing above them to inherit from — a direct
+            assignment is the only way to hold a role here.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Services.AccessEvaluator.EffectiveTeamRole(BoardSync.Api.Modules.Rbac.Models.AccessSnapshot,System.Guid,System.Nullable{System.Guid})">
+            <summary>
+            The user's effective role on a team, or null if they hold none.
+            </summary>
+            <param name="snapshot">The user's grants.</param>
+            <param name="teamId">The team being asked about.</param>
+            <param name="organizationId">
+            The team's owning organization, or null when it could not be resolved (a team that no longer
+            exists). Null simply means org-admin inheritance cannot be applied, so the answer falls back
+            to direct grants.
+            </param>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Services.AccessEvaluator.EffectiveProjectRole(BoardSync.Api.Modules.Rbac.Models.AccessSnapshot,System.Guid,BoardSync.Api.Modules.Rbac.Models.ProjectLocation)">
+            <summary>
+            The user's effective role on a project, or null if they hold none.
+            </summary>
+            <param name="snapshot">The user's grants.</param>
+            <param name="projectId">The project being asked about.</param>
+            <param name="location">
+            Where the project sits in the tree, or null when it could not be resolved (a project that no
+            longer exists). Null falls back to direct project grants only.
+            </param>
+            <remarks>
+            Three ways to hold a role on a project, and the most privileged wins:
+            a direct project assignment, OrgAdmin of the owning organization, or a grant on the team the
+            project is assigned to.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Services.AccessEvaluator.Satisfies(System.Nullable{BoardSync.Api.Modules.Rbac.Models.RoleType},BoardSync.Api.Modules.Rbac.Models.RoleType)">
+            <summary>
+            Whether <paramref name="held"/> satisfies a requirement of <paramref name="minimumRole"/>.
+            </summary>
+            <remarks>
+            Lower <see cref="T:BoardSync.Api.Modules.Rbac.Models.RoleType"/> value means more privileged, so a role satisfies a requirement
+            when its value is less than or equal to it. This comparison stays in memory on purpose:
+            <c>RoleType</c> is persisted with <c>HasConversion&lt;string&gt;()</c>, so the same
+            comparison in SQL would order the <em>names</em> — under which 'TeamMember' &lt;= 'Reader'
+            is false and 'Reader' &lt;= 'TeamMember' is true, denying team members read access and
+            letting readers perform team-member writes.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Services.AccessEvaluator.ProjectRoleFromTeamRole(BoardSync.Api.Modules.Rbac.Models.RoleType)">
+            <summary>
+            What a grant on a team confers on that team's projects.
+            </summary>
+            <remarks>
+            Clamped so it can never exceed <see cref="F:BoardSync.Api.Modules.Rbac.Models.RoleType.TeamMember"/> — contribution, not
+            administration. Two reasons. A team can serve several projects, so anything higher would let
+            a grant on the shared team administer every one of them. And nothing today assigns a role
+            more privileged than TeamMember at team scope, so a row that says otherwise is corrupt data
+            rather than an intention worth honouring. Raising this ceiling is a deliberate act — it is
+            what introducing a team-lead role will mean.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Services.AccessEvaluator.MostPrivileged(System.Nullable{BoardSync.Api.Modules.Rbac.Models.RoleType},BoardSync.Api.Modules.Rbac.Models.RoleType)">
+            <summary>The more privileged of two roles, treating null as "nothing held".</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Rbac.Services.Implementations.AccessResolver">
+            <summary>
+            Builds access snapshots from the database.
+            </summary>
+            <remarks>
+            Two queries, both indexed on <c>UserId</c>: the user's role assignments and the teams they are a
+            member of. The result is bounded by how much the user has been granted, not by how large their
+            organization is — an OrgAdmin of a thousand-project organization has the same snapshot size as
+            an OrgAdmin of one.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Services.Implementations.AccessResolver.KeepMostPrivileged(System.Collections.Generic.Dictionary{System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType},System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType)">
+            <summary>
+            Records <paramref name="role"/> against <paramref name="scopeId"/> unless something more
+            privileged is already there. Nothing stops a user holding several roles at one scope, and
+            the effective answer is the best of them.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Rbac.Services.Implementations.CachingAccessResolver">
+            <summary>
+            Caches access snapshots and scope positions, in memory and in Redis.
+            </summary>
+            <remarks>
+            <para>
+            Role assignments are the most-read and least-written data in the system: every authorized action
+            asks, and almost nothing changes.
             </para>
             <para>
-            A plain dictionary is the right structure here even though it is not thread-safe. This decorator
+            <b>One entry per user, not one per question.</b> The previous design cached a decision under
+            <c>(user, scope, scopeId, minimumRole)</c>, so the same user generated a separate entry for every
+            rank anyone happened to ask about and every scope they touched. Caching the grants instead means
+            one entry per user per generation, and the question is answered from it in memory.
+            </para>
+            <para>
+            <b>Only grants are cached here.</b> A scope's position in the tree is read fresh — it is a
+            primary-key lookup, and the per-request memo above this already collapses repeats within a
+            request. Caching it distributed would be a small saving bought with a real hole: reassigning a
+            project to a different team changes who may see it, and every other instance would keep serving
+            the old parent out of its own L1 until that copy expired, with no way to reach in and evict it.
+            A grant is safe to cache because its generation counter can be advanced atomically; the tree has
+            no such counter, so it is not cached.
+            </para>
+            </remarks>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Rbac.Services.Implementations.InvalidatingRbacService">
+            <summary>
+            Advances the access cache generation whenever a user's grants change.
+            </summary>
+            <remarks>
+            <para>
+            The read side is cached one layer down, in <see cref="T:BoardSync.Api.Modules.Rbac.Services.Implementations.CachingAccessResolver"/> — a user's grants
+            are cached once and every question is answered from them in memory. This decorator exists purely
+            so that writes reach that cache: it wraps each mutation and bumps the user's generation
+            afterwards, which orphans everything cached about them.
+            </para>
+            <para>
+            Ordering matters. The generation is advanced <em>after</em> the write, so a concurrent reader
+            that repopulates the cache mid-flight is orphaned by the bump rather than surviving it.
+            </para>
+            <para>
+            The per-request memo is dropped as well. It sits above the distributed cache and would otherwise
+            keep answering from grants this very request has just changed.
+            </para>
+            </remarks>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Rbac.Services.Implementations.MemoizingAccessResolver">
+            <summary>
+            Scoped decorator that loads a user's grants at most once per request.
+            </summary>
+            <remarks>
+            <para>
+            Nearly every action authorizes more than once against the same scope: the controller guard runs,
+            then a service method re-resolves the same scope to decide what it is allowed to touch. Without
+            this each of those would deserialize the snapshot out of the cache again.
+            </para>
+            <para>
+            The memo lives exactly as long as the request, so a grant changed elsewhere is picked up on the
+            caller's next request with no invalidation machinery. Changes made <em>by this request</em> are a
+            different matter: a memo held across a write would answer with grants that no longer exist, so
+            every write path drops it through <see cref="M:BoardSync.Api.Modules.Rbac.Services.Interfaces.IAccessMemo.Clear"/>.
+            </para>
+            <para>
+            Plain dictionaries are the right structure even though they are not thread-safe. This decorator
             is scoped, so it shares its lifetime — and its threading contract — with the repository chain
             beneath it, which is ultimately backed by a DbContext that already forbids concurrent use.
             </para>
             </remarks>
         </member>
-        <member name="T:BoardSync.Api.Modules.Rbac.Services.Implementations.MemoizingRbacService.RoleCheck">
+        <member name="M:BoardSync.Api.Modules.Rbac.Services.Implementations.MemoizingAccessResolver.Clear">
             <summary>
-            One permission question. <paramref name="MinimumRole"/> is part of the identity because
-            "is this user at least a TeamMember here" and "is this user at least a Reader here" are
-            different questions with different answers.
+            Drops everything remembered so far.
             </summary>
+            <remarks>
+            Everything, rather than the entries a write looks like it touched. Granting OrgAdmin at an
+            organization changes the answer for every team and project underneath it, and reassigning a
+            project moves it under a different team entirely — targeted eviction would have to re-derive
+            the tree, which is more work and more ways to be subtly wrong than discarding three
+            dictionaries that only ever hold a handful of entries.
+            </remarks>
         </member>
-        <member name="M:BoardSync.Api.Modules.Rbac.Services.Implementations.MemoizingRbacService.RoleCheck.#ctor(System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType,BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid)">
+        <member name="M:BoardSync.Api.Modules.Rbac.Services.Implementations.RbacService.GetEffectiveRoleAsync(System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid,System.Threading.CancellationToken)">
             <summary>
-            One permission question. <paramref name="MinimumRole"/> is part of the identity because
-            "is this user at least a TeamMember here" and "is this user at least a Reader here" are
-            different questions with different answers.
+            The best role this user holds at one scope by any route, or null if they hold none.
             </summary>
+            <remarks>
+            Loads the user's grants once, then locates the scope in the tree so
+            <see cref="T:BoardSync.Api.Modules.Rbac.Services.AccessEvaluator"/> can apply inheritance to it. Organization questions skip the
+            lookup entirely — the organization is the root, so there is nothing above it to resolve.
+            </remarks>
         </member>
         <member name="M:BoardSync.Api.Modules.Rbac.Services.Implementations.RbacService.CreateAssignment(System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType,BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid,System.Nullable{System.Guid})">
             <summary>
@@ -1620,11 +1931,36 @@
             matches <paramref name="scope"/>, leaving the other two null.
             </summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.Rbac.Services.Implementations.RbacService.RolesSatisfying(BoardSync.Api.Modules.Rbac.Models.RoleType)">
+        <member name="T:BoardSync.Api.Modules.Rbac.Services.Interfaces.IAccessMemo">
             <summary>
-            Every role at least as privileged as <paramref name="minimumRole"/>. Lower enum value means
-            more privileged, so this is every role whose value is &lt;= the requirement.
+            The per-request memo of resolved access, exposed so writes can drop it.
             </summary>
+            <remarks>
+            Separate from <see cref="T:BoardSync.Api.Modules.Rbac.Services.Interfaces.IAccessResolver"/> because it is the write side's concern, not the read
+            side's. A caller that only asks questions has no business being able to discard the answers.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Services.Interfaces.IAccessMemo.Clear">
+            <summary>Forgets everything resolved so far in this request.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Rbac.Services.Interfaces.IAccessResolver">
+            <summary>
+            Loads a user's grants, and locates scopes in the tree so those grants can be interpreted.
+            </summary>
+            <remarks>
+            Split from <see cref="T:BoardSync.Api.Modules.Rbac.Services.Interfaces.IRbacService"/> because the two have very different caching profiles. A
+            snapshot changes only when the user's own grants change; a scope's position in the tree barely
+            changes at all. Keeping them apart lets each be cached on its own terms.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Services.Interfaces.IAccessResolver.GetSnapshotAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Everything this user has been granted, anywhere.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Services.Interfaces.IAccessResolver.GetProjectLocationAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Where a project sits in the tree, or null if it does not exist.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Services.Interfaces.IAccessResolver.GetTeamOrganizationIdAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>The organization owning a team, or null if the team does not exist.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Rbac.Services.Interfaces.IRbacService.AssignRoleAsync(System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType,BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid,System.Nullable{System.Guid},System.Threading.CancellationToken)">
             <summary>
@@ -1634,6 +1970,17 @@
         </member>
         <member name="M:BoardSync.Api.Modules.Rbac.Services.Interfaces.IRbacService.RemoveRoleAsync(System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType,BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid,System.Threading.CancellationToken)">
             <summary>Remove a specific role assignment.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Services.Interfaces.IRbacService.RemoveAllRolesInOrganizationAsync(System.Guid,System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Remove every role a user holds anywhere inside an organization — at the organization itself
+            and at every team and project belonging to it.
+            </summary>
+            <remarks>
+            The counterpart to losing organization membership. Revoking only the organization-scope rows
+            leaves project and team grants behind that keep working, because every check below the
+            organization resolves against its own scope and never consults membership.
+            </remarks>
         </member>
         <member name="M:BoardSync.Api.Modules.Rbac.Services.Interfaces.IRbacService.HasRoleAsync(System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType,BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid,System.Threading.CancellationToken)">
             <summary>
@@ -2142,8 +2489,17 @@
             so both are needed before any card can be loaded.
             </summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.IBoardRepository.GetCardsForSprintAsync(System.Guid,System.Threading.CancellationToken)">
+        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.IBoardRepository.GetCardsForSprintAsync(System.Guid,System.Guid,System.Threading.CancellationToken)">
             <summary>Every card in a sprint, with its tags, ready to be dealt into columns.</summary>
+            <summary>
+            The cards a project's board should show from one sprint.
+            </summary>
+            <remarks>
+            Filtered to <paramref name="projectId"/> because a sprint is team-scoped while a board is
+            project-scoped, and a team can hold several projects — so one sprint legitimately contains
+            items belonging to boards other than this one. Without the filter a project's board renders
+            its sibling projects' cards, and anything wrongly added to the sprint is rendered too.
+            </remarks>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.IBoardRepository.GetColumnAsync(System.Guid,System.Threading.CancellationToken)">
             <summary>Column by ID, tracked for mutation, or null.</summary>
@@ -2210,6 +2566,16 @@
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.TeamExistsAsync(System.Guid,System.Threading.CancellationToken)">
             <summary>Whether an active team with this ID exists.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.GetAssignedTeamForProjectAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            The team a project is assigned to, or null if the project does not exist.
+            </summary>
+            <remarks>
+            Used to check that a work item belongs to the same team as the sprint it is being added to.
+            A sprint is team-scoped and a team can hold several projects, so items from any of the
+            team's projects are legitimate — items from anywhere else are not.
+            </remarks>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.HasOverlappingSprintAsync(System.Guid,System.DateTime,System.DateTime,System.Threading.CancellationToken)">
             <summary>
@@ -3012,6 +3378,17 @@
             it is bounded work rather than work proportional to how long the client was away.
             </remarks>
         </member>
+        <member name="P:BoardSync.Api.Shared.Kernel.Configuration.RealtimeSettings.ReauthorizationIntervalSeconds">
+            <summary>
+            How often live subscriptions are re-checked against current permissions.
+            </summary>
+            <remarks>
+            This is the worst case for how long a revoked user can keep receiving a topic when the
+            immediate path does not fire — Redis unavailable, or a permission changed directly in the
+            database rather than through the API. The immediate path normally acts within milliseconds;
+            this is the floor under it.
+            </remarks>
+        </member>
         <member name="T:BoardSync.Api.Shared.Kernel.Events.EventDispatcher">
             <summary>
             Resolves and runs the handlers registered for a domain event.
@@ -3406,6 +3783,111 @@
             asked — the limiter would look wired up and enforce nothing.
             </remarks>
         </member>
+        <member name="T:BoardSync.Api.Shared.Realtime.AccessChangeHandlers">
+            <summary>
+            Watches for the events that change what somebody is allowed to see, and has their live
+            subscriptions re-checked.
+            </summary>
+            <remarks>
+            <para>
+            These are exactly the events that can take access away. Adding a member or granting a role
+            cannot make an existing subscription invalid, but they are handled too: the same re-check that
+            drops a revoked topic is harmless when nothing changed, and treating the whole set uniformly
+            removes the question of which direction a role change went.
+            </para>
+            <para>
+            <see cref="T:BoardSync.Api.Modules.OrgProject.Domain.Events.ProjectTeamAssigned"/> is the odd one out: it changes nobody's grants, it moves the
+            project to a different place in the tree. Everyone on the previous team silently loses access to
+            it and everyone on the new team gains it, so both teams' members have to be re-checked even
+            though no role assignment was touched.
+            </para>
+            <para>
+            Runs on the outbox dispatcher, so it inherits the outbox's guarantee — a role change that
+            committed will be acted on, even if the instance handling it dies first.
+            </para>
+            </remarks>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Realtime.IAccessChangeNotifier">
+            <summary>
+            Tells every instance that one user's access has changed and their subscriptions need re-checking.
+            </summary>
+            <remarks>
+            <para>
+            A role change is processed by whichever instance happened to dispatch the event, but the affected
+            user's connections could be held by any of them. Redis pub/sub is the fan-out: every instance
+            hears, and each acts on the connections it actually holds.
+            </para>
+            <para>
+            Not the SignalR backplane, which delivers to <em>clients</em>. This has to reach instance-side
+            code, because dropping someone from a group is a server decision — asking the client to give up
+            its own access would be no security boundary at all.
+            </para>
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Realtime.IAccessChangeNotifier.AnnounceAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Announces that a user's permissions changed.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Realtime.AccessChangeNotifier">
+            <inheritdoc />
+        </member>
+        <member name="F:BoardSync.Api.Shared.Realtime.AccessChangeNotifier.Channel">
+            <summary>Channel carrying user ids whose access changed.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Realtime.SubscriptionAuditService">
+            <summary>
+            Keeps subscriptions honest: re-checks everything periodically, and immediately when a user's
+            access changes.
+            </summary>
+            <remarks>
+            Two mechanisms because they fail differently. The announcement is fast but depends on Redis and
+            on the event actually being raised; the sweep is slower but depends on nothing and will find a
+            stale subscription whatever caused it — including a permission changed directly in the database.
+            </remarks>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Realtime.IConnectionRegistry">
+            <summary>
+            Which connections this instance is holding, and what each of them is subscribed to.
+            </summary>
+            <remarks>
+            <para>
+            SignalR offers no way to enumerate connections or their groups, so anything that needs to act on
+            existing subscriptions — re-checking that they are still allowed, for instance — has to keep its
+            own record.
+            </para>
+            <para>
+            Deliberately per-instance and in-memory. A connection lives on exactly one instance, so the
+            instance holding it is the only one that can drop it from a group; there is nothing to share.
+            Instances are told <em>when</em> to re-check over Redis, but each acts on its own connections.
+            </para>
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Realtime.IConnectionRegistry.Track(System.String,System.Guid)">
+            <summary>Records a new connection and who it belongs to.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Realtime.IConnectionRegistry.Forget(System.String)">
+            <summary>Forgets a connection and everything it was subscribed to.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Realtime.IConnectionRegistry.AddTopic(System.String,System.String)">
+            <summary>Notes that a connection joined a topic.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Realtime.IConnectionRegistry.RemoveTopic(System.String,System.String)">
+            <summary>Notes that a connection left a topic.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Realtime.IConnectionRegistry.ForUser(System.Guid)">
+            <summary>This instance's connections for one user, with their current topics.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Realtime.IConnectionRegistry.All">
+            <summary>Every connection this instance is holding.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Realtime.TrackedConnection">
+            <summary>A live connection and what it is currently watching.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Realtime.TrackedConnection.#ctor(System.String,System.Guid,System.Collections.Generic.IReadOnlyList{System.String})">
+            <summary>A live connection and what it is currently watching.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Realtime.ConnectionRegistry">
+            <inheritdoc />
+        </member>
         <member name="T:BoardSync.Api.Shared.Realtime.IPresenceTracker">
             <summary>
             Who is currently looking at a topic.
@@ -3555,6 +4037,27 @@
             </returns>
         </member>
         <member name="T:BoardSync.Api.Shared.Realtime.RealtimeReplay">
+            <inheritdoc />
+        </member>
+        <member name="T:BoardSync.Api.Shared.Realtime.ISubscriptionAuditor">
+            <summary>
+            Re-checks live subscriptions and drops the ones that are no longer permitted.
+            </summary>
+            <remarks>
+            Subscriptions are authorized when they are made, and a permission granted then can be taken away
+            later. Without this, someone removed from a project would keep receiving its cards for as long
+            as they left the tab open — the socket has no reason to notice.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Realtime.ISubscriptionAuditor.AuditUserAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Re-checks one user's connections on this instance.</summary>
+            <returns>How many subscriptions were revoked.</returns>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Realtime.ISubscriptionAuditor.AuditAllAsync(System.Threading.CancellationToken)">
+            <summary>Re-checks every connection on this instance.</summary>
+            <returns>How many subscriptions were revoked.</returns>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Realtime.SubscriptionAuditor">
             <inheritdoc />
         </member>
         <member name="T:BoardSync.Api.Shared.Realtime.ITopicAuthorizer">

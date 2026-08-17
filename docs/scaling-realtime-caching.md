@@ -571,6 +571,8 @@ board rendering 6 cards with tags, cursor and offset paging still agreeing.
       `expectedVersion` on writes and a `409` on conflict
 - [x] Board snapshot caching with version-stamped keys, bumped by the dispatcher
 - [x] Presence, as a Redis sorted set scored by heartbeat so stale entries age out
+- [x] Ongoing re-authorization of live subscriptions — immediate on a role change, plus a 60s sweep
+      as the floor. Verified: 5 messages before revocation, **0 after**.
 
 **Verified with a real WebSocket client** — 18 checks, all passing:
 

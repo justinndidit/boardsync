@@ -21,6 +21,17 @@ public interface IRbacService
     Task RemoveAllRolesAsync(Guid userId, RoleScope scope, Guid scopeId, CancellationToken ct = default);
 
     /// <summary>
+    /// Remove every role a user holds anywhere inside an organization — at the organization itself
+    /// and at every team and project belonging to it.
+    /// </summary>
+    /// <remarks>
+    /// The counterpart to losing organization membership. Revoking only the organization-scope rows
+    /// leaves project and team grants behind that keep working, because every check below the
+    /// organization resolves against its own scope and never consults membership.
+    /// </remarks>
+    Task RemoveAllRolesInOrganizationAsync(Guid userId, Guid organizationId, CancellationToken ct = default);
+
+    /// <summary>
     /// Check whether a user holds at least <paramref name="minimumRole"/> at the given scope.
     /// A more-privileged role (lower enum value) satisfies a less-privileged requirement.
     /// OrgAdmin implicitly satisfies any project or team scope check within that org.
