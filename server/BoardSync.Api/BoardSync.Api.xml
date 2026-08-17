@@ -624,6 +624,145 @@
             feed, or every organization the caller belongs to for the workspace feed.
             </summary>
         </member>
+        <member name="T:BoardSync.Api.Modules.Backlog.Controllers.BacklogController">
+             <summary>
+             Product backlog management scoped to a project.
+            
+             Read:            Reader+
+             Reorder / move:  TeamMember+
+             Add / remove:    TeamMember+
+             </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Backlog.Controllers.BacklogController.GetForProject(System.Guid,System.Nullable{System.Guid},BoardSync.Api.Shared.Kernel.PaginationQuery,System.Threading.CancellationToken)">
+            <summary>
+            Get the unscheduled product backlog for a project, ordered by rank.
+            Optionally filter to a specific team with ?teamId=.
+            Requires Reader.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Backlog.Controllers.BacklogController.Add(System.Guid,BoardSync.Api.Modules.Backlog.DTOs.AddToBacklogRequest,System.Threading.CancellationToken)">
+            <summary>
+            Add a work item to the project backlog.
+            Idempotent — returns the existing entry if the item is already tracked.
+            Requires TeamMember.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Backlog.Controllers.BacklogController.Remove(System.Guid,System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Remove a work item from the project backlog.
+            Requires TeamMember.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Backlog.Controllers.BacklogController.Reorder(System.Guid,BoardSync.Api.Modules.Backlog.DTOs.ReorderBacklogRequest,System.Threading.CancellationToken)">
+            <summary>
+            Reorder the backlog by providing the desired work item ID sequence.
+            Items not included are pushed to the bottom in their original relative order.
+            Requires TeamMember.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Backlog.Controllers.BacklogController.MoveToSprint(System.Guid,BoardSync.Api.Modules.Backlog.DTOs.MoveToSprintRequest,System.Threading.CancellationToken)">
+            <summary>
+            Move one or more backlog items into a sprint.
+            Creates SprintWorkItem entries so the sprint board reflects the change immediately.
+            Requires TeamMember.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Backlog.Controllers.BacklogController.ReturnToBacklog(System.Guid,BoardSync.Api.Modules.Backlog.DTOs.ReturnToBacklogRequest,System.Threading.CancellationToken)">
+            <summary>
+            Return sprint items back to the unscheduled backlog.
+            Removes SprintWorkItem rows and clears the sprint assignment.
+            Requires TeamMember.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Backlog.DTOs.AddToBacklogRequest">
+            <summary>Add a work item to the project backlog.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.Backlog.DTOs.AddToBacklogRequest.TeamId">
+            <summary>Optional team scope for this backlog entry.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.Backlog.DTOs.AddToBacklogRequest.Rank">
+            <summary>Desired rank position (0-based). Omit to append at the bottom.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Backlog.DTOs.ReorderBacklogRequest">
+            <summary>Reorder backlog items by providing the new rank-ordered list of work item IDs.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.Backlog.DTOs.ReorderBacklogRequest.WorkItemIds">
+            <summary>Work item IDs in desired rank order (index 0 = highest priority).</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Backlog.DTOs.MoveToSprintRequest">
+            <summary>Move one or more backlog items into a sprint.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Backlog.DTOs.ReturnToBacklogRequest">
+            <summary>Return one or more sprint items back to the backlog.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Backlog.DTOs.BacklogItemResponse">
+            <summary>A single item in the backlog list view.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Backlog.DTOs.BacklogItemResponse.#ctor(System.Guid,System.Guid,System.Guid,System.Nullable{System.Guid},System.Nullable{System.Guid},System.Int32,System.String,BoardSync.Api.Modules.WorkItems.Models.WorkItemType,BoardSync.Api.Modules.WorkItems.Models.WorkItemState,BoardSync.Api.Modules.WorkItems.Models.WorkItemPriority,System.Nullable{System.Guid},System.Nullable{System.Int32},System.Collections.Generic.IReadOnlyList{System.String},System.Int32,System.DateTime)">
+            <summary>A single item in the backlog list view.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Backlog.DTOs.BacklogBulkOperationResponse">
+            <summary>Result of a move-to-sprint or return-to-backlog bulk operation.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Backlog.DTOs.BacklogBulkOperationResponse.#ctor(System.Int32,System.String)">
+            <summary>Result of a move-to-sprint or return-to-backlog bulk operation.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Backlog.Models.BacklogItem">
+            <summary>
+            Tracks the rank of a work item in a project's product backlog.
+            One row per work item — when an item is assigned to a sprint this row stays
+            so rank is preserved if the item is returned to the backlog later.
+            </summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.Backlog.Models.BacklogItem.TeamId">
+            <summary>
+            Optional team filter — null means the item appears in every team's backlog view
+            for this project. Set when the item is explicitly scoped to a team.
+            </summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.Backlog.Models.BacklogItem.Rank">
+            <summary>0-based display rank within the project backlog (lower = higher priority).</summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.Backlog.Models.BacklogItem.SprintId">
+            <summary>
+            When set the item has been pulled into a sprint and should be hidden from
+            the unscheduled backlog view.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Backlog.Services.IBacklogService.GetForProjectAsync(System.Guid,System.Nullable{System.Guid},BoardSync.Api.Shared.Kernel.PaginationQuery,System.Threading.CancellationToken)">
+            <summary>
+            Get the unscheduled product backlog for a project (items not assigned to any sprint),
+            ordered by rank ascending. Optionally filtered to a specific team.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Backlog.Services.IBacklogService.AddAsync(System.Guid,BoardSync.Api.Modules.Backlog.DTOs.AddToBacklogRequest,System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Ensure a work item has a backlog entry for this project.
+            Idempotent — returns the existing entry if one already exists.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Backlog.Services.IBacklogService.RemoveAsync(System.Guid,System.Guid,System.Threading.CancellationToken)">
+            <summary>Remove a work item from the backlog entirely.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Backlog.Services.IBacklogService.ReorderAsync(System.Guid,BoardSync.Api.Modules.Backlog.DTOs.ReorderBacklogRequest,System.Threading.CancellationToken)">
+            <summary>
+            Re-rank backlog items by accepting the desired work item ID order.
+            Any IDs not in the list keep their existing rank relative to each other
+            at the bottom.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Backlog.Services.IBacklogService.MoveToSprintAsync(System.Guid,BoardSync.Api.Modules.Backlog.DTOs.MoveToSprintRequest,System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Pull a set of backlog items into a sprint.
+            Also creates SprintWorkItem rows so the sprint service sees them immediately.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Backlog.Services.IBacklogService.ReturnToBacklogAsync(System.Guid,BoardSync.Api.Modules.Backlog.DTOs.ReturnToBacklogRequest,System.Threading.CancellationToken)">
+            <summary>
+            Return items from a sprint back to the unscheduled backlog.
+            Removes their SprintWorkItem rows and clears SprintId on the backlog entry.
+            </summary>
+        </member>
         <member name="T:BoardSync.Api.Modules.Notifications.Controllers.NotificationsController">
             <summary>
             The notification bell — recent work item changes across the caller's organizations.
@@ -1983,6 +2122,13 @@
         <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.Delete(System.Guid,System.Threading.CancellationToken)">
             <summary>Delete a Planning sprint with no work items. Requires ProjectAdmin.</summary>
         </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.Close(System.Guid,BoardSync.Api.Modules.Sprints.DTOs.CloseSprintRequest,System.Threading.CancellationToken)">
+            <summary>
+            Close an active sprint. Incomplete items (not Resolved or Closed) are either
+            returned to the project backlog or moved to a specified next sprint.
+            Requires ProjectAdmin.
+            </summary>
+        </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.GetWorkItems(System.Guid,BoardSync.Api.Shared.Kernel.PaginationQuery,System.Threading.CancellationToken)">
             <summary>List work items in a sprint ordered by position.</summary>
         </member>
@@ -2126,31 +2272,47 @@
         <member name="P:BoardSync.Api.Modules.Sprints.DTOs.AddSprintWorkItemRequest.Position">
             <summary>0-based position in the backlog. Omit to append at the end.</summary>
         </member>
-        <member name="T:BoardSync.Api.Modules.Sprints.DTOs.MoveSprintWorkItemRequest">
+        <member name="T:BoardSync.Api.Modules.Sprints.DTOs.ReorderSprintWorkItemsRequest">
             <summary>Reorder work items within a sprint backlog.</summary>
-            <summary>
-            Moves one backlog item to sit between two others.
-            </summary>
-            <remarks>
-            Prefer this over <see cref="T:BoardSync.Api.Modules.Sprints.DTOs.ReorderSprintWorkItemsRequest"/> for drag-and-drop. It names only
-            the card that moved and where it landed, so two people dragging different cards touch different
-            rows and cannot overwrite each other. Sending a whole ordering — which is what the older
-            endpoint takes — means submitting a view of the list computed before the other person's move
-            existed, and silently reverting it.
-            </remarks>
-        </member>
-        <member name="P:BoardSync.Api.Modules.Sprints.DTOs.MoveSprintWorkItemRequest.AfterWorkItemId">
-            <summary>
-            The item the moved card should sit *after*, or null when it moves to the top.
-            </summary>
-        </member>
-        <member name="P:BoardSync.Api.Modules.Sprints.DTOs.MoveSprintWorkItemRequest.BeforeWorkItemId">
-            <summary>
-            The item the moved card should sit *before*, or null when it moves to the end.
-            </summary>
         </member>
         <member name="P:BoardSync.Api.Modules.Sprints.DTOs.ReorderSprintWorkItemsRequest.WorkItemIds">
             <summary>Ordered list of WorkItem IDs representing the desired backlog order.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.DTOs.MoveSprintWorkItemRequest">
+            <summary>Move a single work item to a new position between two others (fractional ranking).</summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.Sprints.DTOs.MoveSprintWorkItemRequest.AfterWorkItemId">
+            <summary>Place the item immediately after this work item ID. Null = move to the top.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.Sprints.DTOs.MoveSprintWorkItemRequest.BeforeWorkItemId">
+            <summary>Place the item immediately before this work item ID. Null = move to the bottom.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.DTOs.CloseSprintRequest">
+            <summary>
+            Options for closing a sprint.
+            Incomplete items (not Resolved or Closed) will be handled according to
+            <see cref="P:BoardSync.Api.Modules.Sprints.DTOs.CloseSprintRequest.IncompleteItemsDestination"/>.
+            </summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.Sprints.DTOs.CloseSprintRequest.IncompleteItemsDestination">
+            <summary>
+            Where to send work items that are not yet Resolved or Closed.
+            Defaults to ReturnToBacklog.
+            </summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.Sprints.DTOs.CloseSprintRequest.NextSprintId">
+            <summary>
+            Required when <see cref="P:BoardSync.Api.Modules.Sprints.DTOs.CloseSprintRequest.IncompleteItemsDestination"/> is MoveToNextSprint.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.DTOs.IncompleteItemsDestination">
+            <summary>Where incomplete sprint items are sent on close-out.</summary>
+        </member>
+        <member name="F:BoardSync.Api.Modules.Sprints.DTOs.IncompleteItemsDestination.ReturnToBacklog">
+            <summary>Items are cleared from the sprint and returned to the project backlog.</summary>
+        </member>
+        <member name="F:BoardSync.Api.Modules.Sprints.DTOs.IncompleteItemsDestination.MoveToNextSprint">
+            <summary>Items are moved into the specified next sprint.</summary>
         </member>
         <member name="T:BoardSync.Api.Modules.Sprints.DTOs.SprintResponse">
             <summary>Full sprint detail including velocity metrics.</summary>
@@ -2191,6 +2353,12 @@
             <summary>
             Its new sort key. Ordering is by this ascending; treat the value as opaque and only compare it.
             </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.DTOs.CloseSprintResponse">
+            <summary>Summary returned after closing a sprint.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.DTOs.CloseSprintResponse.#ctor(BoardSync.Api.Modules.Sprints.DTOs.SprintResponse,System.Int32,System.Int32,BoardSync.Api.Modules.Sprints.DTOs.IncompleteItemsDestination,System.Nullable{System.Guid})">
+            <summary>Summary returned after closing a sprint.</summary>
         </member>
         <member name="T:BoardSync.Api.Modules.Sprints.Events.BoardChanged">
             <summary>
@@ -2548,25 +2716,11 @@
             </summary>
             <returns>The item's new rank, so the caller can confirm where it landed.</returns>
         </member>
-        <member name="M:BoardSync.Api.Modules.Sprints.Services.SprintService.RebalanceAsync(System.Guid,System.Threading.CancellationToken)">
+        <member name="M:BoardSync.Api.Modules.Sprints.Services.ISprintService.CloseAsync(System.Guid,BoardSync.Api.Modules.Sprints.DTOs.CloseSprintRequest,System.Guid,System.Threading.CancellationToken)">
             <summary>
-            Spreads the backlog back out over evenly spaced ranks, preserving current order.
+            Close an active sprint.
+            Marks it Completed and routes incomplete items to the backlog or a next sprint.
             </summary>
-        </member>
-        <member name="M:BoardSync.Api.Modules.Sprints.Services.SprintService.EnqueueAsync``1(BoardSync.Api.Modules.Sprints.Models.Sprint,System.Func{System.Guid,``0},System.Threading.CancellationToken)">
-            <summary>
-            Stages a sprint event. Still async because sprints hang off a team while activity is filed
-            by organization, so the team's owning organization has to be looked up first. If the team
-            has vanished there is nothing to file the event under and it is skipped rather than queued
-            half-formed.
-            </summary>
-            <remarks>
-            Call this <b>before</b> saving — it stages the outbox row on the same unit of work, which is
-            what makes the event and the sprint change commit together.
-            </remarks>
-        </member>
-        <member name="M:BoardSync.Api.Modules.Sprints.Services.SprintService.SprintName(BoardSync.Api.Modules.Sprints.Models.Sprint)">
-            <summary>Display name for a sprint — they are numbered per team, not named.</summary>
         </member>
         <member name="T:BoardSync.Api.Modules.WorkItems.Controllers.WorkItemsController">
             <summary>
@@ -2831,39 +2985,11 @@
             <see cref="T:BoardSync.Api.Modules.WorkItems.Repository.IWorkItemRepository"/>; project references go through <see cref="T:BoardSync.Api.Modules.OrgProject.Services.Interfaces.IProjectService"/>.
             </summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.WorkItems.Services.WorkItemService.TrackChange(System.Collections.Generic.List{System.ValueTuple{System.String,System.String,System.String}},BoardSync.Api.Modules.WorkItems.Models.WorkItem,System.Guid,System.String,System.String,System.String)">
-            <summary>
-            Records a field change in history and collects it into <paramref name="changes"/> for the
-            caller to publish once the save has committed. No-ops when the value did not actually move.
-            </summary>
-        </member>
-        <member name="M:BoardSync.Api.Modules.WorkItems.Services.WorkItemService.AddHistory(BoardSync.Api.Modules.WorkItems.Models.WorkItem,System.Guid,System.String,System.String,System.String)">
-            <summary>
-            Takes the work item rather than its id because the history row carries the project too —
-            see <see cref="P:BoardSync.Api.Modules.WorkItems.Models.WorkItemHistory.ProjectId"/> for why it is stored rather than joined.
-            </summary>
-        </member>
         <member name="M:BoardSync.Api.Modules.WorkItems.Services.WorkItemService.NormalizeTags(System.Collections.Generic.IEnumerable{System.String})">
             <summary>
             Trims, lower-cases and de-duplicates tag names, dropping blanks. Normalization must happen
             before de-duplication so that casing variants collapse to the single row the unique
             (WorkItemId, Name) index allows.
-            </summary>
-        </member>
-        <member name="M:BoardSync.Api.Modules.WorkItems.Services.WorkItemService.ApplyExpectedVersion(BoardSync.Api.Modules.WorkItems.Models.WorkItem,System.Nullable{System.Int64})">
-            <summary>
-            Tells EF to check the update against the version the <em>client</em> read, not the one this
-            request just loaded.
-            </summary>
-            <remarks>
-            Without this, EF compares against the value it fetched moments ago and the check passes
-            almost always — the interesting conflict is not load-to-save inside one request, it is the
-            edit that landed between the user opening the form and submitting it.
-            </remarks>
-        </member>
-        <member name="M:BoardSync.Api.Modules.WorkItems.Services.WorkItemService.SaveDetectingConflictAsync(System.Guid,System.Threading.CancellationToken)">
-            <summary>
-            Saves, turning a lost update into a conflict the caller can act on.
             </summary>
         </member>
         <member name="T:BoardSync.Api.Shared.Auth.Attributes.RequireAuthenticationAttribute">
@@ -3070,6 +3196,30 @@
         <member name="M:BoardSync.Api.Shared.Data.Migrations.ActivityLog.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
             <inheritdoc />
         </member>
+        <member name="T:BoardSync.Api.Shared.Data.Migrations.AddSprintsAndBoards">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.AddSprintsAndBoards.Up(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.AddSprintsAndBoards.Down(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.AddSprintsAndBoards.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="T:BoardSync.Api.Shared.Data.Migrations.AddSprintsAndBoardss">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.AddSprintsAndBoardss.Up(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.AddSprintsAndBoardss.Down(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.AddSprintsAndBoardss.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
+            <inheritdoc />
+        </member>
         <member name="T:BoardSync.Api.Shared.Data.Migrations.Phase0_HotPathIndexes">
             <inheritdoc />
         </member>
@@ -3116,6 +3266,18 @@
             <inheritdoc />
         </member>
         <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase2_FractionalRanks.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="T:BoardSync.Api.Shared.Data.Migrations.Phase4_Backlog">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase4_Backlog.Up(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase4_Backlog.Down(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase4_Backlog.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
             <inheritdoc />
         </member>
         <member name="T:BoardSync.Api.Shared.Kernel.BaseEntity">

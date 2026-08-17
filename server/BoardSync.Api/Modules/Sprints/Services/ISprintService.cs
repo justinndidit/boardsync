@@ -27,4 +27,10 @@ public interface ISprintService
         CancellationToken ct = default);
 
     Task ReorderWorkItemsAsync(Guid sprintId, ReorderSprintWorkItemsRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// Close an active sprint.
+    /// Marks it Completed and routes incomplete items to the backlog or a next sprint.
+    /// </summary>
+    Task<CloseSprintResponse> CloseAsync(Guid sprintId, CloseSprintRequest request, Guid closedBy, CancellationToken ct = default);
 }

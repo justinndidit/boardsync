@@ -148,6 +148,28 @@ public class SprintsController : ControllerBase
         return NoContent();
     }
 
+    /// <summary>
+    /// Close an active sprint. Incomplete items (not Resolved or Closed) are either
+    /// returned to the project backlog or moved to a specified next sprint.
+    /// Requires ProjectAdmin.
+    /// </summary>
+    [HttpPost("api/sprints/{sprintId:guid}/close")]
+    [ProducesResponseType(typeof(ApiResponse<CloseSprintResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<IActionResult> Close(
+        Guid sprintId,
+        [FromBody] CloseSprintRequest request,
+        CancellationToken ct)
+    {
+        var sprint = await _sprintService.GetByIdAsync(sprintId, ct);
+        await RequireTeamRoleAsync(sprint.TeamId, RoleType.ProjectAdmin, ct);
+        var result = await _sprintService.CloseAsync(sprintId, request, _currentUser.UserId, ct);
+        return Ok(new ApiResponse<CloseSprintResponse>(true,
+            $"Sprint closed. {result.CompletedItemCount} completed, {result.IncompleteItemCount} returned.", result));
+    }
+
     // ── Backlog ───────────────────────────────────────────────────────────────
 
     /// <summary>List work items in a sprint ordered by position.</summary>

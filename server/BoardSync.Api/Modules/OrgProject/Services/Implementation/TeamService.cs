@@ -81,7 +81,7 @@ public class TeamService : ITeamService
             _eventBus.Enqueue(new TeamCreated(team.Id, orgId, team.Name, createdBy));
             await _teamRepo.SaveChangesAsync(token);
 
-            await _rbac.AssignRoleAsync(createdBy, RoleType.TeamMember, RoleScope.Team, team.Id, createdBy, token);
+            await _rbac.AssignRoleAsync(createdBy, RoleType.ProjectAdmin, RoleScope.Team, team.Id, createdBy, token);
         }, ct);
 
         _logger.LogInformation("Team '{Name}' ({Id}) created in organization {OrganizationId} by {UserId}",

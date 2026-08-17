@@ -5,6 +5,7 @@ using BoardSync.Api.Modules.Activity;
 using BoardSync.Api.Modules.Notifications;
 using BoardSync.Api.Modules.Search.Repositories;
 using BoardSync.Api.Modules.Search.Services;
+using BoardSync.Api.Modules.Backlog.Services;
 using BoardSync.Api.Modules.OrgProject.Repositories.Implementations;
 using BoardSync.Api.Modules.OrgProject.Repositories.Interfaces;
 using BoardSync.Api.Modules.OrgProject.Services.Implementations;
@@ -226,6 +227,9 @@ builder.Services.AddScoped<IBoardService, BoardService>();
 
 // Activity Module — subscribes to the other modules' domain events
 builder.Services.AddActivityModule();
+
+// Backlog Module
+builder.Services.AddScoped<IBacklogService, BacklogService>();
 
 // Add HTTP Context Accessor
 builder.Services.AddHttpContextAccessor();

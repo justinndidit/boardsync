@@ -47,33 +47,40 @@ public class AddSprintWorkItemRequest
 }
 
 /// <summary>Reorder work items within a sprint backlog.</summary>
-/// <summary>
-/// Moves one backlog item to sit between two others.
-/// </summary>
-/// <remarks>
-/// Prefer this over <see cref="ReorderSprintWorkItemsRequest"/> for drag-and-drop. It names only
-/// the card that moved and where it landed, so two people dragging different cards touch different
-/// rows and cannot overwrite each other. Sending a whole ordering — which is what the older
-/// endpoint takes — means submitting a view of the list computed before the other person's move
-/// existed, and silently reverting it.
-/// </remarks>
-public class MoveSprintWorkItemRequest
-{
-    /// <summary>
-    /// The item the moved card should sit *after*, or null when it moves to the top.
-    /// </summary>
-    public Guid? AfterWorkItemId { get; init; }
-
-    /// <summary>
-    /// The item the moved card should sit *before*, or null when it moves to the end.
-    /// </summary>
-    public Guid? BeforeWorkItemId { get; init; }
-}
-
 public class ReorderSprintWorkItemsRequest
 {
     /// <summary>Ordered list of WorkItem IDs representing the desired backlog order.</summary>
     [Required]
     [MinLength(1)]
     public List<Guid> WorkItemIds { get; init; } = new();
+}
+
+/// <summary>Move a single work item to a new position between two others (fractional ranking).</summary>
+public class MoveSprintWorkItemRequest
+{
+    /// <summary>Place the item immediately after this work item ID. Null = move to the top.</summary>
+    public Guid? AfterWorkItemId { get; init; }
+
+    /// <summary>Place the item immediately before this work item ID. Null = move to the bottom.</summary>
+    public Guid? BeforeWorkItemId { get; init; }
+}
+
+/// <summary>
+/// Options for closing a sprint.
+/// Incomplete items (not Resolved or Closed) will be handled according to
+/// <see cref="IncompleteItemsDestination"/>.
+/// </summary>
+public class CloseSprintRequest
+{
+    /// <summary>
+    /// Where to send work items that are not yet Resolved or Closed.
+    /// Defaults to ReturnToBacklog.
+    /// </summary>
+    public IncompleteItemsDestination IncompleteItemsDestination { get; init; }
+        = IncompleteItemsDestination.ReturnToBacklog;
+
+    /// <summary>
+    /// Required when <see cref="IncompleteItemsDestination"/> is MoveToNextSprint.
+    /// </summary>
+    public Guid? NextSprintId { get; init; }
 }

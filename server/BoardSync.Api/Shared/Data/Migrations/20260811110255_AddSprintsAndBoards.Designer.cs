@@ -3,6 +3,7 @@ using System;
 using BoardSync.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace BoardSync.Api.Shared.Data.Migrations
 {
     [DbContext(typeof(BoardSyncDbContext))]
-    partial class BoardSyncDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260811110255_AddSprintsAndBoards")]
+    partial class AddSprintsAndBoards
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -50,9 +53,6 @@ namespace BoardSync.Api.Shared.Data.Migrations
                         .HasMaxLength(30)
                         .HasColumnType("character varying(30)");
 
-                    b.Property<Guid>("EventId")
-                        .HasColumnType("uuid");
-
                     b.Property<string>("FieldName")
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
@@ -88,9 +88,6 @@ namespace BoardSync.Api.Shared.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("EntityId");
-
-                    b.HasIndex("EventId")
-                        .IsUnique();
 
                     b.HasIndex("ProjectId");
 
@@ -406,7 +403,7 @@ namespace BoardSync.Api.Shared.Data.Migrations
 
                     b.ToTable("RoleAssignments", "iam", t =>
                         {
-                            t.HasCheckConstraint("CK_RoleAssignment_ExactlyOneScope", "(CASE WHEN \"OrganizationId\" IS NOT NULL THEN 1 ELSE 0 END +\n                CASE WHEN \"ProjectId\" IS NOT NULL THEN 1 ELSE 0 END +\n                CASE WHEN \"TeamId\" IS NOT NULL THEN 1 ELSE 0 END) = 1");
+                            t.HasCheckConstraint("CK_RoleAssignment_ExactlyOneScope", "(CASE WHEN \"OrganizationId\" IS NOT NULL THEN 1 ELSE 0 END +\r\n                CASE WHEN \"ProjectId\" IS NOT NULL THEN 1 ELSE 0 END +\r\n                CASE WHEN \"TeamId\" IS NOT NULL THEN 1 ELSE 0 END) = 1");
                         });
                 });
 
@@ -527,8 +524,6 @@ namespace BoardSync.Api.Shared.Data.Migrations
                     b.HasIndex("TeamId", "Number")
                         .IsUnique();
 
-                    b.HasIndex("TeamId", "Status");
-
                     b.ToTable("Sprints", "plan");
                 });
 
@@ -547,9 +542,6 @@ namespace BoardSync.Api.Shared.Data.Migrations
                     b.Property<int>("Position")
                         .HasColumnType("integer");
 
-                    b.Property<decimal>("Rank")
-                        .HasColumnType("numeric");
-
                     b.Property<Guid>("SprintId")
                         .HasColumnType("uuid");
 
@@ -562,10 +554,6 @@ namespace BoardSync.Api.Shared.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("WorkItemId");
-
-                    b.HasIndex("SprintId", "Position");
-
-                    b.HasIndex("SprintId", "Rank");
 
                     b.HasIndex("SprintId", "WorkItemId")
                         .IsUnique();
@@ -630,12 +618,6 @@ namespace BoardSync.Api.Shared.Data.Migrations
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<uint>("Version")
-                        .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("xid")
-                        .HasColumnName("xmin");
-
                     b.HasKey("Id");
 
                     b.HasIndex("AssigneeId");
@@ -651,8 +633,6 @@ namespace BoardSync.Api.Shared.Data.Migrations
                     b.HasIndex("TeamId");
 
                     b.HasIndex("Type");
-
-                    b.HasIndex("ProjectId", "IsActive", "State");
 
                     b.ToTable("WorkItems", "work");
                 });
@@ -723,9 +703,6 @@ namespace BoardSync.Api.Shared.Data.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)");
 
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uuid");
-
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -737,9 +714,6 @@ namespace BoardSync.Api.Shared.Data.Migrations
                     b.HasIndex("ChangedBy");
 
                     b.HasIndex("WorkItemId");
-
-                    b.HasIndex("ProjectId", "CreatedAt")
-                        .IsDescending(false, true);
 
                     b.ToTable("WorkItemHistory", "work");
                 });
@@ -964,59 +938,6 @@ namespace BoardSync.Api.Shared.Data.Migrations
                     b.HasIndex("PasswordResetToken");
 
                     b.ToTable("Users");
-                });
-
-            modelBuilder.Entity("BoardSync.Api.Shared.Kernel.Events.OutboxMessage", b =>
-                {
-                    b.Property<long>("Sequence")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Sequence"));
-
-                    b.Property<int>("Attempts")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime?>("DispatchedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("EventId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("EventType")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<string>("LastError")
-                        .HasMaxLength(2000)
-                        .HasColumnType("character varying(2000)");
-
-                    b.Property<DateTime>("OccurredAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Payload")
-                        .IsRequired()
-                        .HasColumnType("jsonb");
-
-                    b.PrimitiveCollection<string[]>("Topics")
-                        .IsRequired()
-                        .HasColumnType("text[]");
-
-                    b.HasKey("Sequence");
-
-                    b.HasIndex("EventId")
-                        .IsUnique();
-
-                    b.HasIndex("Sequence")
-                        .HasDatabaseName("IX_OutboxMessages_Undispatched")
-                        .HasFilter("\"DispatchedAt\" IS NULL");
-
-                    b.HasIndex("Topics");
-
-                    NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("Topics"), "gin");
-
-                    b.ToTable("OutboxMessages", "kernel");
                 });
 
             modelBuilder.Entity("BoardSync.Api.Modules.OrgProject.Domain.Models.OrganizationMembership", b =>
