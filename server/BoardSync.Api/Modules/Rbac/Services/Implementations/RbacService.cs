@@ -7,11 +7,16 @@ namespace BoardSync.Api.Modules.Rbac.Services.Implementations;
 public class RbacService : IRbacService
 {
     private readonly IRoleAssignmentRepository _repository;
+    private readonly IAccessResolver _resolver;
     private readonly ILogger<RbacService> _logger;
 
-    public RbacService(IRoleAssignmentRepository repository, ILogger<RbacService> logger)
+    public RbacService(
+        IRoleAssignmentRepository repository,
+        IAccessResolver resolver,
+        ILogger<RbacService> logger)
     {
         _repository = repository;
+        _resolver = resolver;
         _logger = logger;
     }
 
@@ -64,21 +69,57 @@ public class RbacService : IRbacService
         Guid scopeId,
         CancellationToken ct = default)
     {
-        var assignments = await _repository.GetRolesAtScopeAsync(userId, scope, scopeId, ct);
+        var effective = await GetEffectiveRoleAsync(userId, scope, scopeId, ct);
 
-        // A role satisfies the requirement if its numeric value is <= minimumRole (lower value =
-        // more privileged). The comparison MUST be resolved here and matched by identity — see
-        // IRoleAssignmentRepository.GetRolesAtScopeAsync for why it cannot happen in SQL.
-        var satisfyingRoles = RolesSatisfying(minimumRole);
+        return AccessEvaluator.Satisfies(effective, minimumRole);
+    }
 
-        if (assignments.Any(satisfyingRoles.Contains))
-            return true;
+    /// <summary>
+    /// The best role this user holds at one scope by any route, or null if they hold none.
+    /// </summary>
+    /// <remarks>
+    /// Loads the user's grants once, then locates the scope in the tree so
+    /// <see cref="AccessEvaluator"/> can apply inheritance to it. Organization questions skip the
+    /// lookup entirely — the organization is the root, so there is nothing above it to resolve.
+    /// </remarks>
+    private async Task<RoleType?> GetEffectiveRoleAsync(
+        Guid userId,
+        RoleScope scope,
+        Guid scopeId,
+        CancellationToken ct)
+    {
+        var snapshot = await _resolver.GetSnapshotAsync(userId, ct);
 
-        // OrgAdmin implicitly satisfies any project/team scope check within that org.
-        if (scope is RoleScope.Project or RoleScope.Team)
-            return await _repository.IsOrgAdminForScopeAsync(userId, scope, scopeId, ct);
+        switch (scope)
+        {
+            case RoleScope.Organization:
+                return AccessEvaluator.EffectiveOrganizationRole(snapshot, scopeId);
 
-        return false;
+            case RoleScope.Team:
+            {
+                // Skip locating the team when the user holds nothing anywhere that could inherit
+                // down to it. Saves a query on every check made by someone with no org grants.
+                var organizationId = snapshot.OrganizationRoles.Count == 0
+                    ? null
+                    : await _resolver.GetTeamOrganizationIdAsync(scopeId, ct);
+
+                return AccessEvaluator.EffectiveTeamRole(snapshot, scopeId, organizationId);
+            }
+
+            case RoleScope.Project:
+            {
+                // Same shortcut: without an organization or team grant, only a direct project
+                // assignment can grant anything, and that needs no lookup.
+                var location = snapshot.OrganizationRoles.Count == 0 && snapshot.TeamRoles.Count == 0
+                    ? null
+                    : await _resolver.GetProjectLocationAsync(scopeId, ct);
+
+                return AccessEvaluator.EffectiveProjectRole(snapshot, scopeId, location);
+            }
+
+            default:
+                throw new ArgumentOutOfRangeException(nameof(scope), scope, "Unhandled RoleScope value.");
+        }
     }
 
     public Task<IReadOnlyList<RoleAssignment>> GetUserRolesAsync(Guid userId, CancellationToken ct = default)
@@ -105,6 +146,21 @@ public class RbacService : IRbacService
 
         _logger.LogInformation("Removed {Count} role(s) from user {UserId} at {Scope}:{ScopeId}",
             assignments.Count, userId, scope, scopeId);
+    }
+
+    public async Task RemoveAllRolesInOrganizationAsync(
+        Guid userId,
+        Guid organizationId,
+        CancellationToken ct = default)
+    {
+        // Deletes in the database rather than through the change tracker, so there is nothing left
+        // to save afterwards.
+        var removed = await _repository.RemoveAllInOrganizationAsync(userId, organizationId, ct);
+
+        if (removed > 0)
+            _logger.LogInformation(
+                "Removed {Count} role(s) from user {UserId} across organization {OrgId} and everything in it",
+                removed, userId, organizationId);
     }
 
     // -------------------------------------------------------------------------
@@ -136,13 +192,4 @@ public class RbacService : IRbacService
 
         return assignment;
     }
-
-    /// <summary>
-    /// Every role at least as privileged as <paramref name="minimumRole"/>. Lower enum value means
-    /// more privileged, so this is every role whose value is &lt;= the requirement.
-    /// </summary>
-    private static RoleType[] RolesSatisfying(RoleType minimumRole) =>
-        Enum.GetValues<RoleType>()
-            .Where(role => (int)role <= (int)minimumRole)
-            .ToArray();
 }
