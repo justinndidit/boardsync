@@ -40,6 +40,16 @@ public interface ISprintRepository
     Task<bool> TeamExistsAsync(Guid teamId, CancellationToken ct = default);
 
     /// <summary>
+    /// The team a project is assigned to, or null if the project does not exist.
+    /// </summary>
+    /// <remarks>
+    /// Used to check that a work item belongs to the same team as the sprint it is being added to.
+    /// A sprint is team-scoped and a team can hold several projects, so items from any of the
+    /// team's projects are legitimate — items from anywhere else are not.
+    /// </remarks>
+    Task<Guid?> GetAssignedTeamForProjectAsync(Guid projectId, CancellationToken ct = default);
+
+    /// <summary>
     /// Whether the team already has a non-completed sprint covering any part of the given range.
     /// Completed sprints are excluded — history is allowed to overlap, only live plans are not.
     /// </summary>

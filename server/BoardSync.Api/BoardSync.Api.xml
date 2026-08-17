@@ -2321,8 +2321,17 @@
             so both are needed before any card can be loaded.
             </summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.IBoardRepository.GetCardsForSprintAsync(System.Guid,System.Threading.CancellationToken)">
+        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.IBoardRepository.GetCardsForSprintAsync(System.Guid,System.Guid,System.Threading.CancellationToken)">
             <summary>Every card in a sprint, with its tags, ready to be dealt into columns.</summary>
+            <summary>
+            The cards a project's board should show from one sprint.
+            </summary>
+            <remarks>
+            Filtered to <paramref name="projectId"/> because a sprint is team-scoped while a board is
+            project-scoped, and a team can hold several projects — so one sprint legitimately contains
+            items belonging to boards other than this one. Without the filter a project's board renders
+            its sibling projects' cards, and anything wrongly added to the sprint is rendered too.
+            </remarks>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.IBoardRepository.GetColumnAsync(System.Guid,System.Threading.CancellationToken)">
             <summary>Column by ID, tracked for mutation, or null.</summary>
@@ -2389,6 +2398,16 @@
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.TeamExistsAsync(System.Guid,System.Threading.CancellationToken)">
             <summary>Whether an active team with this ID exists.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.GetAssignedTeamForProjectAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            The team a project is assigned to, or null if the project does not exist.
+            </summary>
+            <remarks>
+            Used to check that a work item belongs to the same team as the sprint it is being added to.
+            A sprint is team-scoped and a team can hold several projects, so items from any of the
+            team's projects are legitimate — items from anywhere else are not.
+            </remarks>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.HasOverlappingSprintAsync(System.Guid,System.DateTime,System.DateTime,System.Threading.CancellationToken)">
             <summary>
