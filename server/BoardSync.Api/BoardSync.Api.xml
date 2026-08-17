@@ -624,131 +624,6 @@
             feed, or every organization the caller belongs to for the workspace feed.
             </summary>
         </member>
-        <member name="T:BoardSync.Api.Modules.Notifications.Controllers.NotificationsController">
-            <summary>
-            The notification bell — recent work item changes across the caller's organizations.
-            </summary>
-        </member>
-        <member name="M:BoardSync.Api.Modules.Notifications.Controllers.NotificationsController.GetMyNotifications(System.Int32,System.Threading.CancellationToken)">
-            <summary>
-            Recent notifications for the current user, newest first.
-            </summary>
-            <remarks>
-            Also served at the original <c>GET /api/workspace/notifications</c>. Both routes run this
-            same action and return the same body; the workspace path stays because clients were already
-            written against it.
-            </remarks>
-            <param name="limit">
-            Maximum entries, default 20, clamped to 50. Values outside the range are clamped rather
-            than rejected.
-            </param>
-            <param name="ct">Cancellation token.</param>
-        </member>
-        <member name="T:BoardSync.Api.Modules.Notifications.DTOs.NotificationResponse">
-            <summary>
-            One entry in the notification bell.
-            </summary>
-            <remarks>
-            Field-for-field identical to the shape this endpoint returned when it lived on
-            <c>WorkspaceController</c>, so moving it here changed nothing on the wire.
-            </remarks>
-        </member>
-        <member name="M:BoardSync.Api.Modules.Notifications.DTOs.NotificationResponse.#ctor(System.Guid,System.String,System.String,System.String,System.DateTime)">
-            <summary>
-            One entry in the notification bell.
-            </summary>
-            <remarks>
-            Field-for-field identical to the shape this endpoint returned when it lived on
-            <c>WorkspaceController</c>, so moving it here changed nothing on the wire.
-            </remarks>
-        </member>
-        <member name="T:BoardSync.Api.Modules.Notifications.DTOs.NotificationSource">
-            <summary>
-            A work item change as it comes out of the database, before it is worded for display.
-            </summary>
-        </member>
-        <member name="M:BoardSync.Api.Modules.Notifications.DTOs.NotificationSource.#ctor(System.Guid,System.String,System.String,System.String,System.String,System.DateTime)">
-            <summary>
-            A work item change as it comes out of the database, before it is worded for display.
-            </summary>
-        </member>
-        <member name="M:BoardSync.Api.Modules.Notifications.NotificationsModuleExtensions.AddNotificationsModule(Microsoft.Extensions.DependencyInjection.IServiceCollection)">
-            <summary>
-            Registers the notification bell's reader and its data access.
-            </summary>
-        </member>
-        <member name="T:BoardSync.Api.Modules.Notifications.Repositories.Implementations.NotificationRepository">
-            <inheritdoc />
-        </member>
-        <member name="T:BoardSync.Api.Modules.Notifications.Repositories.Interfaces.INotificationRepository">
-            <summary>
-            Data access for the notification bell.
-            </summary>
-            <remarks>
-            <para>
-            Notifications are not stored. They are derived on read from <c>work.WorkItemHistory</c>, which
-            means there is no per-user read state and no fan-out on write — and equally, no way to mark one
-            as read. That is a known limitation of the current design rather than an oversight; see the
-            module's service for what a stored notification would change.
-            </para>
-            <para>
-            The query filters on the history row's own <c>ProjectId</c> rather than reaching through the
-            work item, so one composite index serves both the filter and the ordering.
-            </para>
-            </remarks>
-        </member>
-        <member name="M:BoardSync.Api.Modules.Notifications.Repositories.Interfaces.INotificationRepository.GetOrganizationIdsForUserAsync(System.Guid,System.Threading.CancellationToken)">
-            <summary>Organizations the user is a member of.</summary>
-        </member>
-        <member name="M:BoardSync.Api.Modules.Notifications.Repositories.Interfaces.INotificationRepository.GetRecentForOrganizationsAsync(System.Collections.Generic.IReadOnlyCollection{System.Guid},System.Int32,System.Threading.CancellationToken)">
-            <summary>
-            The most recent work item changes across every active project in the given organizations,
-            newest first, capped at <paramref name="take"/>.
-            </summary>
-        </member>
-        <member name="T:BoardSync.Api.Modules.Notifications.Services.INotificationService">
-            <summary>
-            The notification bell: recent changes worth surfacing to one user.
-            </summary>
-            <remarks>
-            <para>
-            Derived from work item history on read, not stored. Two consequences worth knowing before
-            building on this: there is no read/unread state, and the feed only knows about work item field
-            changes — project, team, sprint and membership activity do not appear here even though they do
-            appear in the activity feed.
-            </para>
-            <para>
-            It also keeps its own <c>type</c> vocabulary (<c>WorkItemUpdated</c>, <c>WorkItem{State}</c>)
-            rather than the activity feed's <c>EntityType.Verb</c> form. Rebuilding this on the activity log
-            would fix all three at once and is the obvious next step for this module; until then, do not
-            share a rendering component between the bell and the feed.
-            </para>
-            </remarks>
-        </member>
-        <member name="M:BoardSync.Api.Modules.Notifications.Services.INotificationService.GetForUserAsync(System.Guid,System.Int32,System.Threading.CancellationToken)">
-            <summary>
-            Recent notifications for one user, newest first, across every organization they belong to.
-            </summary>
-            <param name="userId">The recipient.</param>
-            <param name="limit">Maximum entries to return. Clamped to a sane ceiling.</param>
-            <param name="ct">Cancellation token.</param>
-        </member>
-        <member name="T:BoardSync.Api.Modules.Notifications.Services.NotificationDefaults">
-            <summary>Bell sizing. The bell is a glance, not a page — it does not paginate.</summary>
-        </member>
-        <member name="T:BoardSync.Api.Modules.Notifications.Services.NotificationService">
-            <inheritdoc />
-        </member>
-        <member name="M:BoardSync.Api.Modules.Notifications.Services.NotificationService.Describe(BoardSync.Api.Modules.Notifications.DTOs.NotificationSource)">
-            <summary>
-            Words a raw history row for display.
-            </summary>
-            <remarks>
-            The <c>type</c> vocabulary is preserved exactly as it was before this module existed —
-            <c>WorkItem{NewState}</c> for a state change, <c>WorkItemUpdated</c> for everything else —
-            because clients already switch on those strings.
-            </remarks>
-        </member>
         <member name="T:BoardSync.Api.Modules.Backlog.Controllers.BacklogController">
              <summary>
              Product backlog management scoped to a project.
@@ -887,6 +762,131 @@
             Return items from a sprint back to the unscheduled backlog.
             Removes their SprintWorkItem rows and clears SprintId on the backlog entry.
             </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Notifications.Controllers.NotificationsController">
+            <summary>
+            The notification bell — recent work item changes across the caller's organizations.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Notifications.Controllers.NotificationsController.GetMyNotifications(System.Int32,System.Threading.CancellationToken)">
+            <summary>
+            Recent notifications for the current user, newest first.
+            </summary>
+            <remarks>
+            Also served at the original <c>GET /api/workspace/notifications</c>. Both routes run this
+            same action and return the same body; the workspace path stays because clients were already
+            written against it.
+            </remarks>
+            <param name="limit">
+            Maximum entries, default 20, clamped to 50. Values outside the range are clamped rather
+            than rejected.
+            </param>
+            <param name="ct">Cancellation token.</param>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Notifications.DTOs.NotificationResponse">
+            <summary>
+            One entry in the notification bell.
+            </summary>
+            <remarks>
+            Field-for-field identical to the shape this endpoint returned when it lived on
+            <c>WorkspaceController</c>, so moving it here changed nothing on the wire.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Notifications.DTOs.NotificationResponse.#ctor(System.Guid,System.String,System.String,System.String,System.DateTime)">
+            <summary>
+            One entry in the notification bell.
+            </summary>
+            <remarks>
+            Field-for-field identical to the shape this endpoint returned when it lived on
+            <c>WorkspaceController</c>, so moving it here changed nothing on the wire.
+            </remarks>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Notifications.DTOs.NotificationSource">
+            <summary>
+            A work item change as it comes out of the database, before it is worded for display.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Notifications.DTOs.NotificationSource.#ctor(System.Guid,System.String,System.String,System.String,System.String,System.DateTime)">
+            <summary>
+            A work item change as it comes out of the database, before it is worded for display.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Notifications.NotificationsModuleExtensions.AddNotificationsModule(Microsoft.Extensions.DependencyInjection.IServiceCollection)">
+            <summary>
+            Registers the notification bell's reader and its data access.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Notifications.Repositories.Implementations.NotificationRepository">
+            <inheritdoc />
+        </member>
+        <member name="T:BoardSync.Api.Modules.Notifications.Repositories.Interfaces.INotificationRepository">
+            <summary>
+            Data access for the notification bell.
+            </summary>
+            <remarks>
+            <para>
+            Notifications are not stored. They are derived on read from <c>work.WorkItemHistory</c>, which
+            means there is no per-user read state and no fan-out on write — and equally, no way to mark one
+            as read. That is a known limitation of the current design rather than an oversight; see the
+            module's service for what a stored notification would change.
+            </para>
+            <para>
+            The query filters on the history row's own <c>ProjectId</c> rather than reaching through the
+            work item, so one composite index serves both the filter and the ordering.
+            </para>
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Notifications.Repositories.Interfaces.INotificationRepository.GetOrganizationIdsForUserAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Organizations the user is a member of.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Notifications.Repositories.Interfaces.INotificationRepository.GetRecentForOrganizationsAsync(System.Collections.Generic.IReadOnlyCollection{System.Guid},System.Int32,System.Threading.CancellationToken)">
+            <summary>
+            The most recent work item changes across every active project in the given organizations,
+            newest first, capped at <paramref name="take"/>.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Notifications.Services.INotificationService">
+            <summary>
+            The notification bell: recent changes worth surfacing to one user.
+            </summary>
+            <remarks>
+            <para>
+            Derived from work item history on read, not stored. Two consequences worth knowing before
+            building on this: there is no read/unread state, and the feed only knows about work item field
+            changes — project, team, sprint and membership activity do not appear here even though they do
+            appear in the activity feed.
+            </para>
+            <para>
+            It also keeps its own <c>type</c> vocabulary (<c>WorkItemUpdated</c>, <c>WorkItem{State}</c>)
+            rather than the activity feed's <c>EntityType.Verb</c> form. Rebuilding this on the activity log
+            would fix all three at once and is the obvious next step for this module; until then, do not
+            share a rendering component between the bell and the feed.
+            </para>
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Notifications.Services.INotificationService.GetForUserAsync(System.Guid,System.Int32,System.Threading.CancellationToken)">
+            <summary>
+            Recent notifications for one user, newest first, across every organization they belong to.
+            </summary>
+            <param name="userId">The recipient.</param>
+            <param name="limit">Maximum entries to return. Clamped to a sane ceiling.</param>
+            <param name="ct">Cancellation token.</param>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Notifications.Services.NotificationDefaults">
+            <summary>Bell sizing. The bell is a glance, not a page — it does not paginate.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Notifications.Services.NotificationService">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Modules.Notifications.Services.NotificationService.Describe(BoardSync.Api.Modules.Notifications.DTOs.NotificationSource)">
+            <summary>
+            Words a raw history row for display.
+            </summary>
+            <remarks>
+            The <c>type</c> vocabulary is preserved exactly as it was before this module existed —
+            <c>WorkItem{NewState}</c> for a state change, <c>WorkItemUpdated</c> for everything else —
+            because clients already switch on those strings.
+            </remarks>
         </member>
         <member name="T:BoardSync.Api.Modules.OrgProject.Controllers.OrganizationsController">
             <summary>
@@ -1925,31 +1925,20 @@
         <member name="P:BoardSync.Api.Modules.Sprints.DTOs.AddSprintWorkItemRequest.Position">
             <summary>0-based position in the backlog. Omit to append at the end.</summary>
         </member>
-        <member name="T:BoardSync.Api.Modules.Sprints.DTOs.MoveSprintWorkItemRequest">
+        <member name="T:BoardSync.Api.Modules.Sprints.DTOs.ReorderSprintWorkItemsRequest">
             <summary>Reorder work items within a sprint backlog.</summary>
-            <summary>
-            Moves one backlog item to sit between two others.
-            </summary>
-            <remarks>
-            Prefer this over <see cref="T:BoardSync.Api.Modules.Sprints.DTOs.ReorderSprintWorkItemsRequest"/> for drag-and-drop. It names only
-            the card that moved and where it landed, so two people dragging different cards touch different
-            rows and cannot overwrite each other. Sending a whole ordering — which is what the older
-            endpoint takes — means submitting a view of the list computed before the other person's move
-            existed, and silently reverting it.
-            </remarks>
-        </member>
-        <member name="P:BoardSync.Api.Modules.Sprints.DTOs.MoveSprintWorkItemRequest.AfterWorkItemId">
-            <summary>
-            The item the moved card should sit *after*, or null when it moves to the top.
-            </summary>
-        </member>
-        <member name="P:BoardSync.Api.Modules.Sprints.DTOs.MoveSprintWorkItemRequest.BeforeWorkItemId">
-            <summary>
-            The item the moved card should sit *before*, or null when it moves to the end.
-            </summary>
         </member>
         <member name="P:BoardSync.Api.Modules.Sprints.DTOs.ReorderSprintWorkItemsRequest.WorkItemIds">
             <summary>Ordered list of WorkItem IDs representing the desired backlog order.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.DTOs.MoveSprintWorkItemRequest">
+            <summary>Move a single work item to a new position between two others (fractional ranking).</summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.Sprints.DTOs.MoveSprintWorkItemRequest.AfterWorkItemId">
+            <summary>Place the item immediately after this work item ID. Null = move to the top.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Modules.Sprints.DTOs.MoveSprintWorkItemRequest.BeforeWorkItemId">
+            <summary>Place the item immediately before this work item ID. Null = move to the bottom.</summary>
         </member>
         <member name="T:BoardSync.Api.Modules.Sprints.DTOs.CloseSprintRequest">
             <summary>
@@ -2345,13 +2334,6 @@
             <summary>Get (or auto-create with default columns) the board for a project.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Services.IBoardService.GetProjectIdForColumnAsync(System.Guid,System.Threading.CancellationToken)">
-        <member name="M:BoardSync.Api.Modules.Sprints.Services.ISprintService.CloseAsync(System.Guid,BoardSync.Api.Modules.Sprints.DTOs.CloseSprintRequest,System.Guid,System.Threading.CancellationToken)">
-            <summary>
-            Close an active sprint.
-            Marks it Completed and routes incomplete items to the backlog or a next sprint.
-            </summary>
-        </member>
-        <member name="M:BoardSync.Api.Modules.Sprints.Services.SprintService.PublishAsync``1(BoardSync.Api.Modules.Sprints.Models.Sprint,System.Func{System.Guid,``0},System.Threading.CancellationToken)">
             <summary>
             Project owning a column, resolved column → board → project.
             </summary>
@@ -2368,25 +2350,11 @@
             </summary>
             <returns>The item's new rank, so the caller can confirm where it landed.</returns>
         </member>
-        <member name="M:BoardSync.Api.Modules.Sprints.Services.SprintService.RebalanceAsync(System.Guid,System.Threading.CancellationToken)">
+        <member name="M:BoardSync.Api.Modules.Sprints.Services.ISprintService.CloseAsync(System.Guid,BoardSync.Api.Modules.Sprints.DTOs.CloseSprintRequest,System.Guid,System.Threading.CancellationToken)">
             <summary>
-            Spreads the backlog back out over evenly spaced ranks, preserving current order.
+            Close an active sprint.
+            Marks it Completed and routes incomplete items to the backlog or a next sprint.
             </summary>
-        </member>
-        <member name="M:BoardSync.Api.Modules.Sprints.Services.SprintService.EnqueueAsync``1(BoardSync.Api.Modules.Sprints.Models.Sprint,System.Func{System.Guid,``0},System.Threading.CancellationToken)">
-            <summary>
-            Stages a sprint event. Still async because sprints hang off a team while activity is filed
-            by organization, so the team's owning organization has to be looked up first. If the team
-            has vanished there is nothing to file the event under and it is skipped rather than queued
-            half-formed.
-            </summary>
-            <remarks>
-            Call this <b>before</b> saving — it stages the outbox row on the same unit of work, which is
-            what makes the event and the sprint change commit together.
-            </remarks>
-        </member>
-        <member name="M:BoardSync.Api.Modules.Sprints.Services.SprintService.SprintName(BoardSync.Api.Modules.Sprints.Models.Sprint)">
-            <summary>Display name for a sprint — they are numbered per team, not named.</summary>
         </member>
         <member name="T:BoardSync.Api.Modules.WorkItems.Controllers.WorkItemsController">
             <summary>
@@ -2651,39 +2619,11 @@
             <see cref="T:BoardSync.Api.Modules.WorkItems.Repository.IWorkItemRepository"/>; project references go through <see cref="T:BoardSync.Api.Modules.OrgProject.Services.Interfaces.IProjectService"/>.
             </summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.WorkItems.Services.WorkItemService.TrackChange(System.Collections.Generic.List{System.ValueTuple{System.String,System.String,System.String}},BoardSync.Api.Modules.WorkItems.Models.WorkItem,System.Guid,System.String,System.String,System.String)">
-            <summary>
-            Records a field change in history and collects it into <paramref name="changes"/> for the
-            caller to publish once the save has committed. No-ops when the value did not actually move.
-            </summary>
-        </member>
-        <member name="M:BoardSync.Api.Modules.WorkItems.Services.WorkItemService.AddHistory(BoardSync.Api.Modules.WorkItems.Models.WorkItem,System.Guid,System.String,System.String,System.String)">
-            <summary>
-            Takes the work item rather than its id because the history row carries the project too —
-            see <see cref="P:BoardSync.Api.Modules.WorkItems.Models.WorkItemHistory.ProjectId"/> for why it is stored rather than joined.
-            </summary>
-        </member>
         <member name="M:BoardSync.Api.Modules.WorkItems.Services.WorkItemService.NormalizeTags(System.Collections.Generic.IEnumerable{System.String})">
             <summary>
             Trims, lower-cases and de-duplicates tag names, dropping blanks. Normalization must happen
             before de-duplication so that casing variants collapse to the single row the unique
             (WorkItemId, Name) index allows.
-            </summary>
-        </member>
-        <member name="M:BoardSync.Api.Modules.WorkItems.Services.WorkItemService.ApplyExpectedVersion(BoardSync.Api.Modules.WorkItems.Models.WorkItem,System.Nullable{System.Int64})">
-            <summary>
-            Tells EF to check the update against the version the <em>client</em> read, not the one this
-            request just loaded.
-            </summary>
-            <remarks>
-            Without this, EF compares against the value it fetched moments ago and the check passes
-            almost always — the interesting conflict is not load-to-save inside one request, it is the
-            edit that landed between the user opening the form and submitting it.
-            </remarks>
-        </member>
-        <member name="M:BoardSync.Api.Modules.WorkItems.Services.WorkItemService.SaveDetectingConflictAsync(System.Guid,System.Threading.CancellationToken)">
-            <summary>
-            Saves, turning a lost update into a conflict the caller can act on.
             </summary>
         </member>
         <member name="T:BoardSync.Api.Shared.Auth.Attributes.RequireAuthenticationAttribute">
@@ -2890,6 +2830,30 @@
         <member name="M:BoardSync.Api.Shared.Data.Migrations.ActivityLog.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
             <inheritdoc />
         </member>
+        <member name="T:BoardSync.Api.Shared.Data.Migrations.AddSprintsAndBoards">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.AddSprintsAndBoards.Up(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.AddSprintsAndBoards.Down(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.AddSprintsAndBoards.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="T:BoardSync.Api.Shared.Data.Migrations.AddSprintsAndBoardss">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.AddSprintsAndBoardss.Up(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.AddSprintsAndBoardss.Down(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.AddSprintsAndBoardss.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
+            <inheritdoc />
+        </member>
         <member name="T:BoardSync.Api.Shared.Data.Migrations.Phase0_HotPathIndexes">
             <inheritdoc />
         </member>
@@ -2938,28 +2902,16 @@
         <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase2_FractionalRanks.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
             <inheritdoc />
         </member>
-        <member name="T:BoardSync.Api.Shared.Data.Migrations.AddSprintsAndBoards">
+        <member name="T:BoardSync.Api.Shared.Data.Migrations.Phase4_Backlog">
             <inheritdoc />
         </member>
-        <member name="M:BoardSync.Api.Shared.Data.Migrations.AddSprintsAndBoards.Up(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase4_Backlog.Up(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
             <inheritdoc />
         </member>
-        <member name="M:BoardSync.Api.Shared.Data.Migrations.AddSprintsAndBoards.Down(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase4_Backlog.Down(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
             <inheritdoc />
         </member>
-        <member name="M:BoardSync.Api.Shared.Data.Migrations.AddSprintsAndBoards.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
-            <inheritdoc />
-        </member>
-        <member name="T:BoardSync.Api.Shared.Data.Migrations.AddSprintsAndBoardss">
-            <inheritdoc />
-        </member>
-        <member name="M:BoardSync.Api.Shared.Data.Migrations.AddSprintsAndBoardss.Up(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
-            <inheritdoc />
-        </member>
-        <member name="M:BoardSync.Api.Shared.Data.Migrations.AddSprintsAndBoardss.Down(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
-            <inheritdoc />
-        </member>
-        <member name="M:BoardSync.Api.Shared.Data.Migrations.AddSprintsAndBoardss.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase4_Backlog.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
             <inheritdoc />
         </member>
         <member name="T:BoardSync.Api.Shared.Kernel.BaseEntity">

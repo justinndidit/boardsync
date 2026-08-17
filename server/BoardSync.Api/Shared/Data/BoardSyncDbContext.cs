@@ -43,6 +43,9 @@ public class BoardSyncDbContext : DbContext
     public DbSet<Board> Boards { get; set; } = null!;
     public DbSet<BoardColumn> BoardColumns { get; set; } = null!;
 
+    // ---- Backlog module ----
+    public DbSet<BacklogItem> BacklogItems { get; set; } = null!;
+
     // ---- Activity module ----
     public DbSet<ActivityLog> ActivityLogs { get; set; } = null!;
 

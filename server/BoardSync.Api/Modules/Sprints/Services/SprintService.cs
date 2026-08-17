@@ -63,8 +63,8 @@ public class SprintService : ISprintService
             TeamId    = teamId,
             Number    = await _repository.GetNextNumberAsync(teamId, ct),
             Goal      = request.Goal?.Trim(),
-            StartDate = request.StartDate,
-            EndDate   = request.EndDate,
+            StartDate = DateTime.SpecifyKind(request.StartDate.Date, DateTimeKind.Utc),
+            EndDate   = DateTime.SpecifyKind(request.EndDate.Date, DateTimeKind.Utc),
             Status    = SprintStatus.Planning,
             CreatedBy = createdBy
         };
@@ -123,19 +123,21 @@ public class SprintService : ISprintService
         if (request.EndDate <= request.StartDate)
             throw new BusinessRuleException("End date must be after start date.");
 
-        var changes  = new List<(string Field, string? Old, string? New)>();
-        var newGoal  = request.Goal?.Trim();
+        var changes      = new List<(string Field, string? Old, string? New)>();
+        var newGoal      = request.Goal?.Trim();
+        var newStartDate = DateTime.SpecifyKind(request.StartDate.Date, DateTimeKind.Utc);
+        var newEndDate   = DateTime.SpecifyKind(request.EndDate.Date, DateTimeKind.Utc);
 
         if (sprint.Goal      != newGoal)
             changes.Add(("Goal",      sprint.Goal,                    newGoal));
-        if (sprint.StartDate != request.StartDate)
-            changes.Add(("StartDate", sprint.StartDate.ToString("u"), request.StartDate.ToString("u")));
-        if (sprint.EndDate   != request.EndDate)
-            changes.Add(("EndDate",   sprint.EndDate.ToString("u"),   request.EndDate.ToString("u")));
+        if (sprint.StartDate != newStartDate)
+            changes.Add(("StartDate", sprint.StartDate.ToString("u"), newStartDate.ToString("u")));
+        if (sprint.EndDate   != newEndDate)
+            changes.Add(("EndDate",   sprint.EndDate.ToString("u"),   newEndDate.ToString("u")));
 
         sprint.Goal      = newGoal;
-        sprint.StartDate = request.StartDate;
-        sprint.EndDate   = request.EndDate;
+        sprint.StartDate = newStartDate;
+        sprint.EndDate   = newEndDate;
         sprint.UpdatedAt = DateTime.UtcNow;
 
         foreach (var (field, oldValue, newValue) in changes)
