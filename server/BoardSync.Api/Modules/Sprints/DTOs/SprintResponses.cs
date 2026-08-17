@@ -16,7 +16,7 @@ public enum IncompleteItemsDestination
 /// <summary>Full sprint detail including velocity metrics.</summary>
 public record SprintResponse(
     Guid Id,
-    Guid TeamId,
+    Guid ProjectId,
     int Number,
     string? Goal,
     DateTime StartDate,

@@ -44,24 +44,24 @@ public class SprintService : ISprintService
     // ── CRUD ──────────────────────────────────────────────────────────────────
 
     public async Task<SprintResponse> CreateAsync(
-        Guid teamId,
+        Guid projectId,
         CreateSprintRequest request,
         Guid createdBy,
         CancellationToken ct = default)
     {
-        if (!await _repository.TeamExistsAsync(teamId, ct))
-            throw new NotFoundException("Team", teamId);
+        if (!await _repository.ProjectExistsAsync(projectId, ct))
+            throw new NotFoundException("Team", projectId);
 
         if (request.EndDate <= request.StartDate)
             throw new BusinessRuleException("End date must be after start date.");
 
-        if (await _repository.HasOverlappingSprintAsync(teamId, request.StartDate, request.EndDate, ct))
+        if (await _repository.HasOverlappingSprintAsync(projectId, request.StartDate, request.EndDate, ct))
             throw new ConflictException("Sprint dates overlap with an existing sprint for this team.");
 
         var sprint = new Sprint
         {
-            TeamId    = teamId,
-            Number    = await _repository.GetNextNumberAsync(teamId, ct),
+            ProjectId    = projectId,
+            Number    = await _repository.GetNextNumberAsync(projectId, ct),
             Goal      = request.Goal?.Trim(),
             StartDate = DateTime.SpecifyKind(request.StartDate.Date, DateTimeKind.Utc),
             EndDate   = DateTime.SpecifyKind(request.EndDate.Date, DateTimeKind.Utc),
@@ -72,12 +72,12 @@ public class SprintService : ISprintService
         _repository.Add(sprint);
 
         await EnqueueAsync(sprint, orgId => new SprintCreated(
-            sprint.Id, sprint.TeamId, orgId, SprintName(sprint), createdBy), ct);
+            sprint.Id, sprint.ProjectId, orgId, SprintName(sprint), createdBy), ct);
 
         await _repository.SaveChangesAsync(ct);
 
-        _logger.LogInformation("Sprint {Number} created for team {TeamId} by {UserId}",
-            sprint.Number, teamId, createdBy);
+        _logger.LogInformation("Sprint {Number} created for team {projectId} by {UserId}",
+            sprint.Number, projectId, createdBy);
 
         return await BuildResponseAsync(sprint.Id, ct);
     }
@@ -90,22 +90,22 @@ public class SprintService : ISprintService
         return await BuildResponseAsync(sprintId, ct);
     }
 
-    public async Task<PagedResult<SprintSummaryResponse>> GetForTeamAsync(
-        Guid teamId,
+    public async Task<PagedResult<SprintSummaryResponse>> GetForProjectAsync(
+        Guid projectId,
         PaginationQuery pagination,
         CancellationToken ct = default)
     {
-        var (items, total) = await _repository.GetForTeamAsync(
-            teamId, pagination.Skip, pagination.PageSize, ct);
+        var (items, total) = await _repository.GetForProjectAsync(
+            projectId, pagination.Skip, pagination.PageSize, ct);
 
         return new PagedResult<SprintSummaryResponse>(items, total, pagination.Page, pagination.PageSize);
     }
 
-    public async Task<SprintResponse?> GetActiveForTeamAsync(
-        Guid teamId,
+    public async Task<SprintResponse?> GetActiveForProjectAsync(
+        Guid projectId,
         CancellationToken ct = default)
     {
-        var sprint = await _repository.GetActiveForTeamAsync(teamId, ct);
+        var sprint = await _repository.GetActiveForProjectAsync(projectId, ct);
         return sprint is null ? null : await BuildResponseAsync(sprint.Id, ct);
     }
 
@@ -143,7 +143,7 @@ public class SprintService : ISprintService
         foreach (var (field, oldValue, newValue) in changes)
         {
             await EnqueueAsync(sprint, orgId => new SprintUpdated(
-                sprint.Id, sprint.TeamId, orgId, SprintName(sprint),
+                sprint.Id, sprint.ProjectId, orgId, SprintName(sprint),
                 field, oldValue, newValue, updatedBy), ct);
         }
 
@@ -162,7 +162,7 @@ public class SprintService : ISprintService
         ValidateTransition(sprint.Status, newStatus);
 
         if (newStatus == SprintStatus.Active
-            && await _repository.HasAnotherActiveSprintAsync(sprint.TeamId, sprintId, ct))
+            && await _repository.HasAnotherActiveSprintAsync(sprint.ProjectId, sprintId, ct))
         {
             throw new ConflictException(
                 "Another sprint is already active for this team. Complete it before starting a new one.");
@@ -173,7 +173,7 @@ public class SprintService : ISprintService
         sprint.UpdatedAt = DateTime.UtcNow;
 
         await EnqueueAsync(sprint, orgId => new SprintStatusChanged(
-            sprint.Id, sprint.TeamId, orgId, SprintName(sprint),
+            sprint.Id, sprint.ProjectId, orgId, SprintName(sprint),
             oldStatus, newStatus, updatedBy), ct);
 
         await _repository.SaveChangesAsync(ct);
@@ -200,7 +200,7 @@ public class SprintService : ISprintService
         _repository.Remove(sprint);
 
         await EnqueueAsync(sprint, orgId => new SprintDeleted(
-            sprint.Id, sprint.TeamId, orgId, SprintName(sprint), deletedBy), ct);
+            sprint.Id, sprint.ProjectId, orgId, SprintName(sprint), deletedBy), ct);
 
         await _repository.SaveChangesAsync(ct);
 
@@ -209,62 +209,79 @@ public class SprintService : ISprintService
 
     // ── Backlog ───────────────────────────────────────────────────────────────
 
-    public async Task<SprintWorkItemResponse> AddWorkItemAsync(
-        Guid sprintId,
-        AddSprintWorkItemRequest request,
-        Guid addedBy,
-        CancellationToken ct = default)
+  public async Task<SprintWorkItemResponse> AddWorkItemAsync(
+    Guid sprintId,
+    AddSprintWorkItemRequest request,
+    Guid addedBy,
+    CancellationToken ct = default)
+{
+    var sprint = await GetOrThrowAsync(sprintId, ct);
+
+    if (sprint.Status == SprintStatus.Completed)
+        throw new BusinessRuleException(
+            "Cannot add work items to a completed sprint.");
+
+    var workItem = await _workItems.GetActiveAsync(
+        request.WorkItemId, ct)
+        ?? throw new NotFoundException(
+            "WorkItem", request.WorkItemId);
+
+    // Work item must belong to the same project as the sprint.
+    if (workItem.ProjectId != sprint.ProjectId)
+        throw new NotFoundException(
+            "WorkItem", request.WorkItemId);
+
+    // Prevent duplicate links.
+    if (await _repository.BacklogContainsAsync(
+            sprintId,
+            request.WorkItemId,
+            ct))
     {
-        var sprint = await GetOrThrowAsync(sprintId, ct);
-
-        if (sprint.Status == SprintStatus.Completed)
-            throw new BusinessRuleException("Cannot add work items to a completed sprint.");
-
-        var workItem = await _workItems.GetActiveAsync(request.WorkItemId, ct)
-            ?? throw new NotFoundException("WorkItem", request.WorkItemId);
-
-        // The caller was authorized against the *sprint's* team; nothing so far has authorized the
-        // *work item*. Without this check any team member could name any work item id in the system
-        // — including one in another organization — and read its title, assignee and points back
-        // off their own backlog and board. The sprint's team is the boundary: a team can hold
-        // several projects and one sprint spans all of them, so a sibling project is fine and
-        // anything outside the team is not.
-        //
-        // Reported as not-found rather than forbidden on purpose. The caller cannot see this work
-        // item, and answering "forbidden" would confirm the id names something real.
-        var owningTeamId = await _repository.GetAssignedTeamForProjectAsync(workItem.ProjectId, ct);
-
-        if (owningTeamId != sprint.TeamId)
-            throw new NotFoundException("WorkItem", request.WorkItemId);
-
-        if (await _repository.BacklogContainsAsync(sprintId, request.WorkItemId, ct))
-            throw new ConflictException("Work item is already in this sprint.");
-
-        var position = request.Position ?? await _repository.GetNextPositionAsync(sprintId, ct);
-        var maxRank  = await _repository.GetMaxRankAsync(sprintId, ct);
-
-        var entry = new SprintWorkItem
-        {
-            SprintId   = sprintId,
-            WorkItemId = request.WorkItemId,
-            Position   = position,
-            Rank       = Ranking.Between(maxRank, null),
-            CreatedBy  = addedBy
-        };
-
-        _repository.AddBacklogEntry(entry);
-
-        await EnqueueAsync(sprint, orgId => new SprintWorkItemAdded(
-            sprint.Id, sprint.TeamId, orgId, SprintName(sprint),
-            workItem.Id, workItem.Title, addedBy), ct);
-
-        await _repository.SaveChangesAsync(ct);
-
-        return new SprintWorkItemResponse(
-            workItem.Id, workItem.Title, workItem.Type,
-            workItem.State, workItem.Priority,
-            workItem.AssigneeId, workItem.StoryPoints, position);
+        throw new ConflictException(
+            "Work item is already in this sprint.");
     }
+
+    var position = request.Position
+        ?? await _repository.GetNextPositionAsync(sprintId, ct);
+
+    var maxRank = await _repository.GetMaxRankAsync(sprintId, ct);
+
+    var entry = new SprintWorkItem
+    {
+        SprintId = sprintId,
+        WorkItemId = request.WorkItemId,
+        Position = position,
+        Rank = Ranking.Between(maxRank, null),
+        CreatedBy = addedBy
+    };
+
+    _repository.AddBacklogEntry(entry);
+
+    await EnqueueAsync(
+        sprint,
+        orgId => new SprintWorkItemAdded(
+            sprint.Id,
+            sprint.ProjectId,
+            orgId,
+            SprintName(sprint),
+            workItem.Id,
+            workItem.Title,
+            addedBy),
+        ct);
+
+    await _repository.SaveChangesAsync(ct);
+
+    return new SprintWorkItemResponse(
+        workItem.Id,
+        workItem.Title,
+        workItem.Type,
+        workItem.State,
+        workItem.Priority,
+        workItem.AssigneeId,
+        workItem.StoryPoints,
+        position);
+}
+   
 
     public async Task RemoveWorkItemAsync(
         Guid sprintId,
@@ -281,7 +298,7 @@ public class SprintService : ISprintService
         _repository.RemoveBacklogEntry(entry);
 
         await EnqueueAsync(sprint, orgId => new SprintWorkItemRemoved(
-            sprint.Id, sprint.TeamId, orgId, SprintName(sprint),
+            sprint.Id, sprint.ProjectId, orgId, SprintName(sprint),
             workItemId, title, removedBy), ct);
 
         await _repository.SaveChangesAsync(ct);
@@ -462,7 +479,7 @@ public class SprintService : ISprintService
         sprint.UpdatedAt = DateTime.UtcNow;
 
         await EnqueueAsync(sprint, orgId => new SprintStatusChanged(
-            sprint.Id, sprint.TeamId, orgId, SprintName(sprint),
+            sprint.Id, sprint.ProjectId, orgId, SprintName(sprint),
             SprintStatus.Active, SprintStatus.Completed, closedBy), ct);
 
         await _repository.SaveChangesAsync(ct);
@@ -490,7 +507,7 @@ public class SprintService : ISprintService
         Func<Guid, TEvent> build,
         CancellationToken ct) where TEvent : IDomainEvent
     {
-        var orgId = await _repository.GetOrganizationIdForTeamAsync(sprint.TeamId, ct);
+        var orgId = await _repository.GetOrganizationIdForProjectAsync(sprint.ProjectId, ct);
         if (orgId is null) return;
         _eventBus.Enqueue(build(orgId.Value));
     }
@@ -519,10 +536,11 @@ public class SprintService : ISprintService
         var progress = await _repository.GetProgressAsync(sprintId, ct);
 
         return new SprintResponse(
-            sprint.Id, sprint.TeamId, sprint.Number, sprint.Goal,
+            sprint.Id, sprint.ProjectId, sprint.Number, sprint.Goal,
             sprint.StartDate, sprint.EndDate, sprint.Status,
             progress.TotalItems, progress.CompletedItems,
             progress.TotalPoints, progress.CompletedPoints,
             sprint.CreatedAt);
     }
 }
+

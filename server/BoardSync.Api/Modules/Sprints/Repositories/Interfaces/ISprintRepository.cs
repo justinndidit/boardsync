@@ -26,53 +26,53 @@ public interface ISprintRepository
     /// <summary>Sprint by ID, tracked for mutation, or null.</summary>
     Task<Sprint?> GetByIdAsync(Guid sprintId, CancellationToken ct = default);
 
-    /// <summary>The team's currently active sprint, or null when it has none.</summary>
-    Task<Sprint?> GetActiveForTeamAsync(Guid teamId, CancellationToken ct = default);
+    /// <summary>The project's currently active sprint, or null when it has none.</summary>
+    Task<Sprint?> GetActiveForProjectAsync(Guid ProjectId, CancellationToken ct = default);
 
-    /// <summary>Paginated sprint summaries for a team, newest sprint number first.</summary>
-    Task<(IReadOnlyList<SprintSummaryResponse> Items, int TotalCount)> GetForTeamAsync(
-        Guid teamId,
+    /// <summary>Paginated sprint summaries for a project, newest sprint number first.</summary>
+    Task<(IReadOnlyList<SprintSummaryResponse> Items, int TotalCount)> GetForProjectAsync(
+        Guid ProjectId,
         int skip,
         int take,
         CancellationToken ct = default);
 
-    /// <summary>Whether an active team with this ID exists.</summary>
-    Task<bool> TeamExistsAsync(Guid teamId, CancellationToken ct = default);
+    /// <summary>Whether an active project with this ID exists.</summary>
+    Task<bool> ProjectExistsAsync(Guid ProjectId, CancellationToken ct = default);
 
     /// <summary>
-    /// The team a project is assigned to, or null if the project does not exist.
+    /// The project a project is assigned to, or null if the project does not exist.
     /// </summary>
     /// <remarks>
-    /// Used to check that a work item belongs to the same team as the sprint it is being added to.
-    /// A sprint is team-scoped and a team can hold several projects, so items from any of the
-    /// team's projects are legitimate — items from anywhere else are not.
+    /// Used to check that a work item belongs to the same project as the sprint it is being added to.
+    /// A sprint is project-scoped and a project can hold several projects, so items from any of the
+    /// project's projects are legitimate — items from anywhere else are not.
     /// </remarks>
     Task<Guid?> GetAssignedTeamForProjectAsync(Guid projectId, CancellationToken ct = default);
 
     /// <summary>
-    /// Whether the team already has a non-completed sprint covering any part of the given range.
+    /// Whether the project already has a non-completed sprint covering any part of the given range.
     /// Completed sprints are excluded — history is allowed to overlap, only live plans are not.
     /// </summary>
     Task<bool> HasOverlappingSprintAsync(
-        Guid teamId,
+        Guid ProjectId,
         DateTime startDate,
         DateTime endDate,
         CancellationToken ct = default);
 
     /// <summary>
-    /// Whether the team has an active sprint other than <paramref name="excludingSprintId"/>.
-    /// Guards the one-active-sprint-per-team rule when starting a sprint.
+    /// Whether the project has an active sprint other than <paramref name="excludingSprintId"/>.
+    /// Guards the one-active-sprint-per-project rule when starting a sprint.
     /// </summary>
-    Task<bool> HasAnotherActiveSprintAsync(Guid teamId, Guid excludingSprintId, CancellationToken ct = default);
+    Task<bool> HasAnotherActiveSprintAsync(Guid projectId, Guid excludingSprintId, CancellationToken ct = default);
 
-    /// <summary>Next sprint number for a team. Numbers are sequential per team, starting at 1.</summary>
-    Task<int> GetNextNumberAsync(Guid teamId, CancellationToken ct = default);
+    /// <summary>Next sprint number for a project. Numbers are sequential per project, starting at 1.</summary>
+    Task<int> GetNextNumberAsync(Guid projectId, CancellationToken ct = default);
 
     /// <summary>
-    /// The organization owning a sprint's team, or null if the team is gone. Sprints hang off a
-    /// team but activity is filed by organization, so events need this before they can be published.
+    /// The organization owning a sprint's project, or null if the project is gone. Sprints hang off a
+    /// project but activity is filed by organization, so events need this before they can be published.
     /// </summary>
-    Task<Guid?> GetOrganizationIdForTeamAsync(Guid teamId, CancellationToken ct = default);
+    Task<Guid?> GetOrganizationIdForProjectAsync(Guid projectId, CancellationToken ct = default);
 
     void Add(Sprint sprint);
     void Remove(Sprint sprint);
@@ -135,3 +135,5 @@ public readonly record struct SprintProgress(
     int CompletedItems,
     int TotalPoints,
     int CompletedPoints);
+
+

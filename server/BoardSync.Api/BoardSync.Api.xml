@@ -2091,23 +2091,23 @@
         </member>
         <member name="T:BoardSync.Api.Modules.Sprints.Controllers.SprintsController">
             <summary>
-            Sprint lifecycle and backlog management scoped to a team.
+            Sprint lifecycle and backlog management scoped to a project.
             Read operations:      Reader+
             Sprint management:    ProjectAdmin+
             Backlog management:   TeamMember+
             </summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.GetForTeam(System.Guid,BoardSync.Api.Shared.Kernel.PaginationQuery,System.Threading.CancellationToken)">
-            <summary>List all sprints for a team, newest first.</summary>
+        <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.GetForProject(System.Guid,BoardSync.Api.Shared.Kernel.PaginationQuery,System.Threading.CancellationToken)">
+            <summary>List all sprints for a project, newest first.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.GetActive(System.Guid,System.Threading.CancellationToken)">
-            <summary>Get the currently active sprint for a team. Returns null data if none is active.</summary>
+            <summary>Get the currently active sprint for a project. Returns null data if none is active.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.GetById(System.Guid,System.Threading.CancellationToken)">
             <summary>Get a sprint by ID.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.Create(System.Guid,BoardSync.Api.Modules.Sprints.DTOs.CreateSprintRequest,System.Threading.CancellationToken)">
-            <summary>Create a new sprint for a team. Requires ProjectAdmin.</summary>
+            <summary>Create a new sprint for a project. Requires ProjectAdmin.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.Update(System.Guid,BoardSync.Api.Modules.Sprints.DTOs.UpdateSprintRequest,System.Threading.CancellationToken)">
             <summary>Update a sprint's goal and dates. Only allowed while Planning. Requires ProjectAdmin.</summary>
@@ -2115,7 +2115,7 @@
         <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.UpdateStatus(System.Guid,BoardSync.Api.Modules.Sprints.DTOs.UpdateSprintStatusRequest,System.Threading.CancellationToken)">
             <summary>
             Transition sprint status: Planning → Active → Completed.
-            Only one Active sprint per team is allowed at a time.
+            Only one Active sprint per project is allowed at a time.
             Requires ProjectAdmin.
             </summary>
         </member>
@@ -2124,13 +2124,12 @@
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.Close(System.Guid,BoardSync.Api.Modules.Sprints.DTOs.CloseSprintRequest,System.Threading.CancellationToken)">
             <summary>
-            Close an active sprint. Incomplete items (not Resolved or Closed) are either
-            returned to the project backlog or moved to a specified next sprint.
-            Requires ProjectAdmin.
+            Close an active sprint. Incomplete items are either returned to the backlog
+            or moved to a specified next sprint. Requires ProjectAdmin.
             </summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.GetWorkItems(System.Guid,BoardSync.Api.Shared.Kernel.PaginationQuery,System.Threading.CancellationToken)">
-            <summary>List work items in a sprint ordered by position.</summary>
+            <summary>List work items in a sprint ordered by rank.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.AddWorkItem(System.Guid,BoardSync.Api.Modules.Sprints.DTOs.AddSprintWorkItemRequest,System.Threading.CancellationToken)">
             <summary>Add a work item to the sprint backlog. Requires TeamMember.</summary>
@@ -2139,25 +2138,10 @@
             <summary>Remove a work item from the sprint backlog. Requires TeamMember.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.MoveWorkItem(System.Guid,System.Guid,BoardSync.Api.Modules.Sprints.DTOs.MoveSprintWorkItemRequest,System.Threading.CancellationToken)">
-            <summary>
-            Move one backlog item between two neighbours. Requires TeamMember.
-            </summary>
-            <remarks>
-            The drag-and-drop endpoint. Names only the card that moved and where it landed, so two
-            people rearranging different cards write different rows and cannot revert each other —
-            unlike the whole-list reorder below, which submits an entire ordering.
-            Omit <c>afterWorkItemId</c> to move to the top, or <c>beforeWorkItemId</c> to move to the end.
-            </remarks>
+            <summary>Move a single backlog item between two neighbours (drag-and-drop). Requires TeamMember.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.ReorderWorkItems(System.Guid,BoardSync.Api.Modules.Sprints.DTOs.ReorderSprintWorkItemsRequest,System.Threading.CancellationToken)">
-            <summary>
-            Reorder the whole sprint backlog. Requires TeamMember.
-            </summary>
-            <remarks>
-            Last-writer-wins across every item: it submits an ordering computed before any concurrent
-            move existed, so a second caller silently reverts the first. Fine for a single editor;
-            prefer the move endpoint above wherever more than one person can drag at once.
-            </remarks>
+            <summary>Reorder the whole sprint backlog. Requires TeamMember.</summary>
         </member>
         <member name="T:BoardSync.Api.Modules.Sprints.Domain.Ranking">
             <summary>
@@ -2405,14 +2389,14 @@
         </member>
         <member name="T:BoardSync.Api.Modules.Sprints.Models.Sprint">
             <summary>
-            A time-boxed iteration scoped to a team.
+            A time-boxed iteration scoped to a project.
             </summary>
         </member>
-        <member name="P:BoardSync.Api.Modules.Sprints.Models.Sprint.TeamId">
-            <summary>The team this sprint belongs to.</summary>
+        <member name="P:BoardSync.Api.Modules.Sprints.Models.Sprint.ProjectId">
+            <summary>The project this sprint belongs to.</summary>
         </member>
         <member name="P:BoardSync.Api.Modules.Sprints.Models.Sprint.Number">
-            <summary>Auto-incremented sprint number within the team (Sprint 1, Sprint 2 …).</summary>
+            <summary>Auto-incremented sprint number within the project (Sprint 1, Sprint 2 …).</summary>
         </member>
         <member name="P:BoardSync.Api.Modules.Sprints.Models.Sprint.Goal">
             <summary>Optional sprint goal / focus statement shown on the board header.</summary>
@@ -2558,44 +2542,44 @@
         <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.GetByIdAsync(System.Guid,System.Threading.CancellationToken)">
             <summary>Sprint by ID, tracked for mutation, or null.</summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.GetActiveForTeamAsync(System.Guid,System.Threading.CancellationToken)">
-            <summary>The team's currently active sprint, or null when it has none.</summary>
+        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.GetActiveForProjectAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>The project's currently active sprint, or null when it has none.</summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.GetForTeamAsync(System.Guid,System.Int32,System.Int32,System.Threading.CancellationToken)">
-            <summary>Paginated sprint summaries for a team, newest sprint number first.</summary>
+        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.GetForProjectAsync(System.Guid,System.Int32,System.Int32,System.Threading.CancellationToken)">
+            <summary>Paginated sprint summaries for a project, newest sprint number first.</summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.TeamExistsAsync(System.Guid,System.Threading.CancellationToken)">
-            <summary>Whether an active team with this ID exists.</summary>
+        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.ProjectExistsAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Whether an active project with this ID exists.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.GetAssignedTeamForProjectAsync(System.Guid,System.Threading.CancellationToken)">
             <summary>
-            The team a project is assigned to, or null if the project does not exist.
+            The project a project is assigned to, or null if the project does not exist.
             </summary>
             <remarks>
-            Used to check that a work item belongs to the same team as the sprint it is being added to.
-            A sprint is team-scoped and a team can hold several projects, so items from any of the
-            team's projects are legitimate — items from anywhere else are not.
+            Used to check that a work item belongs to the same project as the sprint it is being added to.
+            A sprint is project-scoped and a project can hold several projects, so items from any of the
+            project's projects are legitimate — items from anywhere else are not.
             </remarks>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.HasOverlappingSprintAsync(System.Guid,System.DateTime,System.DateTime,System.Threading.CancellationToken)">
             <summary>
-            Whether the team already has a non-completed sprint covering any part of the given range.
+            Whether the project already has a non-completed sprint covering any part of the given range.
             Completed sprints are excluded — history is allowed to overlap, only live plans are not.
             </summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.HasAnotherActiveSprintAsync(System.Guid,System.Guid,System.Threading.CancellationToken)">
             <summary>
-            Whether the team has an active sprint other than <paramref name="excludingSprintId"/>.
-            Guards the one-active-sprint-per-team rule when starting a sprint.
+            Whether the project has an active sprint other than <paramref name="excludingSprintId"/>.
+            Guards the one-active-sprint-per-project rule when starting a sprint.
             </summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.GetNextNumberAsync(System.Guid,System.Threading.CancellationToken)">
-            <summary>Next sprint number for a team. Numbers are sequential per team, starting at 1.</summary>
+            <summary>Next sprint number for a project. Numbers are sequential per project, starting at 1.</summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.GetOrganizationIdForTeamAsync(System.Guid,System.Threading.CancellationToken)">
+        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.GetOrganizationIdForProjectAsync(System.Guid,System.Threading.CancellationToken)">
             <summary>
-            The organization owning a sprint's team, or null if the team is gone. Sprints hang off a
-            team but activity is filed by organization, so events need this before they can be published.
+            The organization owning a sprint's project, or null if the project is gone. Sprints hang off a
+            project but activity is filed by organization, so events need this before they can be published.
             </summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.GetBacklogEntryAsync(System.Guid,System.Guid,System.Threading.CancellationToken)">
@@ -2709,18 +2693,6 @@
             reaching into the database itself.
             </remarks>
             <exception cref="T:BoardSync.Api.Shared.Kernel.Exceptions.NotFoundException">No such column.</exception>
-        </member>
-        <member name="M:BoardSync.Api.Modules.Sprints.Services.ISprintService.MoveWorkItemAsync(System.Guid,System.Guid,BoardSync.Api.Modules.Sprints.DTOs.MoveSprintWorkItemRequest,System.Threading.CancellationToken)">
-            <summary>
-            Moves a single backlog item between two neighbours. One row is written.
-            </summary>
-            <returns>The item's new rank, so the caller can confirm where it landed.</returns>
-        </member>
-        <member name="M:BoardSync.Api.Modules.Sprints.Services.ISprintService.CloseAsync(System.Guid,BoardSync.Api.Modules.Sprints.DTOs.CloseSprintRequest,System.Guid,System.Threading.CancellationToken)">
-            <summary>
-            Close an active sprint.
-            Marks it Completed and routes incomplete items to the backlog or a next sprint.
-            </summary>
         </member>
         <member name="T:BoardSync.Api.Modules.WorkItems.Controllers.WorkItemsController">
             <summary>

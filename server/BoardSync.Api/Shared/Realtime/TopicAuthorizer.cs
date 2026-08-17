@@ -76,6 +76,6 @@ public class TopicAuthorizer : ITopicAuthorizer
 
         if (sprint is null) return false;
 
-        return await _rbac.HasRoleAsync(userId, RoleType.Reader, RoleScope.Team, sprint.TeamId, ct);
+        return await _rbac.HasRoleAsync(userId, RoleType.Reader, RoleScope.Team, sprint.ProjectId, ct);
     }
 }

@@ -12,7 +12,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace BoardSync.Api.Modules.Sprints.Controllers;
 
 /// <summary>
-/// Sprint lifecycle and backlog management scoped to a team.
+/// Sprint lifecycle and backlog management scoped to a project.
 /// Read operations:      Reader+
 /// Sprint management:    ProjectAdmin+
 /// Backlog management:   TeamMember+
@@ -38,30 +38,30 @@ public class SprintsController : ControllerBase
 
     // ── Sprint CRUD ───────────────────────────────────────────────────────────
 
-    /// <summary>List all sprints for a team, newest first.</summary>
-    [HttpGet("api/teams/{teamId:guid}/sprints")]
+    /// <summary>List all sprints for a project, newest first.</summary>
+    [HttpGet("api/projects/{projectId:guid}/sprints")]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<SprintSummaryResponse>>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> GetForTeam(
-        Guid teamId,
+    public async Task<IActionResult> GetForProject(
+        Guid projectId,
         [FromQuery] PaginationQuery pagination,
         CancellationToken ct)
     {
-        await RequireTeamRoleAsync(teamId, RoleType.Reader, ct);
-        var result = await _sprintService.GetForTeamAsync(teamId, pagination, ct);
+        await RequireProjectRoleAsync(projectId, RoleType.Reader, ct);
+        var result = await _sprintService.GetForProjectAsync(projectId, pagination, ct);
         return Ok(new ApiResponse<PagedResult<SprintSummaryResponse>>(true, "Sprints retrieved.", result));
     }
 
-    /// <summary>Get the currently active sprint for a team. Returns null data if none is active.</summary>
-    [HttpGet("api/teams/{teamId:guid}/sprints/active")]
+    /// <summary>Get the currently active sprint for a project. Returns null data if none is active.</summary>
+    [HttpGet("api/projects/{projectId:guid}/sprints/active")]
     [ProducesResponseType(typeof(ApiResponse<SprintResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> GetActive(Guid teamId, CancellationToken ct)
+    public async Task<IActionResult> GetActive(Guid projectId, CancellationToken ct)
     {
-        await RequireTeamRoleAsync(teamId, RoleType.Reader, ct);
-        var sprint = await _sprintService.GetActiveForTeamAsync(teamId, ct);
+        await RequireProjectRoleAsync(projectId, RoleType.Reader, ct);
+        var sprint = await _sprintService.GetActiveForProjectAsync(projectId, ct);
         return Ok(new ApiResponse<SprintResponse?>(true,
             sprint is null ? "No active sprint." : "Active sprint retrieved.", sprint));
     }
@@ -74,23 +74,23 @@ public class SprintsController : ControllerBase
     public async Task<IActionResult> GetById(Guid sprintId, CancellationToken ct)
     {
         var sprint = await _sprintService.GetByIdAsync(sprintId, ct);
-        await RequireTeamRoleAsync(sprint.TeamId, RoleType.Reader, ct);
+        await RequireProjectRoleAsync(sprint.ProjectId, RoleType.Reader, ct);
         return Ok(new ApiResponse<SprintResponse>(true, "Sprint retrieved.", sprint));
     }
 
-    /// <summary>Create a new sprint for a team. Requires ProjectAdmin.</summary>
-    [HttpPost("api/teams/{teamId:guid}/sprints")]
+    /// <summary>Create a new sprint for a project. Requires ProjectAdmin.</summary>
+    [HttpPost("api/projects/{projectId:guid}/sprints")]
     [ProducesResponseType(typeof(ApiResponse<SprintResponse>), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> Create(
-        Guid teamId,
+        Guid projectId,
         [FromBody] CreateSprintRequest request,
         CancellationToken ct)
     {
-        await RequireTeamRoleAsync(teamId, RoleType.ProjectAdmin, ct);
-        var sprint = await _sprintService.CreateAsync(teamId, request, _currentUser.UserId, ct);
+        await RequireProjectRoleAsync(projectId, RoleType.ProjectAdmin, ct);
+        var sprint = await _sprintService.CreateAsync(projectId, request, _currentUser.UserId, ct);
         return CreatedAtAction(nameof(GetById), new { sprintId = sprint.Id },
             new ApiResponse<SprintResponse>(true, "Sprint created.", sprint));
     }
@@ -107,14 +107,14 @@ public class SprintsController : ControllerBase
         CancellationToken ct)
     {
         var sprint = await _sprintService.GetByIdAsync(sprintId, ct);
-        await RequireTeamRoleAsync(sprint.TeamId, RoleType.ProjectAdmin, ct);
+        await RequireProjectRoleAsync(sprint.ProjectId, RoleType.ProjectAdmin, ct);
         var updated = await _sprintService.UpdateAsync(sprintId, request, _currentUser.UserId, ct);
         return Ok(new ApiResponse<SprintResponse>(true, "Sprint updated.", updated));
     }
 
     /// <summary>
     /// Transition sprint status: Planning → Active → Completed.
-    /// Only one Active sprint per team is allowed at a time.
+    /// Only one Active sprint per project is allowed at a time.
     /// Requires ProjectAdmin.
     /// </summary>
     [HttpPatch("api/sprints/{sprintId:guid}/status")]
@@ -129,7 +129,7 @@ public class SprintsController : ControllerBase
         CancellationToken ct)
     {
         var sprint = await _sprintService.GetByIdAsync(sprintId, ct);
-        await RequireTeamRoleAsync(sprint.TeamId, RoleType.ProjectAdmin, ct);
+        await RequireProjectRoleAsync(sprint.ProjectId, RoleType.ProjectAdmin, ct);
         var updated = await _sprintService.UpdateStatusAsync(sprintId, request.Status, _currentUser.UserId, ct);
         return Ok(new ApiResponse<SprintResponse>(true, $"Sprint status updated to {request.Status}.", updated));
     }
@@ -143,15 +143,14 @@ public class SprintsController : ControllerBase
     public async Task<IActionResult> Delete(Guid sprintId, CancellationToken ct)
     {
         var sprint = await _sprintService.GetByIdAsync(sprintId, ct);
-        await RequireTeamRoleAsync(sprint.TeamId, RoleType.ProjectAdmin, ct);
+        await RequireProjectRoleAsync(sprint.ProjectId, RoleType.ProjectAdmin, ct);
         await _sprintService.DeleteAsync(sprintId, _currentUser.UserId, ct);
         return NoContent();
     }
 
     /// <summary>
-    /// Close an active sprint. Incomplete items (not Resolved or Closed) are either
-    /// returned to the project backlog or moved to a specified next sprint.
-    /// Requires ProjectAdmin.
+    /// Close an active sprint. Incomplete items are either returned to the backlog
+    /// or moved to a specified next sprint. Requires ProjectAdmin.
     /// </summary>
     [HttpPost("api/sprints/{sprintId:guid}/close")]
     [ProducesResponseType(typeof(ApiResponse<CloseSprintResponse>), StatusCodes.Status200OK)]
@@ -164,7 +163,7 @@ public class SprintsController : ControllerBase
         CancellationToken ct)
     {
         var sprint = await _sprintService.GetByIdAsync(sprintId, ct);
-        await RequireTeamRoleAsync(sprint.TeamId, RoleType.ProjectAdmin, ct);
+        await RequireProjectRoleAsync(sprint.ProjectId, RoleType.ProjectAdmin, ct);
         var result = await _sprintService.CloseAsync(sprintId, request, _currentUser.UserId, ct);
         return Ok(new ApiResponse<CloseSprintResponse>(true,
             $"Sprint closed. {result.CompletedItemCount} completed, {result.IncompleteItemCount} returned.", result));
@@ -172,7 +171,7 @@ public class SprintsController : ControllerBase
 
     // ── Backlog ───────────────────────────────────────────────────────────────
 
-    /// <summary>List work items in a sprint ordered by position.</summary>
+    /// <summary>List work items in a sprint ordered by rank.</summary>
     [HttpGet("api/sprints/{sprintId:guid}/workitems")]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<SprintWorkItemResponse>>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
@@ -183,7 +182,7 @@ public class SprintsController : ControllerBase
         CancellationToken ct)
     {
         var sprint = await _sprintService.GetByIdAsync(sprintId, ct);
-        await RequireTeamRoleAsync(sprint.TeamId, RoleType.Reader, ct);
+        await RequireProjectRoleAsync(sprint.ProjectId, RoleType.Reader, ct);
         var result = await _sprintService.GetWorkItemsAsync(sprintId, pagination, ct);
         return Ok(new ApiResponse<PagedResult<SprintWorkItemResponse>>(true, "Sprint backlog retrieved.", result));
     }
@@ -201,7 +200,7 @@ public class SprintsController : ControllerBase
         CancellationToken ct)
     {
         var sprint = await _sprintService.GetByIdAsync(sprintId, ct);
-        await RequireTeamRoleAsync(sprint.TeamId, RoleType.TeamMember, ct);
+        await RequireProjectRoleAsync(sprint.ProjectId, RoleType.TeamMember, ct);
         var item = await _sprintService.AddWorkItemAsync(sprintId, request, _currentUser.UserId, ct);
         return StatusCode(StatusCodes.Status201Created,
             new ApiResponse<SprintWorkItemResponse>(true, "Work item added to sprint.", item));
@@ -218,20 +217,12 @@ public class SprintsController : ControllerBase
         CancellationToken ct)
     {
         var sprint = await _sprintService.GetByIdAsync(sprintId, ct);
-        await RequireTeamRoleAsync(sprint.TeamId, RoleType.TeamMember, ct);
+        await RequireProjectRoleAsync(sprint.ProjectId, RoleType.TeamMember, ct);
         await _sprintService.RemoveWorkItemAsync(sprintId, workItemId, _currentUser.UserId, ct);
         return NoContent();
     }
 
-    /// <summary>
-    /// Move one backlog item between two neighbours. Requires TeamMember.
-    /// </summary>
-    /// <remarks>
-    /// The drag-and-drop endpoint. Names only the card that moved and where it landed, so two
-    /// people rearranging different cards write different rows and cannot revert each other —
-    /// unlike the whole-list reorder below, which submits an entire ordering.
-    /// Omit <c>afterWorkItemId</c> to move to the top, or <c>beforeWorkItemId</c> to move to the end.
-    /// </remarks>
+    /// <summary>Move a single backlog item between two neighbours (drag-and-drop). Requires TeamMember.</summary>
     [HttpPatch("api/sprints/{sprintId:guid}/workitems/{workItemId:guid}/move")]
     [ProducesResponseType(typeof(ApiResponse<MoveSprintWorkItemResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
@@ -243,22 +234,13 @@ public class SprintsController : ControllerBase
         CancellationToken ct)
     {
         var sprint = await _sprintService.GetByIdAsync(sprintId, ct);
-        await RequireTeamRoleAsync(sprint.TeamId, RoleType.TeamMember, ct);
-
+        await RequireProjectRoleAsync(sprint.ProjectId, RoleType.TeamMember, ct);
         var rank = await _sprintService.MoveWorkItemAsync(sprintId, workItemId, request, ct);
-
         return Ok(new ApiResponse<MoveSprintWorkItemResponse>(
             true, "Work item moved.", new MoveSprintWorkItemResponse(workItemId, rank)));
     }
 
-    /// <summary>
-    /// Reorder the whole sprint backlog. Requires TeamMember.
-    /// </summary>
-    /// <remarks>
-    /// Last-writer-wins across every item: it submits an ordering computed before any concurrent
-    /// move existed, so a second caller silently reverts the first. Fine for a single editor;
-    /// prefer the move endpoint above wherever more than one person can drag at once.
-    /// </remarks>
+    /// <summary>Reorder the whole sprint backlog. Requires TeamMember.</summary>
     [HttpPatch("api/sprints/{sprintId:guid}/workitems/reorder")]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
@@ -270,16 +252,16 @@ public class SprintsController : ControllerBase
         CancellationToken ct)
     {
         var sprint = await _sprintService.GetByIdAsync(sprintId, ct);
-        await RequireTeamRoleAsync(sprint.TeamId, RoleType.TeamMember, ct);
+        await RequireProjectRoleAsync(sprint.ProjectId, RoleType.TeamMember, ct);
         await _sprintService.ReorderWorkItemsAsync(sprintId, request, ct);
         return Ok(new ApiResponse(true, "Sprint backlog reordered."));
     }
 
     // ── Helper ────────────────────────────────────────────────────────────────
 
-    private async Task RequireTeamRoleAsync(Guid teamId, RoleType minimum, CancellationToken ct)
+    private async Task RequireProjectRoleAsync(Guid projectId, RoleType minimum, CancellationToken ct)
     {
-        if (!await _rbac.HasRoleAsync(_currentUser.UserId, minimum, RoleScope.Team, teamId, ct))
+        if (!await _rbac.HasRoleAsync(_currentUser.UserId, minimum, RoleScope.Project, projectId, ct))
             throw new ForbiddenException();
     }
 }

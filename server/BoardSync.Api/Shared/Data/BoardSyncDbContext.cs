@@ -307,12 +307,12 @@ public class BoardSyncDbContext : DbContext
         {
             entity.ToTable("Sprints", "plan");
             entity.HasKey(s => s.Id);
-            entity.HasIndex(s => s.TeamId);
-            entity.HasIndex(s => new { s.TeamId, s.Number }).IsUnique();
+            entity.HasIndex(s => s.ProjectId);
+            entity.HasIndex(s => new { s.ProjectId, s.Number }).IsUnique();
             entity.HasIndex(s => s.Status);
 
-            // "The active sprint for this team" runs on every board render.
-            entity.HasIndex(s => new { s.TeamId, s.Status });
+            // "The active sprint for this project" runs on every board render.
+            entity.HasIndex(s => new { s.ProjectId, s.Status });
 
             entity.Property(s => s.Goal).HasMaxLength(500);
             entity.Property(s => s.Status)

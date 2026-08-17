@@ -45,7 +45,7 @@ public class BoardRepository : IBoardRepository
             .Select(p => new BoardSprintContext(
                 p.AssignedTeamId,
                 _context.Sprints
-                    .Where(s => s.TeamId == p.AssignedTeamId && s.Status == SprintStatus.Active)
+                    .Where(s => s.ProjectId == p.AssignedTeamId && s.Status == SprintStatus.Active)
                     .Select(s => (Guid?)s.Id)
                     .FirstOrDefault()))
             .FirstOrDefaultAsync(ct);
