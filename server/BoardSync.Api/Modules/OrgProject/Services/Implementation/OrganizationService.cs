@@ -17,6 +17,7 @@ namespace BoardSync.Api.Modules.OrgProject.Services.Implementations;
 public class OrganizationService : IOrganizationService
 {
     private readonly IOrganizationRepository _organizationRepo;
+    private readonly ITeamMembershipRepository _teamMembershipRepo;
     private readonly IRbacService _rbac;
     private readonly IUserService _userService;
     private readonly IEventBus _eventBus;
@@ -24,12 +25,14 @@ public class OrganizationService : IOrganizationService
 
     public OrganizationService(
         IOrganizationRepository organizationRepository,
+        ITeamMembershipRepository teamMembershipRepository,
         IRbacService rbac,
         IUserService userService,
         IEventBus eventBus,
         ILogger<OrganizationService> logger)
     {
         _organizationRepo = organizationRepository;
+        _teamMembershipRepo = teamMembershipRepository;
         _rbac = rbac;
         _userService = userService;
         _eventBus = eventBus;
@@ -199,11 +202,34 @@ public class OrganizationService : IOrganizationService
 
         await _organizationRepo.ExecuteInTransactionAsync(async token =>
         {
+            // Refuse to remove the last OrgAdmin, for the same reason SetMemberRoleAsync refuses to
+            // demote them: OrgAdmin is the only role that can hand out organization roles, so an
+            // organization without one can never be administered again. Checked inside the
+            // transaction, or two concurrent removals could each see the other's admin and both
+            // succeed.
+            var orgRoles = await _rbac.GetScopeRolesAsync(RoleScope.Organization, orgId, token);
+
+            if (orgRoles.Any(ra => ra.UserId == userId && ra.Role == RoleType.OrgAdmin) &&
+                orgRoles.Count(ra => ra.Role == RoleType.OrgAdmin) == 1)
+                throw new DomainException("Cannot remove the last OrgAdmin of an organization.");
+
             _organizationRepo.RemoveMembership(membership);
             _eventBus.Enqueue(new MemberRemovedFromOrg(orgId, userId, removedBy));
             await _organizationRepo.SaveChangesAsync(token);
 
-            await _rbac.RemoveAllRolesAsync(userId, RoleScope.Organization, orgId, token);
+            // Organization membership is what every grant underneath it hangs off, so losing it has
+            // to take the whole subtree with it — team memberships, team roles and project roles.
+            // Revoking only the organization-scope rows is what previously left a removed member
+            // still administering a project in that organization, and still receiving its realtime
+            // feed: TopicAuthorizer resolves a project topic against project scope and never
+            // consults organization membership.
+            var teamsLeft = await _teamMembershipRepo.RemoveAllInOrganizationAsync(userId, orgId, token);
+            await _rbac.RemoveAllRolesInOrganizationAsync(userId, orgId, token);
+
+            if (teamsLeft > 0)
+                _logger.LogInformation(
+                    "Removed user {UserId} from {Count} team(s) in organization {OrgId}",
+                    userId, teamsLeft, orgId);
         }, ct);
 
         _logger.LogInformation("User {UserId} removed from organization {OrgId}", userId, orgId);

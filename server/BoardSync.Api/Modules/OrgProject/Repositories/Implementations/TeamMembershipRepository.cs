@@ -51,6 +51,21 @@ public class TeamMembershipRepository : ITeamMembershipRepository
 
   public void RemoveMembership(TeamMembership membership) => _context.TeamMemberships.Remove(membership);
 
+  public Task<int> RemoveAllInOrganizationAsync(
+      Guid userId,
+      Guid organizationId,
+      CancellationToken ct = default)
+  {
+    // Subquery rather than a materialized id list, matching the role-assignment cascade.
+    var teamIds = _context.Teams
+        .Where(t => t.OrganizationId == organizationId)
+        .Select(t => t.Id);
+
+    return _context.TeamMemberships
+        .Where(m => m.UserId == userId && teamIds.Contains(m.TeamId))
+        .ExecuteDeleteAsync(ct);
+  }
+
 
   public Task SaveChangesAsync(CancellationToken ct = default)
   {

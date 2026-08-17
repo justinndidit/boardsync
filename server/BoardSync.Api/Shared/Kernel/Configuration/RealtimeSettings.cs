@@ -21,4 +21,15 @@ public class RealtimeSettings
     /// it is bounded work rather than work proportional to how long the client was away.
     /// </remarks>
     public int MaxReplayMessages { get; set; } = 200;
+
+    /// <summary>
+    /// How often live subscriptions are re-checked against current permissions.
+    /// </summary>
+    /// <remarks>
+    /// This is the worst case for how long a revoked user can keep receiving a topic when the
+    /// immediate path does not fire — Redis unavailable, or a permission changed directly in the
+    /// database rather than through the API. The immediate path normally acts within milliseconds;
+    /// this is the floor under it.
+    /// </remarks>
+    public int ReauthorizationIntervalSeconds { get; set; } = 60;
 }

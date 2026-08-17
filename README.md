@@ -157,6 +157,7 @@ RFC 7807 problem details via the global exception handler.
 | `Outbox:MaxAttempts` | `5` | Delivery attempts before a message is left alone — still in the table, visible, not deleted. |
 | `Telemetry:OtlpEndpoint` | unset | OTLP collector address, e.g. `http://localhost:4317`. Unset means OpenTelemetry is not registered at all — no spans built, nothing exported. `OTEL_EXPORTER_OTLP_ENDPOINT` works too. |
 | `Realtime:Enabled` | `true` | Whether the hub is mapped. Off means clients cannot connect; the REST API is unaffected. |
+| `Realtime:ReauthorizationIntervalSeconds` | `60` | How often live subscriptions are re-checked against current permissions. Revocations normally take effect immediately via a role-change event; this is the worst case when that path does not fire. |
 | `Realtime:MaxReplayMessages` | `200` | How far a reconnecting client can be caught up before it is told to resync instead. |
 | `Telemetry:ServiceName` | `boardsync-api` | `service.name` on exported traces and metrics. |
 

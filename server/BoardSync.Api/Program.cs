@@ -14,6 +14,7 @@ using BoardSync.Api.Modules.Sprints.Repositories.Interfaces;
 using BoardSync.Api.Modules.Sprints.Services;
 using BoardSync.Api.Modules.Rbac.Repositories.Implementations;
 using BoardSync.Api.Modules.Rbac.Repositories.Interfaces;
+using BoardSync.Api.Modules.Rbac.Services;
 using BoardSync.Api.Modules.Rbac.Services.Interfaces;
 using BoardSync.Api.Modules.Rbac.Services.Implementations;
 using BoardSync.Api.Modules.WorkItems.Repository;
@@ -145,32 +146,54 @@ builder.Services.AddScoped<IEventDispatcher, EventDispatcher>();
 builder.Services.AddHostedService<OutboxDispatcher>();
 
 // RBAC Module
-// RbacService is registered concretely and reached through the memoizing decorator, so a scope that
-// authorizes the same question twice — which is most requests, once for the controller guard and
-// again inside the service — pays for it once.
-// Three layers, outermost first: per-request memoization, then the shared L1/L2 cache, then the
-// database. A repeated question inside one request costs nothing; a repeated question across
-// requests costs a cache read; only a genuine miss reaches Postgres.
+// Permission questions are answered from a snapshot of what the user has been granted, rather than
+// by querying per question. The snapshot is cached; the scope tree it is interpreted against is
+// cached separately and for longer, because a project's organization never changes and its team
+// changes rarely.
+//
+// Resolution chain, innermost first: the database, the shared L1/L2 cache, then the per-request
+// memo. A repeated question inside one request costs nothing, a repeated question across requests
+// costs one cache read, and only a genuine miss reaches Postgres.
 builder.Services.AddScoped<ITransactionState, TransactionState>();
 builder.Services.AddScoped<IRoleAssignmentRepository, RoleAssignmentRepository>();
-builder.Services.AddScoped<RbacService>();
-// The distributed layer only goes in when Redis is there to hold the version stamps that make
-// revocation immediate. Without it, per-request memoization alone — correct, just less effective.
-builder.Services.AddScoped<IRbacService>(sp =>
+
+// The generation counter that makes revocation immediate. It lives in Redis; without Redis nothing
+// is cached across requests, so there is no generation to advance.
+if (builder.Configuration.GetConnectionString("Redis") is { Length: > 0 })
+    builder.Services.AddScoped<IAccessCacheVersion, AccessCacheVersion>();
+else
+    builder.Services.AddScoped<IAccessCacheVersion, NullAccessCacheVersion>();
+
+builder.Services.AddScoped<AccessResolver>();
+builder.Services.AddScoped<MemoizingAccessResolver>(sp =>
 {
     var redis = sp.GetService<IConnectionMultiplexer>();
 
-    IRbacService inner = redis is null
-        ? sp.GetRequiredService<RbacService>()
-        : new CachingRbacService(
-            sp.GetRequiredService<RbacService>(),
+    // The distributed layer only goes in when Redis is there to hold the generation counters that
+    // make revocation immediate. Without it, per-request memoization alone — correct, just less
+    // effective.
+    IAccessResolver inner = redis is null
+        ? sp.GetRequiredService<AccessResolver>()
+        : new CachingAccessResolver(
+            sp.GetRequiredService<AccessResolver>(),
             sp.GetRequiredService<HybridCache>(),
-            redis,
+            sp.GetRequiredService<IAccessCacheVersion>(),
             sp.GetRequiredService<ITransactionState>(),
-            sp.GetRequiredService<ILogger<CachingRbacService>>());
+            sp.GetRequiredService<ILogger<CachingAccessResolver>>());
 
-    return new MemoizingRbacService(inner);
+    return new MemoizingAccessResolver(inner);
 });
+// One instance behind both interfaces: the read side asks it questions, the write side drops it.
+builder.Services.AddScoped<IAccessResolver>(sp => sp.GetRequiredService<MemoizingAccessResolver>());
+builder.Services.AddScoped<IAccessMemo>(sp => sp.GetRequiredService<MemoizingAccessResolver>());
+
+builder.Services.AddScoped<RbacService>();
+// Always decorated, in both configurations: even with no distributed cache, a write has to drop the
+// per-request memo or the rest of the request answers from grants it has just changed.
+builder.Services.AddScoped<IRbacService>(sp => new InvalidatingRbacService(
+    sp.GetRequiredService<RbacService>(),
+    sp.GetRequiredService<IAccessCacheVersion>(),
+    sp.GetRequiredService<IAccessMemo>()));
 
 // OrgProject Module
 builder.Services.AddScoped<IOrganizationRepository, OrganizationRepository>();

@@ -22,6 +22,7 @@ const connection = new signalR.HubConnectionBuilder()
   .build();
 
 connection.on('Message', handleMessage);
+connection.on('SubscriptionRevoked', handleRevoked);   // see §7.1 — do not skip this
 await connection.start();
 ```
 
@@ -110,8 +111,9 @@ function handleMessage(m: RealtimeMessage) {
 | `BoardChanged` | `project:`, `org:` | columns changed — refetch the board |
 | `ProjectCreated` / `Updated` | `org:`, `project:` | project list and header |
 | `TeamCreated` / `Updated` / `Archived` | `org:`, `team:` | team list |
-| `MemberAddedToOrg` / `RemovedFromOrg` | `org:`, `user:` | member list; **re-check your own access** |
-| `OrgMemberRoleChanged` / `ProjectRoleChanged` | `org:`, `user:` | **re-check your own access** |
+| `MemberAddedToOrg` / `RemovedFromOrg` | `org:`, `user:` | member list; your own access may have changed |
+| `SubscriptionRevoked` | *(sent directly)* | you lost access to a topic — see §7.1 |
+| `OrgMemberRoleChanged` / `ProjectRoleChanged` | `org:`, `user:` | your access changed in some direction — refresh what is visible |
 
 The two structural ones — `SprintStatusChanged` and `BoardChanged` — are the exceptions to "never
 refetch". The board's shape changed, not one card in it, so one refetch is the right answer.
@@ -233,12 +235,43 @@ has aged out.
 - **Real-time is an optimisation, never the source of truth.** Every message describes a change that
   is already committed and already readable over REST. If the socket drops, the app must keep
   working on REST alone.
-- **A role change can revoke a subscription's basis.** When you receive `OrgMemberRoleChanged` or
-  `ProjectRoleChanged` on your own `user:` topic, re-check your access. The server re-authorizes
-  periodically, but your UI should not wait to find out.
+- **Losing access ends a subscription — the server enforces it.** See §7.1.
 - **Without Redis configured, the hub is single-instance only.** Development is fine; a deployment
   needs it or a client connected to one instance will not see changes written on another. The API
   logs a warning at startup when the backplane is missing.
+
+### 7.1 When your access is revoked
+
+Subscriptions are authorized when you make them, and the server keeps checking afterwards. If your
+permission on a topic is taken away, the server drops you from it and tells you:
+
+```ts
+connection.on('SubscriptionRevoked', ({ topic }) => {
+  // You are no longer receiving this topic. Stop showing its data.
+  activeTopics.delete(topic);
+  delete lastSequence[topic];
+  navigateAwayOrShowNoAccess(topic);
+});
+```
+
+Two mechanisms drive it, and you do not need to do anything to trigger either:
+
+- **Immediately** when a role or membership event is processed — normally within a second of the
+  change being made.
+- **A periodic sweep** every 60 seconds, as the floor under that. It catches revocations the
+  immediate path missed: Redis unavailable, or a permission changed directly in the database rather
+  than through the API.
+
+So the worst case for a revoked user still receiving a topic is one sweep interval, not "until they
+close the tab".
+
+**Handle `SubscriptionRevoked`.** If you ignore it the traffic still stops — the server has already
+removed you from the group — but your UI will sit on whatever it had when access was withdrawn,
+with no indication anything changed. Re-subscribing will simply be refused.
+
+You may also see `OrgMemberRoleChanged` or `ProjectRoleChanged` arrive on your own `user:` topic.
+That is a hint your access changed in *some* direction, including gaining it; use it to refresh
+what the user can see. It is not the revocation signal — `SubscriptionRevoked` is.
 
 ---
 
