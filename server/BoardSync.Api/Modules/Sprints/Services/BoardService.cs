@@ -242,7 +242,7 @@ public class BoardService : IBoardService
         var activeSprint = context?.ActiveSprintId;
 
         var cards = activeSprint.HasValue
-            ? await _repository.GetCardsForSprintAsync(activeSprint.Value, ct)
+            ? await _repository.GetCardsForSprintAsync(activeSprint.Value, board.ProjectId, ct)
             : [];
 
         var columns = board.Columns

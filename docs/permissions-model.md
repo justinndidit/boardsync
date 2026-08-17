@@ -223,6 +223,45 @@ seed or migration from creating a row for it.
 
 ---
 
+### 3.10 Sprint membership is not authorized against the work item — cross-organization read leak
+
+**Confirmed by exploit, severity high — now FIXED (see §9.3).** Found while checking whether a
+sprint can span several of a team's projects. It could span *anything*.
+
+`SprintsController.AddWorkItem` guards on the **sprint's** team
+(`RequireTeamRoleAsync(sprint.TeamId, RoleType.TeamMember)`, `:182`) and never authorizes the
+**work item** being added. `SprintService.AddWorkItemAsync` checks only that the sprint is not
+completed and that the item is not already present (`:197-204`) — it never compares the work item's
+project to the sprint's team. `BoardRepository.GetCardsForSprintAsync` then selects on
+`sw.SprintId == sprintId` with no project filter.
+
+So any authenticated user can:
+
+1. Create their own organization, team, project and sprint — all self-service.
+2. `POST /api/sprints/{theirSprint}/workitems` with **any** work item id in the system.
+3. Read that item's title, type, priority, assignee, story points and tags from their own sprint
+   backlog and their own board.
+
+Verified end to end: an attacker in organization B correctly got `403` reading a victim
+organization's work item both directly and through the project listing, then added it to their own
+sprint (`201`) and read its title off their own board. Organization boundaries are bypassed
+completely.
+
+Exploiting it requires knowing the target work item's GUID, which is not enumerable — so this is
+targeted disclosure rather than mass scraping. GUIDs do leak, though: URLs, screenshots, logs,
+support tickets, and eventually the git integration.
+
+**This is the defect that reframes the model.** The role check on that endpoint is present and it
+passes correctly; it simply authorizes the wrong object. No refinement of the role vocabulary would
+have prevented it, which is why §4.5 now treats object-level authorization as a first-class concern
+rather than something the scope check implies.
+
+**Fix:** validate the work item's project against the sprint's team in `AddWorkItemAsync` — the
+project's `AssignedTeamId` must equal `sprint.TeamId` — and defend in depth by filtering
+`GetCardsForSprintAsync` to the board's project. Both are small; neither depends on Stage 2.
+
+---
+
 ## 4. Target model
 
 ### 4.1 Access derivation
@@ -342,12 +381,47 @@ Two things worth being explicit about, because they are easy to get wrong:
 be a silent tightening that breaks a working flow. If exclusive prioritisation is wanted it should be
 a deliberate, separately-decided change — not a side effect of naming the role.
 
-**`ProductOwner` currently has no permission that `ScrumMaster` lacks.** There is no endpoint in the
-API today that maps to product-owner authority specifically — no acceptance gate, no
-backlog-prioritisation right distinct from reordering. Naming the position is still worth doing now,
-because it records the org structure and makes it transferable, but the honest position is that its
-distinct permissions arrive when the endpoints that need them do. Inventing a permission it does not
-yet enforce would be worse than saying so.
+#### 4.3.1 What a team member may still put into a sprint
+
+Two operations are easy to conflate and must not be:
+
+| Operation | Endpoint | Gate |
+|---|---|---|
+| Create a work item in a project | `POST /api/projects/{projectId}/workitems` | `workitem:write` — **any team member, unchanged** |
+| Commit a work item to a sprint | `POST /api/sprints/{sprintId}/workitems` | see below |
+
+Creating work is never gated on the Product Owner. Anyone on the team can write tasks into their
+project's backlog exactly as they do today; that is authorship, not commitment.
+
+Entering a **sprint** is commitment, and the rule is:
+
+> A team member may add a work item to a sprint when that item's parent is already in the sprint.
+> Anything else requires `sprint:scope` — Product Owner, Scrum Master, Team Lead or OrgAdmin.
+
+**Decomposition is not a scope change.** If Story S is committed and a developer adds Task T with
+`ParentId = S`, the sprint's commitment has not moved — they have broken down work the team already
+agreed to, which is precisely their job and precisely what a Product Owner gate should not touch.
+Adding a top-level item, or one whose parent is not in the sprint, genuinely is new scope and is
+what the gate is for.
+
+`WorkItem.ParentId` already models the Epic → Feature → Story → Task hierarchy, so this needs no
+schema change.
+
+Reordering within the sprint (`sprint:order` — move, reorder) stays open to every team member.
+What is *in* a sprint is a commitment; how it is *ordered* is execution.
+
+**The known rough edge:** a bug found mid-sprint has no parent, so under this rule it needs a
+Product Owner or Scrum Master. That is arguably correct — an unplanned bug *is* a scope change — but
+it is the case most likely to generate friction. The recommendation is to ship without an exemption
+and let real use decide, because adding a `Bug`-type exemption later is trivial and removing one
+after people rely on it is not.
+
+**`ProductOwner` otherwise has no permission that `ScrumMaster` lacks.** Beyond `sprint:scope` there
+is no endpoint today that maps to product-owner authority specifically — no acceptance gate, no
+prioritisation right distinct from reordering. Naming the position is still worth doing now, because
+it records the structure and makes it transferable, but its remaining distinct permissions arrive
+when the endpoints that need them do. Inventing permissions it does not yet enforce would be worse
+than saying so.
 
 Organization scope keeps `org:read`, `org:admin` and `org:member:manage`. Call sites ask
 `Can(principal, "sprint:manage", RoleScope.Team, teamId)` — the question becomes readable where it is
@@ -478,12 +552,24 @@ its realtime topic until the periodic sweep catches them.
 
 Open before Stage 2 can start:
 
+| # | Question | Status |
+|---|---|---|
+| 5 | Which scope do Scrum Master and Product Owner sit at? | **Decided: team scope**, both. Project-scope Product Owner was proposed and rejected — see the note below. |
+| 6 | Does `sprint:scope` gate everything entering a sprint? | **Decided: no** — decomposition of committed work stays open to team members. See §4.3.1. |
+
+**Consequence of team-scoped Product Owner.** One team holds several projects and runs one sprint,
+so a single Product Owner owns the backlogs of every project that team works on. That is the
+intended model. The case it cannot express is two products under one team needing different backlog
+owners; if that arises the answer is to split the team, not to add a second Product Owner, because
+the sprint they would share is a single team-level commitment either way.
+
+Still open before Stage 2 can start:
+
 | # | Question | Recommendation |
 |---|---|---|
-| 5 | One holder per team position, or several? | **One**, with transfer as an atomic act (§4.2.1). "Transferable when someone is unavailable" implies a handover, and single-holder makes "who is the Scrum Master" answerable. Easy to relax later; hard to tighten. |
-| 6 | Can a position be held by someone who is not a team member? | **No** — reject with 400, matching the org-membership precedent in `ProjectsController.AssignRole`. |
-| 7 | Does `ProductOwner` get exclusive control of backlog ordering? | **Not now.** Today every team member can reorder; restricting it is a silent tightening of a working flow and should be decided on its own merits (§4.3). |
-| 8 | Are there positions beyond Team Lead, Scrum Master and Product Owner? | Needs an answer before the enum is fixed — adding one later is a migration. |
+| 7 | One holder per team position, or several? | **One**, with transfer as an atomic act (§4.2.1). "Transferable when someone is unavailable" implies a handover, and single-holder makes "who is the Scrum Master" answerable. Easy to relax later; hard to tighten. |
+| 8 | Can a position be held by someone who is not a team member? | **No** — reject with 400, matching the org-membership precedent in `ProjectsController.AssignRole`. |
+| 9 | Are there positions beyond Team Lead, Scrum Master and Product Owner? | Needs an answer before the enum is fixed — adding one later is a migration. |
 
 ---
 
@@ -585,6 +671,35 @@ Against a live stack — Postgres and Redis on `docker-compose.dev.yaml`, real H
 **Not covered:** the subscription-revocation path was exercised only as far as the announcement —
 the tests hold no live SignalR connections, so no subscription was actually dropped. To be verified
 against the frontend.
+
+### 9.3 The §3.10 fix
+
+Two changes, both small, neither dependent on Stage 2.
+
+**`SprintService.AddWorkItemAsync` now authorizes the work item, not just the sprint.** The item's
+project must be assigned to the sprint's team. A sibling project of the same team is legitimate — one
+team, one sprint, several projects — anything else is not. Rejected as `NotFoundException` rather
+than `ForbiddenException`: the caller cannot see this work item, and answering "forbidden" would
+confirm the id names something real. This is §3.6's principle applied at the one place it currently
+matters most.
+
+**`GetCardsForSprintAsync` is filtered to the board's project.** Defence in depth against the same
+class of bug — but also a correctness fix in its own right. A sprint is team-scoped and a board is
+project-scoped, so with several projects per team a sprint legitimately holds items belonging to
+other boards. Before this, every project's board rendered its siblings' cards.
+
+Verified with the original exploit, which now fails at step one:
+
+| Step | Before | After |
+| --- | --- | --- |
+| Attacker reads victim's work item directly | 403 | 403 |
+| Attacker lists victim's project work items | 403 | 403 |
+| Attacker adds victim's item to their own sprint | **201** | **404** |
+| Victim's title on attacker's sprint backlog | **leaked** | absent |
+| Victim's title on attacker's board | **leaked** | absent |
+
+The Stage 0 and Stage 1 suites were re-run against the same build: 12/12 and 5/5, no regressions.
+22 checks green in total.
 
 ---
 
