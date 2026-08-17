@@ -117,8 +117,8 @@ namespace BoardSync.Api.Shared.Data.Migrations
                     b.Property<Guid>("ProjectId")
                         .HasColumnType("uuid");
 
-                    b.Property<int>("Rank")
-                        .HasColumnType("integer");
+                    b.Property<decimal>("Rank")
+                        .HasColumnType("numeric");
 
                     b.Property<Guid?>("SprintId")
                         .HasColumnType("uuid");

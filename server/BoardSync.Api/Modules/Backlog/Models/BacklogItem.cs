@@ -18,8 +18,16 @@ public class BacklogItem : BaseEntity
     /// </summary>
     public Guid? TeamId { get; set; }
 
-    /// <summary>0-based display rank within the project backlog (lower = higher priority).</summary>
-    public int Rank { get; set; }
+    /// <summary>
+    /// Fractional sort key within the project backlog — lower sorts higher.
+    /// </summary>
+    /// <remarks>
+    /// Fractional rather than a 0-based index, matching <c>SprintWorkItem.Rank</c> and computed by
+    /// the same <c>Ranking</c> helper. Consecutive integers force a reorder to rewrite every row,
+    /// which makes two people dragging different cards silently revert each other — the product
+    /// backlog is the most concurrently-edited list in the system, so it wants this most.
+    /// </remarks>
+    public decimal Rank { get; set; }
 
     /// <summary>
     /// When set the item has been pulled into a sprint and should be hidden from

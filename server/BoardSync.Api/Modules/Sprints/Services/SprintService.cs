@@ -20,7 +20,7 @@ public class SprintService : ISprintService
     private readonly ISprintRepository _repository;
     private readonly IWorkItemRepository _workItems;
     private readonly IEventBus _eventBus;
-    private readonly IBacklogService _backlogService;
+    private readonly IBacklogSprintLink _backlog;
     private readonly ILogger<SprintService> _logger;
     private readonly BoardSyncDbContext _context;   // ← added field
 
@@ -30,14 +30,14 @@ public class SprintService : ISprintService
         ISprintRepository repository,
         IWorkItemRepository workItems,
         IEventBus eventBus,
-        IBacklogService backlogService,
+        IBacklogSprintLink backlog,
         ILogger<SprintService> logger)
     {
         _context        = context;        // ← now properly assigned
         _repository     = repository;
         _workItems      = workItems;
         _eventBus       = eventBus;
-        _backlogService = backlogService;
+        _backlog = backlog;
         _logger         = logger;
     }
 
@@ -427,10 +427,9 @@ public class SprintService : ISprintService
         {
             if (request.IncompleteItemsDestination == IncompleteItemsDestination.ReturnToBacklog)
             {
-                await _backlogService.ReturnToBacklogAsync(
-                    projectId,
-                    new Backlog.DTOs.ReturnToBacklogRequest { WorkItemIds = incompleteIds },
-                    ct);
+                // Only the backlog entries this sprint held; an item that also sits in another
+                // sprint keeps that membership. The sprint-side rows are dropped below.
+                await _backlog.ClearSprintAsync(sprintId, incompleteIds, ct);
             }
             else
             {

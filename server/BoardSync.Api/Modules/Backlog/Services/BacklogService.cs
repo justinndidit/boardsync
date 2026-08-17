@@ -1,22 +1,41 @@
-using BoardSync.Api.Data;
 using BoardSync.Api.Modules.Backlog.DTOs;
 using BoardSync.Api.Modules.Backlog.Models;
-using BoardSync.Api.Modules.Sprints.Models;
+using BoardSync.Api.Modules.Backlog.Repositories;
+using BoardSync.Api.Modules.Sprints.Domain;
+using BoardSync.Api.Modules.Sprints.DTOs;
+using BoardSync.Api.Modules.Sprints.Services;
 using BoardSync.Api.Modules.WorkItems.Models;
 using BoardSync.Api.Shared.Kernel;
 using BoardSync.Api.Shared.Kernel.Exceptions;
-using Microsoft.EntityFrameworkCore;
 
 namespace BoardSync.Api.Modules.Backlog.Services;
 
+/// <summary>
+/// The product backlog: which work items a project is carrying, and in what order.
+/// </summary>
+/// <remarks>
+/// <para>
+/// A backlog entry owns <em>rank</em>, and nothing else. Whether an item is in a sprint is the
+/// Sprints module's business, so the two bulk operations here delegate to
+/// <see cref="ISprintService"/> rather than writing <c>SprintWorkItem</c> rows themselves. That is
+/// not tidiness: sprint membership carries an authorization rule — a work item may only join a
+/// sprint belonging to its own team — and a second writer would be a second place for that rule to
+/// be forgotten. <c>SprintId</c> here is a cached view of the answer, not the answer.
+/// </para>
+/// </remarks>
 public class BacklogService : IBacklogService
 {
-    private readonly BoardSyncDbContext _context;
+    private readonly IBacklogRepository _repository;
+    private readonly ISprintService _sprints;
     private readonly ILogger<BacklogService> _logger;
 
-    public BacklogService(BoardSyncDbContext context, ILogger<BacklogService> logger)
+    public BacklogService(
+        IBacklogRepository repository,
+        ISprintService sprints,
+        ILogger<BacklogService> logger)
     {
-        _context = context;
+        _repository = repository;
+        _sprints = sprints;
         _logger = logger;
     }
 
@@ -28,50 +47,24 @@ public class BacklogService : IBacklogService
         PaginationQuery pagination,
         CancellationToken ct = default)
     {
-        var query = _context.BacklogItems
-            .Where(b => b.ProjectId == projectId && b.SprintId == null);
+        var (entries, total) = await _repository.GetUnscheduledPageAsync(
+            projectId, teamId, pagination.Skip, pagination.PageSize, ct);
 
-        if (teamId.HasValue)
-            query = query.Where(b => b.TeamId == null || b.TeamId == teamId.Value);
+        if (entries.Count == 0)
+            return new PagedResult<BacklogItemResponse>([], total, pagination.Page, pagination.PageSize);
 
-        var total = await query.CountAsync(ct);
+        var workItemIds = entries.Select(b => b.WorkItemId).ToList();
 
-        var pageSize = Math.Clamp(pagination.PageSize, 1, 100);
-        var page     = Math.Max(pagination.Page, 1);
+        var workItems = await _repository.GetWorkItemsAsync(workItemIds, ct);
+        var childCounts = await _repository.GetChildCountsAsync(workItemIds, ct);
 
-        var backlogEntries = await query
-            .OrderBy(b => b.Rank)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .ToListAsync(ct);
-
-        var workItemIds = backlogEntries.Select(b => b.WorkItemId).ToList();
-
-        var workItems = await _context.WorkItems
-            .Include(w => w.Tags)
-            .Where(w => workItemIds.Contains(w.Id) && w.IsActive)
-            .ToDictionaryAsync(w => w.Id, ct);
-
-        var childCounts = await _context.WorkItems
-            .Where(w => w.ParentId != null && w.IsActive && workItemIds.Contains(w.ParentId.Value))
-            .GroupBy(w => w.ParentId!.Value)
-            .Select(g => new { ParentId = g.Key, Count = g.Count() })
-            .ToDictionaryAsync(x => x.ParentId, x => x.Count, ct);
-
-        var items = backlogEntries
+        // An entry whose work item has since been deleted is skipped rather than rendered blank.
+        var items = entries
             .Where(b => workItems.ContainsKey(b.WorkItemId))
-            .Select(b =>
-            {
-                var w = workItems[b.WorkItemId];
-                return new BacklogItemResponse(
-                    b.Id, b.WorkItemId, b.ProjectId, b.TeamId, b.SprintId, b.Rank,
-                    w.Title, w.Type, w.State, w.Priority, w.AssigneeId, w.StoryPoints,
-                    w.Tags.Select(t => t.Name).ToList(),
-                    childCounts.GetValueOrDefault(w.Id, 0),
-                    w.CreatedAt);
-            }).ToList();
+            .Select(b => Map(b, workItems[b.WorkItemId], childCounts.GetValueOrDefault(b.WorkItemId, 0)))
+            .ToList();
 
-        return new PagedResult<BacklogItemResponse>(items, total, page, pageSize);
+        return new PagedResult<BacklogItemResponse>(items, total, pagination.Page, pagination.PageSize);
     }
 
     // ── Write ─────────────────────────────────────────────────────────────────
@@ -82,51 +75,45 @@ public class BacklogService : IBacklogService
         Guid addedBy,
         CancellationToken ct = default)
     {
-        if (!await _context.Projects.AnyAsync(p => p.Id == projectId && p.IsActive, ct))
+        if (!await _repository.ProjectExistsAsync(projectId, ct))
             throw new NotFoundException("Project", projectId);
 
-        var workItem = await _context.WorkItems
-            .Include(w => w.Tags)
-            .FirstOrDefaultAsync(w => w.Id == request.WorkItemId && w.ProjectId == projectId && w.IsActive, ct)
+        // Scoped to the project, so an item belonging to somewhere else reads as absent rather than
+        // as forbidden — the caller has no business knowing it exists.
+        var workItem = await _repository.GetWorkItemInProjectAsync(request.WorkItemId, projectId, ct)
             ?? throw new NotFoundException("WorkItem", request.WorkItemId);
 
-        // Idempotent — return existing entry unchanged
-        var existing = await _context.BacklogItems
-            .FirstOrDefaultAsync(b => b.ProjectId == projectId && b.WorkItemId == request.WorkItemId, ct);
+        var existing = await _repository.GetEntryAsync(projectId, request.WorkItemId, ct);
 
         if (existing is not null)
             return await BuildResponseAsync(existing, workItem, ct);
 
-        var rank = request.Rank ?? (
-            await _context.BacklogItems
-                .Where(b => b.ProjectId == projectId)
-                .MaxAsync(b => (int?)b.Rank, ct) ?? -1) + 1;
-
         var entry = new BacklogItem
         {
-            ProjectId  = projectId,
+            ProjectId = projectId,
             WorkItemId = request.WorkItemId,
-            TeamId     = request.TeamId,
-            Rank       = rank,
-            CreatedBy  = addedBy
+            TeamId = request.TeamId,
+            Rank = Ranking.Between(await _repository.GetMaxRankAsync(projectId, ct), null),
+            CreatedBy = addedBy
         };
 
-        _context.BacklogItems.Add(entry);
-        await _context.SaveChangesAsync(ct);
+        _repository.Add(entry);
+        await _repository.SaveChangesAsync(ct);
 
-        _logger.LogInformation("WorkItem {WorkItemId} added to backlog of project {ProjectId}", request.WorkItemId, projectId);
+        _logger.LogInformation(
+            "WorkItem {WorkItemId} added to the backlog of project {ProjectId}",
+            request.WorkItemId, projectId);
 
         return await BuildResponseAsync(entry, workItem, ct);
     }
 
     public async Task RemoveAsync(Guid projectId, Guid workItemId, CancellationToken ct = default)
     {
-        var entry = await _context.BacklogItems
-            .FirstOrDefaultAsync(b => b.ProjectId == projectId && b.WorkItemId == workItemId, ct)
+        var entry = await _repository.GetEntryAsync(projectId, workItemId, ct)
             ?? throw new NotFoundException("BacklogItem", workItemId);
 
-        _context.BacklogItems.Remove(entry);
-        await _context.SaveChangesAsync(ct);
+        _repository.Remove(entry);
+        await _repository.SaveChangesAsync(ct);
     }
 
     public async Task ReorderAsync(
@@ -134,29 +121,37 @@ public class BacklogService : IBacklogService
         ReorderBacklogRequest request,
         CancellationToken ct = default)
     {
-        var entries = await _context.BacklogItems
-            .Where(b => b.ProjectId == projectId)
-            .ToListAsync(ct);
+        if (!await _repository.ProjectExistsAsync(projectId, ct))
+            throw new NotFoundException("Project", projectId);
 
-        // Apply explicit ranks for the provided IDs
-        for (int i = 0; i < request.WorkItemIds.Count; i++)
+        var entries = await _repository.GetAllEntriesAsync(projectId, ct);
+        var byWorkItem = entries.ToDictionary(b => b.WorkItemId);
+
+        // Renumbers the named items across the whole backlog, so it is last-writer-wins between two
+        // people submitting orderings at the same time. That is inherent to an endpoint that takes a
+        // complete sequence; the fractional ranks exist so a *single* move need not do this, and a
+        // move endpoint like the sprint backlog's is the fix if concurrent reordering becomes real.
+        var rank = Ranking.Step;
+
+        foreach (var workItemId in request.WorkItemIds)
         {
-            var entry = entries.FirstOrDefault(b => b.WorkItemId == request.WorkItemIds[i]);
-            if (entry is not null)
-                entry.Rank = i;
+            if (!byWorkItem.TryGetValue(workItemId, out var entry))
+                continue;
+
+            entry.Rank = rank;
+            rank += Ranking.Step;
         }
 
-        // Items not in the list get pushed to the bottom, preserving their relative order
-        var ranked    = request.WorkItemIds.ToHashSet();
-        var remaining = entries
-            .Where(b => !ranked.Contains(b.WorkItemId))
-            .OrderBy(b => b.Rank)
-            .ToList();
+        // Anything the caller did not mention keeps its relative order, below the items that were.
+        var named = request.WorkItemIds.ToHashSet();
 
-        for (int i = 0; i < remaining.Count; i++)
-            remaining[i].Rank = request.WorkItemIds.Count + i;
+        foreach (var entry in entries.Where(b => !named.Contains(b.WorkItemId)).OrderBy(b => b.Rank))
+        {
+            entry.Rank = rank;
+            rank += Ranking.Step;
+        }
 
-        await _context.SaveChangesAsync(ct);
+        await _repository.SaveChangesAsync(ct);
     }
 
     public async Task<BacklogBulkOperationResponse> MoveToSprintAsync(
@@ -165,79 +160,69 @@ public class BacklogService : IBacklogService
         Guid movedBy,
         CancellationToken ct = default)
     {
-        var sprint = await _context.Sprints
-            .FirstOrDefaultAsync(s => s.Id == request.SprintId && s.Status != SprintStatus.Completed, ct)
-            ?? throw new NotFoundException("Sprint", request.SprintId);
-
-        var entries = await _context.BacklogItems
-            .Where(b => b.ProjectId == projectId && request.WorkItemIds.Contains(b.WorkItemId))
-            .ToListAsync(ct);
+        var entries = await _repository.GetEntriesAsync(projectId, request.WorkItemIds, ct);
 
         if (entries.Count == 0)
             return new BacklogBulkOperationResponse(0, "No matching backlog items found.");
 
-        // Determine next position in sprint
-        var nextPosition = (await _context.SprintWorkItems
-            .Where(sw => sw.SprintId == request.SprintId)
-            .MaxAsync(sw => (int?)sw.Position, ct) ?? -1) + 1;
+        var moved = 0;
 
         foreach (var entry in entries)
         {
-            entry.SprintId = request.SprintId;
-
-            // Add to sprint if not already there
-            var alreadyInSprint = await _context.SprintWorkItems
-                .AnyAsync(sw => sw.SprintId == request.SprintId && sw.WorkItemId == entry.WorkItemId, ct);
-
-            if (!alreadyInSprint)
+            // Delegated, so the sprint's own rule — that a work item may only join a sprint of its
+            // own team — is enforced here too, by the code that owns it. A duplicate is not an
+            // error: the caller asked for the item to end up in the sprint, and it is.
+            try
             {
-                _context.SprintWorkItems.Add(new SprintWorkItem
-                {
-                    SprintId   = request.SprintId,
-                    WorkItemId = entry.WorkItemId,
-                    Position   = nextPosition++,
-                    CreatedBy  = movedBy
-                });
+                await _sprints.AddWorkItemAsync(
+                    request.SprintId,
+                    new AddSprintWorkItemRequest { WorkItemId = entry.WorkItemId },
+                    movedBy,
+                    ct);
             }
+            catch (ConflictException)
+            {
+            }
+
+            entry.SprintId = request.SprintId;
+            moved++;
         }
 
-        await _context.SaveChangesAsync(ct);
+        await _repository.SaveChangesAsync(ct);
 
-        _logger.LogInformation("{Count} items moved to sprint {SprintId} from project {ProjectId}",
-            entries.Count, request.SprintId, projectId);
+        _logger.LogInformation(
+            "{Count} item(s) moved into sprint {SprintId} from the backlog of project {ProjectId}",
+            moved, request.SprintId, projectId);
 
-        return new BacklogBulkOperationResponse(entries.Count,
-            $"{entries.Count} item(s) moved to sprint.");
+        return new BacklogBulkOperationResponse(moved, $"{moved} item(s) moved to sprint.");
     }
 
     public async Task<BacklogBulkOperationResponse> ReturnToBacklogAsync(
         Guid projectId,
         ReturnToBacklogRequest request,
+        Guid returnedBy,
         CancellationToken ct = default)
     {
-        var entries = await _context.BacklogItems
-            .Where(b => b.ProjectId == projectId
-                && request.WorkItemIds.Contains(b.WorkItemId)
-                && b.SprintId != null)
-            .ToListAsync(ct);
+        // Only entries actually in the named sprint. Matching on work item alone is what previously
+        // let returning an item from one sprint remove it from every sprint it appeared in.
+        var entries = (await _repository.GetEntriesAsync(projectId, request.WorkItemIds, ct))
+            .Where(b => b.SprintId == request.SprintId)
+            .ToList();
 
         if (entries.Count == 0)
-            return new BacklogBulkOperationResponse(0, "No matching sprint items found.");
-
-        var workItemIds = entries.Select(b => b.WorkItemId).ToList();
-        var sprintItems = await _context.SprintWorkItems
-            .Where(sw => workItemIds.Contains(sw.WorkItemId))
-            .ToListAsync(ct);
+            return new BacklogBulkOperationResponse(0, "No matching items found in that sprint.");
 
         foreach (var entry in entries)
+        {
+            await _sprints.RemoveWorkItemAsync(request.SprintId, entry.WorkItemId, returnedBy, ct);
             entry.SprintId = null;
+        }
 
-        _context.SprintWorkItems.RemoveRange(sprintItems);
+        await _repository.SaveChangesAsync(ct);
 
-        await _context.SaveChangesAsync(ct);
-
-        _logger.LogInformation("{Count} items returned to backlog in project {ProjectId}",
-            entries.Count, projectId);
+        _logger.LogInformation(
+            "{Count} item(s) returned from sprint {SprintId} to the backlog of project {ProjectId}",
+            entries.Count, request.SprintId, projectId);
 
         return new BacklogBulkOperationResponse(entries.Count,
             $"{entries.Count} item(s) returned to backlog.");
@@ -246,15 +231,16 @@ public class BacklogService : IBacklogService
     // ── Private helpers ───────────────────────────────────────────────────────
 
     private async Task<BacklogItemResponse> BuildResponseAsync(
-        BacklogItem entry, WorkItem w, CancellationToken ct)
+        BacklogItem entry, WorkItem workItem, CancellationToken ct)
     {
-        var childCount = await _context.WorkItems
-            .CountAsync(c => c.ParentId == w.Id && c.IsActive, ct);
+        var counts = await _repository.GetChildCountsAsync([workItem.Id], ct);
 
-        return new BacklogItemResponse(
-            entry.Id, entry.WorkItemId, entry.ProjectId, entry.TeamId, entry.SprintId, entry.Rank,
+        return Map(entry, workItem, counts.GetValueOrDefault(workItem.Id, 0));
+    }
+
+    private static BacklogItemResponse Map(BacklogItem entry, WorkItem w, int childCount) =>
+        new(entry.Id, entry.WorkItemId, entry.ProjectId, entry.TeamId, entry.SprintId, entry.Rank,
             w.Title, w.Type, w.State, w.Priority, w.AssigneeId, w.StoryPoints,
             w.Tags.Select(t => t.Name).ToList(),
             childCount, w.CreatedAt);
-    }
 }

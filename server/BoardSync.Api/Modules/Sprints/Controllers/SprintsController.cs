@@ -155,6 +155,7 @@ public class SprintsController : ControllerBase
     /// Requires ProjectAdmin.
     /// </summary>
     [HttpPost("api/sprints/{sprintId:guid}/close")]
+    [RequirePermission(Permissions.SprintManage, From = "sprintId")]
     [ProducesResponseType(typeof(ApiResponse<CloseSprintResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
@@ -164,8 +165,6 @@ public class SprintsController : ControllerBase
         [FromBody] CloseSprintRequest request,
         CancellationToken ct)
     {
-        var sprint = await _sprintService.GetByIdAsync(sprintId, ct);
-        await RequireTeamRoleAsync(sprint.TeamId, RoleType.ProjectAdmin, ct);
         var result = await _sprintService.CloseAsync(sprintId, request, _currentUser.UserId, ct);
         return Ok(new ApiResponse<CloseSprintResponse>(true,
             $"Sprint closed. {result.CompletedItemCount} completed, {result.IncompleteItemCount} returned.", result));

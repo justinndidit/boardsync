@@ -5,6 +5,7 @@ using BoardSync.Api.Modules.Activity;
 using BoardSync.Api.Modules.Notifications;
 using BoardSync.Api.Modules.Search.Repositories;
 using BoardSync.Api.Modules.Search.Services;
+using BoardSync.Api.Modules.Backlog.Repositories;
 using BoardSync.Api.Modules.Backlog.Services;
 using BoardSync.Api.Modules.OrgProject.Repositories.Implementations;
 using BoardSync.Api.Modules.OrgProject.Repositories.Interfaces;
@@ -252,6 +253,8 @@ builder.Services.AddScoped<IBoardService, BoardService>();
 builder.Services.AddActivityModule();
 
 // Backlog Module
+builder.Services.AddScoped<IBacklogRepository, BacklogRepository>();
+builder.Services.AddScoped<IBacklogSprintLink, BacklogSprintLink>();
 builder.Services.AddScoped<IBacklogService, BacklogService>();
 
 // Add HTTP Context Accessor

@@ -409,7 +409,7 @@
         <member name="T:BoardSync.Api.Modules.Activity.Models.ActivityLog">
              <summary>
              One thing that happened inside an organization — the single source for both activity feeds.
-
+            
              Rows are append-only and are written by the handlers in the Activity module in response to
              domain events, never by the modules that raise them. Every row carries
              <see cref="P:BoardSync.Api.Modules.Activity.Models.ActivityLog.OrganizationId"/> even when the subject is a project or team, because both feeds
@@ -639,10 +639,10 @@
         <member name="T:BoardSync.Api.Modules.Backlog.Controllers.BacklogController">
              <summary>
              Product backlog management scoped to a project.
-
-             Read:            Reader+
-             Reorder / move:  TeamMember+
-             Add / remove:    TeamMember+
+            
+             Reading and reordering are project-scope questions. Moving items into or out of a sprint is not:
+             that changes what a team has committed to, so it is checked against the sprint's team with
+             <c>sprint:scope</c>, exactly as the equivalent endpoints on SprintsController are.
              </summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Backlog.Controllers.BacklogController.GetForProject(System.Guid,System.Nullable{System.Guid},BoardSync.Api.Shared.Kernel.PaginationQuery,System.Threading.CancellationToken)">
@@ -686,6 +686,17 @@
             Requires TeamMember.
             </summary>
         </member>
+        <member name="M:BoardSync.Api.Modules.Backlog.Controllers.BacklogController.RequireSprintScopeAsync(System.Guid,System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Guards changing what a sprint contains, from the backlog side.
+            </summary>
+            <remarks>
+            The route names a project, but committing work is a team-level decision, so the sprint is
+            resolved first and its team is what the permission is checked against. Without this the
+            backlog would be a way around the rule that the sprint's own endpoints enforce — the same
+            authority, reachable through a different door.
+            </remarks>
+        </member>
         <member name="T:BoardSync.Api.Modules.Backlog.DTOs.AddToBacklogRequest">
             <summary>Add a work item to the project backlog.</summary>
         </member>
@@ -707,10 +718,16 @@
         <member name="T:BoardSync.Api.Modules.Backlog.DTOs.ReturnToBacklogRequest">
             <summary>Return one or more sprint items back to the backlog.</summary>
         </member>
+        <member name="P:BoardSync.Api.Modules.Backlog.DTOs.ReturnToBacklogRequest.SprintId">
+            <summary>
+            The sprint to return them from. Required: an item can sit in more than one sprint, and
+            without naming one this operation removed it from all of them.
+            </summary>
+        </member>
         <member name="T:BoardSync.Api.Modules.Backlog.DTOs.BacklogItemResponse">
             <summary>A single item in the backlog list view.</summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.Backlog.DTOs.BacklogItemResponse.#ctor(System.Guid,System.Guid,System.Guid,System.Nullable{System.Guid},System.Nullable{System.Guid},System.Int32,System.String,BoardSync.Api.Modules.WorkItems.Models.WorkItemType,BoardSync.Api.Modules.WorkItems.Models.WorkItemState,BoardSync.Api.Modules.WorkItems.Models.WorkItemPriority,System.Nullable{System.Guid},System.Nullable{System.Int32},System.Collections.Generic.IReadOnlyList{System.String},System.Int32,System.DateTime)">
+        <member name="M:BoardSync.Api.Modules.Backlog.DTOs.BacklogItemResponse.#ctor(System.Guid,System.Guid,System.Guid,System.Nullable{System.Guid},System.Nullable{System.Guid},System.Decimal,System.String,BoardSync.Api.Modules.WorkItems.Models.WorkItemType,BoardSync.Api.Modules.WorkItems.Models.WorkItemState,BoardSync.Api.Modules.WorkItems.Models.WorkItemPriority,System.Nullable{System.Guid},System.Nullable{System.Int32},System.Collections.Generic.IReadOnlyList{System.String},System.Int32,System.DateTime)">
             <summary>A single item in the backlog list view.</summary>
         </member>
         <member name="T:BoardSync.Api.Modules.Backlog.DTOs.BacklogBulkOperationResponse">
@@ -733,13 +750,95 @@
             </summary>
         </member>
         <member name="P:BoardSync.Api.Modules.Backlog.Models.BacklogItem.Rank">
-            <summary>0-based display rank within the project backlog (lower = higher priority).</summary>
+            <summary>
+            Fractional sort key within the project backlog — lower sorts higher.
+            </summary>
+            <remarks>
+            Fractional rather than a 0-based index, matching <c>SprintWorkItem.Rank</c> and computed by
+            the same <c>Ranking</c> helper. Consecutive integers force a reorder to rewrite every row,
+            which makes two people dragging different cards silently revert each other — the product
+            backlog is the most concurrently-edited list in the system, so it wants this most.
+            </remarks>
         </member>
         <member name="P:BoardSync.Api.Modules.Backlog.Models.BacklogItem.SprintId">
             <summary>
             When set the item has been pulled into a sprint and should be hidden from
             the unscheduled backlog view.
             </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Backlog.Repositories.BacklogRepository">
+            <inheritdoc />
+        </member>
+        <member name="T:BoardSync.Api.Modules.Backlog.Repositories.IBacklogRepository">
+            <summary>
+            Data access for the product backlog — the <c>plan.BacklogItems</c> table.
+            </summary>
+            <remarks>
+            Pure unit of work: <c>Add</c>/<c>Remove</c> stage changes in memory and nothing is written until
+            <see cref="M:BoardSync.Api.Modules.Backlog.Repositories.IBacklogRepository.SaveChangesAsync(System.Threading.CancellationToken)"/>, so a service can compose several writes into one transaction.
+            <para>
+            Deliberately owns no sprint state. Backlog entries record <em>rank</em> and which sprint an item
+            was pulled into; membership of the sprint itself belongs to the Sprints module, which is the only
+            place that validates a work item may join a given sprint.
+            </para>
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Backlog.Repositories.IBacklogRepository.ProjectExistsAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Whether an active project exists, without loading it.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Backlog.Repositories.IBacklogRepository.GetUnscheduledPageAsync(System.Guid,System.Nullable{System.Guid},System.Int32,System.Int32,System.Threading.CancellationToken)">
+            <summary>
+            One page of the unscheduled backlog — entries with no sprint — ordered by rank.
+            </summary>
+            <param name="projectId">The project whose backlog to read.</param>
+            <param name="teamId">
+            When given, narrows to entries scoped to that team plus entries scoped to none. Entries with
+            no team belong to every team's view of the project.
+            </param>
+            <param name="skip">Rows to skip.</param>
+            <param name="take">Rows to return.</param>
+            <param name="ct">Cancellation token.</param>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Backlog.Repositories.IBacklogRepository.GetWorkItemsAsync(System.Collections.Generic.IReadOnlyCollection{System.Guid},System.Threading.CancellationToken)">
+            <summary>The work items behind a page of backlog entries, with their tags.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Backlog.Repositories.IBacklogRepository.GetChildCountsAsync(System.Collections.Generic.IReadOnlyCollection{System.Guid},System.Threading.CancellationToken)">
+            <summary>How many active children each of these work items has.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Backlog.Repositories.IBacklogRepository.GetWorkItemInProjectAsync(System.Guid,System.Guid,System.Threading.CancellationToken)">
+            <summary>An active work item, if it belongs to this project.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Backlog.Repositories.IBacklogRepository.GetEntryAsync(System.Guid,System.Guid,System.Threading.CancellationToken)">
+            <summary>One backlog entry, tracked for mutation, or null.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Backlog.Repositories.IBacklogRepository.GetEntriesAsync(System.Guid,System.Collections.Generic.IReadOnlyCollection{System.Guid},System.Threading.CancellationToken)">
+            <summary>The named backlog entries of a project, tracked for mutation.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Backlog.Repositories.IBacklogRepository.GetEntriesForSprintAsync(System.Guid,System.Collections.Generic.IReadOnlyCollection{System.Guid},System.Threading.CancellationToken)">
+            <summary>
+            The named entries that are currently assigned to one sprint, tracked for mutation.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Backlog.Repositories.IBacklogRepository.GetAllEntriesAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Every backlog entry of a project, tracked for mutation.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Backlog.Repositories.IBacklogRepository.GetMaxRankAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>The lowest-priority rank currently in use, or null when the backlog is empty.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Backlog.Services.BacklogService">
+            <summary>
+            The product backlog: which work items a project is carrying, and in what order.
+            </summary>
+            <remarks>
+            <para>
+            A backlog entry owns <em>rank</em>, and nothing else. Whether an item is in a sprint is the
+            Sprints module's business, so the two bulk operations here delegate to
+            <see cref="T:BoardSync.Api.Modules.Sprints.Services.ISprintService"/> rather than writing <c>SprintWorkItem</c> rows themselves. That is
+            not tidiness: sprint membership carries an authorization rule — a work item may only join a
+            sprint belonging to its own team — and a second writer would be a second place for that rule to
+            be forgotten. <c>SprintId</c> here is a cached view of the answer, not the answer.
+            </para>
+            </remarks>
         </member>
         <member name="M:BoardSync.Api.Modules.Backlog.Services.IBacklogService.GetForProjectAsync(System.Guid,System.Nullable{System.Guid},BoardSync.Api.Shared.Kernel.PaginationQuery,System.Threading.CancellationToken)">
             <summary>
@@ -769,11 +868,44 @@
             Also creates SprintWorkItem rows so the sprint service sees them immediately.
             </summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.Backlog.Services.IBacklogService.ReturnToBacklogAsync(System.Guid,BoardSync.Api.Modules.Backlog.DTOs.ReturnToBacklogRequest,System.Threading.CancellationToken)">
+        <member name="M:BoardSync.Api.Modules.Backlog.Services.IBacklogService.ReturnToBacklogAsync(System.Guid,BoardSync.Api.Modules.Backlog.DTOs.ReturnToBacklogRequest,System.Guid,System.Threading.CancellationToken)">
             <summary>
-            Return items from a sprint back to the unscheduled backlog.
-            Removes their SprintWorkItem rows and clears SprintId on the backlog entry.
+            Return items from the named sprint back to the unscheduled backlog.
+            Clears SprintId on the backlog entry and asks the Sprints module to drop the membership.
             </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Backlog.Services.IBacklogSprintLink">
+            <summary>
+            The one thing the Sprints module needs from the backlog: releasing entries when their sprint
+            lets them go.
+            </summary>
+            <remarks>
+            <para>
+            Exists to break a dependency cycle. The backlog needs the Sprints module, because putting an item
+            into a sprint carries a rule the Sprints module owns. Closing a sprint needs the backlog, because
+            incomplete items go back to it. Wiring both as whole services makes
+            <c>SprintService → BacklogService → SprintService</c>, which the container refuses to resolve.
+            </para>
+            <para>
+            Narrowing one direction to this fixes it honestly rather than by indirection: sprint close does
+            not want the backlog *service*, it wants one field cleared. This depends on the backlog
+            repository and nothing else, so nothing points back.
+            </para>
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Backlog.Services.IBacklogSprintLink.ClearSprintAsync(System.Guid,System.Collections.Generic.IReadOnlyCollection{System.Guid},System.Threading.CancellationToken)">
+            <summary>
+            Clears the sprint assignment on the named entries, returning them to the unscheduled backlog.
+            </summary>
+            <remarks>
+            Scoped to <paramref name="sprintId"/>, so an item that also sits in another sprint keeps that
+            membership. Entries not in this sprint are left alone rather than treated as an error — the
+            caller is releasing a sprint, not asserting what was in it.
+            </remarks>
+            <returns>How many entries were released.</returns>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Backlog.Services.BacklogSprintLink">
+            <inheritdoc />
         </member>
         <member name="T:BoardSync.Api.Modules.Notifications.Controllers.NotificationsController">
             <summary>
@@ -1205,7 +1337,7 @@
         <member name="T:BoardSync.Api.Modules.OrgProject.Domain.DTOs.OrganizationSummaryRecord">
              <summary>
              Read models returned by the OrgProject repositories.
-
+            
              These exist for list/aggregate queries where returning an entity would force the caller to
              load navigation collections purely to count them. They are projected in SQL and are not
              tracked, so they must never be used for mutation — take the entity for that.
@@ -1215,7 +1347,7 @@
         <member name="M:BoardSync.Api.Modules.OrgProject.Domain.DTOs.OrganizationSummaryRecord.#ctor(System.Guid,System.String,System.String,System.String,System.String,System.Boolean,System.Int32,System.Int32,System.DateTime)">
              <summary>
              Read models returned by the OrgProject repositories.
-
+            
              These exist for list/aggregate queries where returning an entity would force the caller to
              load navigation collections purely to count them. They are projected in SQL and are not
              tracked, so they must never be used for mutation — take the entity for that.
@@ -1333,7 +1465,7 @@
         <member name="T:BoardSync.Api.Modules.OrgProject.Repositories.Interfaces.IOrganizationRepository">
              <summary>
              Persistence for the Organization aggregate and its memberships.
-
+            
              Pure unit of work: <c>Add</c>/<c>Remove</c> stage changes in memory and nothing is written
              until <see cref="M:BoardSync.Api.Modules.OrgProject.Repositories.Interfaces.IOrganizationRepository.SaveChangesAsync(System.Threading.CancellationToken)"/> is called, so a service can compose several writes into
              one transaction.
@@ -1366,7 +1498,7 @@
         <member name="M:BoardSync.Api.Modules.OrgProject.Repositories.Interfaces.IOrganizationRepository.ExecuteInTransactionAsync(System.Func{System.Threading.CancellationToken,System.Threading.Tasks.Task},System.Threading.CancellationToken)">
              <summary>
              Runs <paramref name="operation"/> inside a single database transaction, retried as a unit.
-
+            
              Needed because creating an organization also writes a role assignment owned by the RBAC
              module, which saves through its own service — so the work cannot be folded into one
              <see cref="M:BoardSync.Api.Modules.OrgProject.Repositories.Interfaces.IOrganizationRepository.SaveChangesAsync(System.Threading.CancellationToken)"/>. Every repository and service in a request shares the same
@@ -3277,7 +3409,7 @@
              <summary>
              Data access for the WorkItems module. Owns every query against the <c>work</c> schema
              (work items, tags, comments, history, links) so that no other layer touches the DbContext.
-
+            
              Mutations are staged in-memory and only persisted by <see cref="M:BoardSync.Api.Modules.WorkItems.Repository.IWorkItemRepository.SaveChangesAsync(System.Threading.CancellationToken)"/>, which
              lets the service decide the transaction boundary (e.g. a work item, its tags and its first
              history row are written in a single save).
@@ -3960,6 +4092,38 @@
         <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase2_FractionalRanks.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
             <inheritdoc />
         </member>
+        <member name="T:BoardSync.Api.Shared.Data.Migrations.Phase4_Backlog">
+            <summary>
+            Intentionally empty.
+            </summary>
+            <remarks>
+            <para>
+            Scaffolded alongside the backlog module, but it never contained the backlog table — that is
+            created by <c>20260811110255_AddSprintsAndBoards</c>, which is misnamed but correct. What this
+            one held was a single <c>AddColumn</c> for <c>work.WorkItems.xmin</c>.
+            </para>
+            <para>
+            <c>xmin</c> is Postgres' own system column, mapped in <c>BoardSyncDbContext</c> as a
+            concurrency token and deliberately backed by no column of ours. Creating it is not merely
+            redundant — Postgres rejects the name, so applying this migration as written fails and blocks
+            every migration after it. The scaffolder emits it whenever the model snapshot has drifted;
+            the snapshot has since been corrected so it stops being suggested.
+            </para>
+            <para>
+            Emptied rather than deleted so the migration history stays stable for anyone who has already
+            recorded this id.
+            </para>
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase4_Backlog.Up(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase4_Backlog.Down(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase4_Backlog.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
+            <inheritdoc />
+        </member>
         <member name="T:BoardSync.Api.Shared.Data.Migrations.Stage2_TeamPositions">
             <summary>
             Makes the role/scope pairing and the single-holder rule for team positions structural.
@@ -3978,18 +4142,6 @@
             <inheritdoc />
         </member>
         <member name="M:BoardSync.Api.Shared.Data.Migrations.Stage2_TeamPositions.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
-            <inheritdoc />
-        </member>
-        <member name="T:BoardSync.Api.Shared.Data.Migrations.Phase4_Backlog">
-            <inheritdoc />
-        </member>
-        <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase4_Backlog.Up(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
-            <inheritdoc />
-        </member>
-        <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase4_Backlog.Down(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
-            <inheritdoc />
-        </member>
-        <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase4_Backlog.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
             <inheritdoc />
         </member>
         <member name="T:BoardSync.Api.Shared.Kernel.BaseEntity">
@@ -4038,7 +4190,7 @@
         <member name="T:BoardSync.Api.Shared.Kernel.Configuration.RateLimitSettings">
              <summary>
              Rate limiting configuration, bound from the "RateLimiting" configuration section.
-
+            
              Every window is applied <b>per caller</b> — partitioned by authenticated user ID when the
              request carries one, otherwise by client IP. A limit is never shared across unrelated
              callers, so one user exhausting their budget cannot lock anybody else out.
@@ -4166,7 +4318,7 @@
              time a message was read back. Identity would then differ on every redelivery, which defeats the
              whole point of keying idempotency on <see cref="P:BoardSync.Api.Shared.Kernel.Events.DomainEvent.EventId"/>: the unique index would never see a
              duplicate and handlers would happily record the same event twice.
-
+            
              <c>init</c> keeps the record immutable to callers while still letting the deserializer restore
              the original values.
              </remarks>
@@ -4223,7 +4375,7 @@
              <remarks>
              Subscription is DI registration: register an <see cref="T:BoardSync.Api.Shared.Kernel.Events.IEventHandler`1"/> and the
              dispatcher will resolve and invoke it.
-
+            
              Handlers must be <b>idempotent</b>. The outbox delivers at least once, so the same event can
              arrive twice — after a dispatcher crash between running the handlers and marking the row
              dispatched, for instance. Key any write on <see cref="P:BoardSync.Api.Shared.Kernel.Events.IDomainEvent.EventId"/>.
