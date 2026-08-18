@@ -41,13 +41,19 @@ public sealed class InvalidatingRbacService : IRbacService
     // ── Reads ─────────────────────────────────────────────────────────────────
     // Pass-through. Caching happens beneath this, on the grants themselves.
 
-    public Task<bool> HasRoleAsync(
+    public Task<bool> HasPermissionAsync(
         Guid userId,
-        RoleType minimumRole,
+        string permission,
         RoleScope scope,
         Guid scopeId,
         CancellationToken ct = default)
-        => _inner.HasRoleAsync(userId, minimumRole, scope, scopeId, ct);
+        => _inner.HasPermissionAsync(userId, permission, scope, scopeId, ct);
+
+    public Task<bool> HasPermissionAnywhereAsync(
+        Guid userId,
+        string permission,
+        CancellationToken ct = default)
+        => _inner.HasPermissionAnywhereAsync(userId, permission, ct);
 
     public Task<IReadOnlyList<RoleAssignment>> GetUserRolesAsync(Guid userId, CancellationToken ct = default)
         => _inner.GetUserRolesAsync(userId, ct);
@@ -101,6 +107,42 @@ public sealed class InvalidatingRbacService : IRbacService
     {
         await _inner.RemoveAllRolesInOrganizationAsync(userId, organizationId, ct);
         await InvalidateAsync(userId);
+    }
+
+    /// <remarks>
+    /// A transfer changes what two people may do, so both generations advance — the incoming holder
+    /// and whoever the position was taken from.
+    /// </remarks>
+    public async Task<Guid?> TransferTeamPositionAsync(
+        Guid teamId,
+        RoleType position,
+        Guid toUserId,
+        Guid assignedBy,
+        CancellationToken ct = default)
+    {
+        var previous = await _inner.TransferTeamPositionAsync(teamId, position, toUserId, assignedBy, ct);
+
+        await InvalidateAsync(toUserId);
+
+        if (previous is Guid from)
+            await _version.BumpAsync(from);
+
+        return previous;
+    }
+
+    public async Task<Guid?> VacateTeamPositionAsync(
+        Guid teamId,
+        RoleType position,
+        CancellationToken ct = default)
+    {
+        var previous = await _inner.VacateTeamPositionAsync(teamId, position, ct);
+
+        _memo.Clear();
+
+        if (previous is Guid from)
+            await _version.BumpAsync(from);
+
+        return previous;
     }
 
     private async Task InvalidateAsync(Guid userId)

@@ -46,7 +46,14 @@ public class WorkItemService : IWorkItemService
         Guid createdBy,
         CancellationToken ct = default)
     {
-        Enum.TryParse<WorkItemType>(request.Type, ignoreCase: true, out WorkItemType workItemTypeParsed);
+        // The parse result is checked rather than discarded. Ignoring it left the out parameter at
+        // its default — Epic — so an unrecognised or misspelled type was silently created as an
+        // epic instead of being rejected, and the caller got a 201 describing something they had
+        // not asked for.
+        if (!Enum.TryParse<WorkItemType>(request.Type, ignoreCase: true, out var workItemTypeParsed))
+            throw new BusinessRuleException(
+                $"'{request.Type}' is not a valid work item type. Valid types: {string.Join(", ", Enum.GetNames<WorkItemType>())}.");
+
         if (!await _projectService.ExistsAsync(projectId, ct))
             throw new NotFoundException("Project", projectId);
 

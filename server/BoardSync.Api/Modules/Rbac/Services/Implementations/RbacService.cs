@@ -62,38 +62,24 @@ public class RbacService : IRbacService
             role, userId, scope, scopeId);
     }
 
-    public async Task<bool> HasRoleAsync(
-        Guid userId,
-        RoleType minimumRole,
-        RoleScope scope,
-        Guid scopeId,
-        CancellationToken ct = default)
-    {
-        var effective = await GetEffectiveRoleAsync(userId, scope, scopeId, ct);
-
-        return AccessEvaluator.Satisfies(effective, minimumRole);
-    }
-
-    /// <summary>
-    /// The best role this user holds at one scope by any route, or null if they hold none.
-    /// </summary>
     /// <remarks>
     /// Loads the user's grants once, then locates the scope in the tree so
     /// <see cref="AccessEvaluator"/> can apply inheritance to it. Organization questions skip the
     /// lookup entirely — the organization is the root, so there is nothing above it to resolve.
     /// </remarks>
-    private async Task<RoleType?> GetEffectiveRoleAsync(
+    public async Task<bool> HasPermissionAsync(
         Guid userId,
+        string permission,
         RoleScope scope,
         Guid scopeId,
-        CancellationToken ct)
+        CancellationToken ct = default)
     {
         var snapshot = await _resolver.GetSnapshotAsync(userId, ct);
 
         switch (scope)
         {
             case RoleScope.Organization:
-                return AccessEvaluator.EffectiveOrganizationRole(snapshot, scopeId);
+                return AccessEvaluator.GrantsAtOrganization(snapshot, permission, scopeId);
 
             case RoleScope.Team:
             {
@@ -103,7 +89,7 @@ public class RbacService : IRbacService
                     ? null
                     : await _resolver.GetTeamOrganizationIdAsync(scopeId, ct);
 
-                return AccessEvaluator.EffectiveTeamRole(snapshot, scopeId, organizationId);
+                return AccessEvaluator.GrantsAtTeam(snapshot, permission, scopeId, organizationId);
             }
 
             case RoleScope.Project:
@@ -114,7 +100,7 @@ public class RbacService : IRbacService
                     ? null
                     : await _resolver.GetProjectLocationAsync(scopeId, ct);
 
-                return AccessEvaluator.EffectiveProjectRole(snapshot, scopeId, location);
+                return AccessEvaluator.GrantsAtProject(snapshot, permission, scopeId, location);
             }
 
             default:
@@ -146,6 +132,83 @@ public class RbacService : IRbacService
 
         _logger.LogInformation("Removed {Count} role(s) from user {UserId} at {Scope}:{ScopeId}",
             assignments.Count, userId, scope, scopeId);
+    }
+
+    public async Task<bool> HasPermissionAnywhereAsync(
+        Guid userId,
+        string permission,
+        CancellationToken ct = default)
+    {
+        // Answered entirely from the snapshot — no scope to locate, so no tree lookup.
+        var snapshot = await _resolver.GetSnapshotAsync(userId, ct);
+
+        return AccessEvaluator.GrantsAnywhere(snapshot, permission);
+    }
+
+    public async Task<Guid?> TransferTeamPositionAsync(
+        Guid teamId,
+        RoleType position,
+        Guid toUserId,
+        Guid assignedBy,
+        CancellationToken ct = default)
+    {
+        if (!TeamPositions.Includes(position))
+            throw new ArgumentOutOfRangeException(
+                nameof(position), position, "Not a team position.");
+
+        var holders = await _repository.GetHoldersOfTeamPositionAsync(teamId, position, ct);
+        var previous = holders.FirstOrDefault(h => h.UserId != toUserId);
+
+        // Remove every current holder, not just the one we happened to read first. The unique index
+        // should make more than one impossible, but a position silently held by two people is
+        // exactly the state this operation exists to prevent, so it is cleared rather than assumed.
+        foreach (var holder in holders.Where(h => h.UserId != toUserId))
+            _repository.Remove(holder);
+
+        var alreadyHeld = holders.Any(h => h.UserId == toUserId);
+
+        if (!alreadyHeld)
+        {
+            var assignment = new RoleAssignment
+            {
+                UserId = toUserId,
+                Role = position,
+                Scope = RoleScope.Team,
+                TeamId = teamId,
+                CreatedBy = assignedBy
+            };
+
+            _repository.Add(assignment);
+        }
+
+        await _repository.SaveChangesAsync(ct);
+
+        _logger.LogInformation(
+            "Team {TeamId} position {Position} transferred from {Previous} to {UserId} by {ActingUser}",
+            teamId, position, previous?.UserId, toUserId, assignedBy);
+
+        return previous?.UserId;
+    }
+
+    public async Task<Guid?> VacateTeamPositionAsync(
+        Guid teamId,
+        RoleType position,
+        CancellationToken ct = default)
+    {
+        if (!TeamPositions.Includes(position))
+            throw new ArgumentOutOfRangeException(
+                nameof(position), position, "Not a team position.");
+
+        var holders = await _repository.GetHoldersOfTeamPositionAsync(teamId, position, ct);
+
+        if (holders.Count == 0) return null;
+
+        _repository.RemoveRange(holders);
+        await _repository.SaveChangesAsync(ct);
+
+        _logger.LogInformation("Team {TeamId} position {Position} vacated", teamId, position);
+
+        return holders[0].UserId;
     }
 
     public async Task RemoveAllRolesInOrganizationAsync(

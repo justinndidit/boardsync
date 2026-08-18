@@ -3,7 +3,8 @@ using BoardSync.Api.Modules.Rbac.Models;
 namespace BoardSync.Api.Modules.Rbac.Services;
 
 /// <summary>
-/// Turns a user's grants into an answer about one scope. Pure: no I/O, no state, no dependencies.
+/// Decides whether a user's grants permit something at one scope. Pure: no I/O, no state, no
+/// dependencies.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -23,115 +24,122 @@ namespace BoardSync.Api.Modules.Rbac.Services;
 /// would hand them the sprints of every sibling project.
 /// </para>
 /// <para>
-/// Being pure is what makes this testable without a database and what lets both the cached and
-/// uncached paths share one definition of the rules. Anything needing I/O — loading the snapshot,
-/// locating a project in the tree — happens before this is called.
+/// Answers are computed by <b>union</b>, never by comparison. A user may hold several roles at one
+/// scope, and holding one role does not imply another: a Scrum Master and a Product Owner are peers.
+/// What each role permits is declared in <see cref="RolePermissions"/>.
+/// </para>
+/// <para>
+/// Being pure is what makes this testable without a database and what lets the cached and uncached
+/// paths share one definition of the rules. Anything needing I/O — loading the snapshot, locating a
+/// project in the tree — happens before this is called.
 /// </para>
 /// </remarks>
 public static class AccessEvaluator
 {
     /// <summary>
-    /// The user's effective role at an organization, or null if they hold none.
+    /// Whether the user may do <paramref name="permission"/> at an organization.
     /// </summary>
     /// <remarks>
     /// Organizations are the root, so there is nothing above them to inherit from — a direct
-    /// assignment is the only way to hold a role here.
+    /// assignment is the only way to hold anything here.
     /// </remarks>
-    public static RoleType? EffectiveOrganizationRole(AccessSnapshot snapshot, Guid organizationId) =>
-        snapshot.OrganizationRoles.TryGetValue(organizationId, out var role) ? role : null;
+    public static bool GrantsAtOrganization(
+        AccessSnapshot snapshot, string permission, Guid organizationId)
+    {
+        foreach (var role in AccessSnapshot.RolesAt(snapshot.OrganizationRoles, organizationId))
+            if (RolePermissions.ForOrganization(role).Contains(permission))
+                return true;
+
+        return false;
+    }
 
     /// <summary>
-    /// The user's effective role on a team, or null if they hold none.
+    /// Whether the user may do <paramref name="permission"/> on a team.
     /// </summary>
     /// <param name="snapshot">The user's grants.</param>
+    /// <param name="permission">The capability being asked about.</param>
     /// <param name="teamId">The team being asked about.</param>
     /// <param name="organizationId">
     /// The team's owning organization, or null when it could not be resolved (a team that no longer
     /// exists). Null simply means org-admin inheritance cannot be applied, so the answer falls back
     /// to direct grants.
     /// </param>
-    public static RoleType? EffectiveTeamRole(
-        AccessSnapshot snapshot,
-        Guid teamId,
-        Guid? organizationId)
+    public static bool GrantsAtTeam(
+        AccessSnapshot snapshot, string permission, Guid teamId, Guid? organizationId)
     {
-        var best = snapshot.TeamRoles.TryGetValue(teamId, out var direct) ? direct : (RoleType?)null;
+        foreach (var role in AccessSnapshot.RolesAt(snapshot.TeamRoles, teamId))
+            if (RolePermissions.ForTeam(role).Contains(permission))
+                return true;
 
-        if (organizationId is Guid org && IsOrgAdmin(snapshot, org))
-            best = MostPrivileged(best, RoleType.OrgAdmin);
-
-        return best;
+        return organizationId is Guid org
+            && GrantsAtOrganization(snapshot, permission, org);
     }
 
     /// <summary>
-    /// The user's effective role on a project, or null if they hold none.
+    /// Whether the user may do <paramref name="permission"/> <em>anywhere at all</em>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// For the handful of endpoints that are not keyed on a scope and cannot be — looking a user up
+    /// by email during an invite, for instance, where the whole point is to find someone who is not
+    /// yet in any of your organizations. There is no scope to name, so the question becomes whether
+    /// the caller holds this authority somewhere.
+    /// </para>
+    /// <para>
+    /// A weaker guarantee than the scoped checks, and deliberately so: it establishes that the caller
+    /// administers <em>something</em>, not that they administer the thing they are asking about. Use
+    /// it only where no scope exists to check, never as a shortcut for one that does.
+    /// </para>
+    /// </remarks>
+    public static bool GrantsAnywhere(AccessSnapshot snapshot, string permission)
+    {
+        foreach (var roles in snapshot.OrganizationRoles.Values)
+            foreach (var role in roles)
+                if (RolePermissions.ForOrganization(role).Contains(permission))
+                    return true;
+
+        foreach (var roles in snapshot.TeamRoles.Values)
+            foreach (var role in roles)
+                if (RolePermissions.ForTeam(role).Contains(permission)
+                    || RolePermissions.ForProjectViaTeam(role).Contains(permission))
+                    return true;
+
+        foreach (var roles in snapshot.ProjectRoles.Values)
+            foreach (var role in roles)
+                if (RolePermissions.ForProject(role).Contains(permission))
+                    return true;
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether the user may do <paramref name="permission"/> on a project.
     /// </summary>
     /// <param name="snapshot">The user's grants.</param>
+    /// <param name="permission">The capability being asked about.</param>
     /// <param name="projectId">The project being asked about.</param>
     /// <param name="location">
     /// Where the project sits in the tree, or null when it could not be resolved (a project that no
     /// longer exists). Null falls back to direct project grants only.
     /// </param>
     /// <remarks>
-    /// Three ways to hold a role on a project, and the most privileged wins:
-    /// a direct project assignment, OrgAdmin of the owning organization, or a grant on the team the
-    /// project is assigned to.
+    /// Three routes, and any one of them suffices: a direct project assignment, a grant on the team
+    /// the project is assigned to, or OrgAdmin of the owning organization.
     /// </remarks>
-    public static RoleType? EffectiveProjectRole(
-        AccessSnapshot snapshot,
-        Guid projectId,
-        ProjectLocation? location)
+    public static bool GrantsAtProject(
+        AccessSnapshot snapshot, string permission, Guid projectId, ProjectLocation? location)
     {
-        var best = snapshot.ProjectRoles.TryGetValue(projectId, out var direct) ? direct : (RoleType?)null;
+        foreach (var role in AccessSnapshot.RolesAt(snapshot.ProjectRoles, projectId))
+            if (RolePermissions.ForProject(role).Contains(permission))
+                return true;
 
         if (location is null)
-            return best;
+            return false;
 
-        if (IsOrgAdmin(snapshot, location.OrganizationId))
-            best = MostPrivileged(best, RoleType.OrgAdmin);
+        foreach (var role in AccessSnapshot.RolesAt(snapshot.TeamRoles, location.AssignedTeamId))
+            if (RolePermissions.ForProjectViaTeam(role).Contains(permission))
+                return true;
 
-        if (snapshot.TeamRoles.TryGetValue(location.AssignedTeamId, out var teamRole))
-            best = MostPrivileged(best, ProjectRoleFromTeamRole(teamRole));
-
-        return best;
+        return GrantsAtOrganization(snapshot, permission, location.OrganizationId);
     }
-
-    /// <summary>
-    /// Whether <paramref name="held"/> satisfies a requirement of <paramref name="minimumRole"/>.
-    /// </summary>
-    /// <remarks>
-    /// Lower <see cref="RoleType"/> value means more privileged, so a role satisfies a requirement
-    /// when its value is less than or equal to it. This comparison stays in memory on purpose:
-    /// <c>RoleType</c> is persisted with <c>HasConversion&lt;string&gt;()</c>, so the same
-    /// comparison in SQL would order the <em>names</em> — under which 'TeamMember' &lt;= 'Reader'
-    /// is false and 'Reader' &lt;= 'TeamMember' is true, denying team members read access and
-    /// letting readers perform team-member writes.
-    /// </remarks>
-    public static bool Satisfies(RoleType? held, RoleType minimumRole) =>
-        held is RoleType role && (int)role <= (int)minimumRole;
-
-    // -------------------------------------------------------------------------
-    // Private helpers
-    // -------------------------------------------------------------------------
-
-    private static bool IsOrgAdmin(AccessSnapshot snapshot, Guid organizationId) =>
-        snapshot.OrganizationRoles.TryGetValue(organizationId, out var role) && role == RoleType.OrgAdmin;
-
-    /// <summary>
-    /// What a grant on a team confers on that team's projects.
-    /// </summary>
-    /// <remarks>
-    /// Clamped so it can never exceed <see cref="RoleType.TeamMember"/> — contribution, not
-    /// administration. Two reasons. A team can serve several projects, so anything higher would let
-    /// a grant on the shared team administer every one of them. And nothing today assigns a role
-    /// more privileged than TeamMember at team scope, so a row that says otherwise is corrupt data
-    /// rather than an intention worth honouring. Raising this ceiling is a deliberate act — it is
-    /// what introducing a team-lead role will mean.
-    /// </remarks>
-    private static RoleType ProjectRoleFromTeamRole(RoleType teamRole) =>
-        (int)teamRole < (int)RoleType.TeamMember ? RoleType.TeamMember : teamRole;
-
-    /// <summary>The more privileged of two roles, treating null as "nothing held".</summary>
-    private static RoleType MostPrivileged(RoleType? a, RoleType b) =>
-        a is RoleType held && (int)held < (int)b ? held : b;
 }

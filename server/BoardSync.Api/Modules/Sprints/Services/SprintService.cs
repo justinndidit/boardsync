@@ -20,7 +20,7 @@ public class SprintService : ISprintService
     private readonly ISprintRepository _repository;
     private readonly IWorkItemRepository _workItems;
     private readonly IEventBus _eventBus;
-    private readonly IBacklogService _backlogService;
+    private readonly IBacklogSprintLink _backlog;
     private readonly ILogger<SprintService> _logger;
     private readonly BoardSyncDbContext _context;   // ← added field
 
@@ -30,14 +30,14 @@ public class SprintService : ISprintService
         ISprintRepository repository,
         IWorkItemRepository workItems,
         IEventBus eventBus,
-        IBacklogService backlogService,
+        IBacklogSprintLink backlog,
         ILogger<SprintService> logger)
     {
         _context        = context;        // ← now properly assigned
         _repository     = repository;
         _workItems      = workItems;
         _eventBus       = eventBus;
-        _backlogService = backlogService;
+        _backlog = backlog;
         _logger         = logger;
     }
 
@@ -208,6 +208,21 @@ public class SprintService : ISprintService
     }
 
     // ── Backlog ───────────────────────────────────────────────────────────────
+
+    public async Task<bool> IsDecompositionOfSprintWorkAsync(
+        Guid sprintId,
+        Guid workItemId,
+        CancellationToken ct = default)
+    {
+        var workItem = await _workItems.GetActiveAsync(workItemId, ct);
+
+        // A missing item is not a decomposition of anything. Saying no here also keeps the caller
+        // on the path that reports the item as not found, rather than as forbidden.
+        if (workItem?.ParentId is not Guid parentId)
+            return false;
+
+        return await _repository.BacklogContainsAsync(sprintId, parentId, ct);
+    }
 
     public async Task<SprintWorkItemResponse> AddWorkItemAsync(
         Guid sprintId,
@@ -412,10 +427,9 @@ public class SprintService : ISprintService
         {
             if (request.IncompleteItemsDestination == IncompleteItemsDestination.ReturnToBacklog)
             {
-                await _backlogService.ReturnToBacklogAsync(
-                    projectId,
-                    new Backlog.DTOs.ReturnToBacklogRequest { WorkItemIds = incompleteIds },
-                    ct);
+                // Only the backlog entries this sprint held; an item that also sits in another
+                // sprint keeps that membership. The sprint-side rows are dropped below.
+                await _backlog.ClearSprintAsync(sprintId, incompleteIds, ct);
             }
             else
             {

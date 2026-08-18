@@ -66,7 +66,7 @@ public class TeamService : ITeamService
             CreatedBy = createdBy
         };
 
-        // Team, the creator's membership and the creator's TeamMember role must all land or none:
+        // Team, the creator's membership and the creator's TeamLead position must all land or none:
         // the role saves through the RBAC module's own service, so it cannot be folded into the
         // save above, and a team whose creator holds no role on it is not administrable.
         await _teamRepo.ExecuteInTransactionAsync(async token =>
@@ -81,7 +81,12 @@ public class TeamService : ITeamService
             _eventBus.Enqueue(new TeamCreated(team.Id, orgId, team.Name, createdBy));
             await _teamRepo.SaveChangesAsync(token);
 
-            await _rbac.AssignRoleAsync(createdBy, RoleType.ProjectAdmin, RoleScope.Team, team.Id, createdBy, token);
+            // TeamLead, not ProjectAdmin. 'ProjectAdmin at team scope' was the only way to satisfy
+            // the old team guards, which asked for a rank rather than a capability — but it named
+            // authority over a project while granting authority over a team, and the database now
+            // rejects the pairing outright. TeamLead is that authority said plainly, and it makes
+            // the creator the team's first position holder rather than an anonymous administrator.
+            await _rbac.AssignRoleAsync(createdBy, RoleType.TeamLead, RoleScope.Team, team.Id, createdBy, token);
         }, ct);
 
         _logger.LogInformation("Team '{Name}' ({Id}) created in organization {OrganizationId} by {UserId}",

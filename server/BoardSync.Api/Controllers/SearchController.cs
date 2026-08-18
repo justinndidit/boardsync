@@ -1,6 +1,7 @@
 using BoardSync.Api.Modules.OrgProject.Domain.DTOs;
 using BoardSync.Api.Modules.Search.Services;
 using BoardSync.Api.Shared.Auth;
+using BoardSync.Api.Shared.Auth.Authorization;
 using BoardSync.Api.Shared.Auth.DTOs;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -35,6 +36,8 @@ public class SearchController : ControllerBase
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Matched hits grouped by resource type, up to 10 results per category.</returns>
     [HttpGet]
+    [NoPermissionRequired(
+        "Results are scoped inside the query to the organizations the caller belongs to, so there is no single scope to gate on.")]
     [ProducesResponseType(typeof(ApiResponse<GlobalSearchResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> Search([FromQuery] string q, CancellationToken ct)

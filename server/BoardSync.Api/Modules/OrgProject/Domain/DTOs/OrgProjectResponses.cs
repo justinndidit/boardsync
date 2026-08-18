@@ -117,3 +117,12 @@ public record GlobalSearchResponse(
     IReadOnlyList<SearchHit> Members,
     IReadOnlyList<SearchHit> WorkItems
 );
+
+/// <summary>
+/// One of a team's positions and who holds it. <c>UserId</c> is null when the position is vacant,
+/// which is a legitimate state rather than an error.
+/// </summary>
+public record TeamPositionResponse(
+    RoleType Position,
+    Guid? UserId
+);

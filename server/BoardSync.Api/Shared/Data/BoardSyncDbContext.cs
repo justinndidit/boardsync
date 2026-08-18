@@ -186,6 +186,15 @@ public class BoardSyncDbContext : DbContext
             // "WHERE <scope column> IS NOT NULL"). They are deliberately not modelled here:
             // a plain composite HasIndex over the three nullable columns would be useless,
             // because Postgres treats NULLs as distinct and would accept unlimited duplicates.
+            //
+            // Two more constraints live in raw SQL for the same reason, added by the
+            // Stage2_TeamPositions migration:
+            //   CK_RoleAssignment_RoleMatchesScope          a role must be one that means something
+            //                                               at the scope it is held (see
+            //                                               RolePermissions.IsValidAt)
+            //   IX_RoleAssignments_OneHolderPerTeamPosition  one TeamLead / ScrumMaster /
+            //                                               ProductOwner per team, partial on
+            //                                               "TeamId" IS NOT NULL
             entity.HasIndex(r => new { r.Scope, r.ProjectId, r.TeamId, r.OrganizationId });
             entity.HasIndex(r => r.UserId);
             entity.HasIndex(r => r.TeamId);

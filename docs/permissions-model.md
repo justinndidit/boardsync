@@ -1,6 +1,6 @@
 # Permissions: Current State and Target Model
 
-Status: **Stages 0 and 1 shipped**, Stages 2–4 proposed · Scope: `server/BoardSync.Api` ·
+Status: **Stages 0–3 shipped**, Stage 4 proposed · Scope: `server/BoardSync.Api` ·
 Companion to `docs/scaling-realtime-caching.md` (§5.2 specifies the RBAC cache this builds on)
 
 This document records what the permission system did before this work, the defects the audit
@@ -593,11 +593,18 @@ Still open before Stage 2 can start:
 - [ ] Scope/role check constraint
 - [ ] Call sites migrated module by module; `HasRoleAsync` deleted
 
-**Stage 3**
-- [ ] `[RequirePermission]` endpoint filter, scope resolved pre-handler
-- [ ] 404 for both denial and absence
-- [ ] Test project created
-- [ ] Reflection test: every non-anonymous action carries a permission attribute
+**Stage 2** — shipped
+- [x] Permission constants and role→permission map; `AccessSnapshot` holds role sets
+- [x] `TeamLead`, `ScrumMaster`, `ProductOwner`; appointment, transfer and vacancy endpoints
+- [x] Scope/role check constraint and one-holder-per-position index
+- [x] All 56 call sites migrated; `HasRoleAsync` deleted
+
+**Stage 3** — shipped
+- [x] `[RequirePermission]` endpoint filter, scope resolved pre-handler
+- [x] Scope resolver registry for ids that are not scopes
+- [x] 404 when the caller cannot see the scope, 403 when they can (§9.5)
+- [x] Test project created — 357 tests
+- [x] Reflection test: every action declares its authorization, with justified exemptions
 
 **Stage 4**
 - [ ] `PrincipalType`; `Guid.Empty` made explicitly invalid
@@ -701,13 +708,139 @@ Verified with the original exploit, which now fails at step one:
 The Stage 0 and Stage 1 suites were re-run against the same build: 12/12 and 5/5, no regressions.
 22 checks green in total.
 
+### 9.4 Stage 2 — what shipped
+
+`HasRoleAsync` is gone. All 56 guards now name a permission, `RolePermissions` is the single table
+saying who may do what, and the three positions exist and transfer.
+
+**Deviations worth recording:**
+
+*`Reader` was not renamed and `User` was not removed.* Both were slated to retire in §4.2. Renaming
+`Reader` to `Viewer` is churn across 30 call sites and a data migration, for a word; `User` is
+declared but never assigned, so removing it only risks an old row failing to parse. Both stay, with
+`User` documented as legacy. The permission table now carries the meaning, so the names matter less
+than they did.
+
+*Organization-scope `ProjectAdmin` and `TeamMember` are no longer assignable — a breaking change.*
+`AssignableOrgRoles` accepted them and they granted nothing beyond organization read, because only
+OrgAdmin ever inherited downwards. Under a permission table an unmapped pairing grants nothing
+*silently*, which turns a misleading option into a trap: an administrator sets someone to
+"ProjectAdmin" at org level and hands them nothing. The migration rewrites existing such rows to
+`Reader` — exactly the power they actually had — and a check constraint now rejects them.
+
+*The scaffolder wanted to add an `xmin` column.* It is Postgres' own system column, mapped as a
+concurrency token and deliberately backed by no column of ours. Left out of the migration; the model
+snapshot was corrected so it stops being re-scaffolded.
+
+**Found in passing, not fixed:** `WorkItemService.cs:50` calls `Enum.TryParse` for the work item type
+and discards the result, so an unrecognised type silently becomes `Epic` (value 0) rather than being
+rejected. Outside this work's scope, but it is a validation hole that will produce confusing data.
+
+**Verified**, against Postgres and Redis with real HTTP — 44 checks, all passing:
+
+| Property | How it was proven |
+| --- | --- |
+| Positions start vacant | All three listed with no holder on a new team |
+| Appointment requires membership | Appointing a non-member → 400 |
+| Bogus positions rejected | `PUT .../positions/Wizard` → 400 |
+| **Scrum Master can run sprints** | Was OrgAdmin-only (§3.2); a plain member 403s, the appointed Scrum Master creates and starts one |
+| Positions are not ranks | A plain team member still 403s while the Scrum Master succeeds |
+| Transfer is atomic and singular | Bob → Carol: Carol gains, Bob loses, **exactly one row** in the database |
+| A holder may hand over | Carol transfers her own position back without `team:role:assign` |
+| Vacating works | Position cleared, holder loses sprint management, OrgAdmin unaffected |
+| **Creating work is never gated** | A plain member still creates work items freely |
+| `sprint:scope` holds | A plain member cannot commit a loose task to the sprint → 403 |
+| **Decomposition is exempt** | The same member adds a child of a committed story → 201 |
+| No regressions | Stages 0/1, reassignment and the §3.10 exploit suites all still green |
+
+### 9.5 Stage 3 — declarative enforcement and the test project
+
+Guards moved from the first line of an action body onto its signature:
+
+```csharp
+[HttpPut("api/sprints/{sprintId:guid}")]
+[RequirePermission(Permissions.SprintManage, From = "sprintId")]
+```
+
+**The scope resolver registry** is what made this possible. `From` names a route parameter, and an
+`IScopeResolver` turns it into a scope — `workItemId → its project`, `sprintId → its team`,
+`commentId`/`linkId`/`columnId` one hop further out. Each resolver is registered by the module that
+owns the data it walks, so this did not become a place where every module's queries accumulate.
+`orgId`, `teamId` and `projectId` resolve to themselves.
+
+**On 403 versus 404.** §3.6 asked for 404 on both denial and absence. Applied bluntly that is wrong:
+someone who can see a project but lacks `project:admin` knows perfectly well it exists, and answering
+"not found" to their rename makes the UI unexplainable. The rule shipped splits on **visibility**:
+
+| Situation | Answer |
+| --- | --- |
+| Scope does not exist | 404 |
+| Caller cannot read the scope | 404 — indistinguishable from the above, which is the disclosure this closes |
+| Caller can read it but lacks the permission | 403 — true, and actionable |
+
+**The coverage test is the durable part.** `EveryEndpointDeclaresItsAuthorization` enumerates the
+controller surface by reflection and fails for any action that declares nothing, so it covers
+endpoints nobody thought to write a case for. Three more tests keep the declarations honest:
+permissions must be real constants (a typo is a permission nobody holds — it fails closed, silently,
+and looks like a broken feature), the named route parameter must actually be in the route, and every
+exemption must state a reason.
+
+Exemptions are two attributes, deliberately not one. `[NoPermissionRequired]` means no check is
+needed — self-scoped endpoints like `GetMe`, `GetMyOrgs`, or `Search`, whose results are scoped
+inside the query to the caller's own organizations. `[PermissionCheckedInAction]` means a real check
+exists that an attribute cannot express: the sprint-scope rule, which depends on the item's parent,
+and position assignment, which permits the current holder. Conflating them would make the exemption
+list useless for telling which endpoints still deserve scrutiny.
+
+**What the test found on first run:** eight endpoints with no authorization declared at all —
+`AuthController`'s six self-scoped actions and `WorkspaceController`'s two aggregates. All were
+genuinely fine (each scopes to the caller's own id), but none of them said so, and nothing would have
+noticed if one had been wrong. That is the point.
+
+**Verified:** 357 unit tests and 44 integration checks, all passing. The integration suites needed
+six expectations changed from 403 to 404 — every one a caller who could not see the scope at all
+(outsiders, revoked users, org members on no team). No case where a caller who *could* see the
+resource wrongly received 404, and the "visible but insufficient" 403s still pass unchanged.
+
+### 9.6 §3.11 — user lookup by email, restricted
+
+`UsersController.GetByEmail` returned a `UserProfile` for **any** email to **any** authenticated
+caller. It documented itself as "used by OrgAdmins when inviting users" and checked for no such
+thing. The effect was a cross-tenant directory: anyone with an account could confirm whether
+`someone@a-competitor.com` was a user here and read their name.
+
+It now requires `org:member:manage` — the people who can actually invite.
+
+**Why an "anywhere" check.** There is no organization to check against: the person being looked up is,
+by definition, not yet in yours, and adding an `orgId` parameter would prove nothing extra, since an
+admin of org A looking up a stranger is exactly the legitimate case. So the question the endpoint can
+answer is "does this caller administer members somewhere", and
+`[RequirePermissionAnywhere(Permissions.OrgMemberManage)]` asks precisely that.
+
+This is a **weaker** guarantee than every other check in the system, and the attribute's own remarks
+say so. It narrows the audience from every authenticated account to organization administrators; it
+does not give tenant isolation, because the lookup's whole purpose is finding people outside your
+tenant. Reach for it only where no scope exists.
+
+Denial is 403 whether or not the address belongs to a real user, so a refused caller learns nothing —
+verified.
+
+**`GetById` was left open.** Resolving a user id to a profile is different in kind: ids are not
+guessable and they appear throughout the API as assignees, authors and members, so every screen that
+renders a name depends on it. It keeps `[NoPermissionRequired]` naming this section.
+
+**Verified**, 6 checks: an org admin may look up (invite flow intact); a user belonging to nothing may
+not; a plain team member may not; **a Team Lead may not** — they manage team members, not organization
+members, and the two permissions must not blur; promoting that same person to OrgAdmin grants it
+immediately; and a real address and a fake one return the same 403.
+
 ---
 
 ## 10. Recommendations on the remaining defects
 
 §3.1, §3.2 (partly), §3.3 and §3.7 are closed. What is left, and what to do about each.
 
-### 10.1 §3.5 — enforcement by convention, no tests · **do this with Stage 2**
+### 10.1 §3.5 — enforcement by convention, no tests · **closed in Stage 3, see §9.5**
 
 The highest-value remaining item, and the one most likely to produce the *next* hole rather than to
 be one today. The fix is the reflection test described in Stage 3: enumerate every controller action,

@@ -3,6 +3,7 @@ using System;
 using BoardSync.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace BoardSync.Api.Shared.Data.Migrations
 {
     [DbContext(typeof(BoardSyncDbContext))]
-    partial class BoardSyncDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260817095522_Stage2_TeamPositions")]
+    partial class Stage2_TeamPositions
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -100,52 +103,6 @@ namespace BoardSync.Api.Shared.Data.Migrations
                         .IsDescending(false, true);
 
                     b.ToTable("ActivityLogs", "activity");
-                });
-
-            modelBuilder.Entity("BoardSync.Api.Modules.Backlog.Models.BacklogItem", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid?>("CreatedBy")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uuid");
-
-                    b.Property<decimal>("Rank")
-                        .HasColumnType("numeric");
-
-                    b.Property<Guid?>("SprintId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid?>("TeamId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("WorkItemId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ProjectId");
-
-                    b.HasIndex("SprintId");
-
-                    b.HasIndex("WorkItemId");
-
-                    b.HasIndex("ProjectId", "Rank");
-
-                    b.HasIndex("ProjectId", "WorkItemId")
-                        .IsUnique();
-
-                    b.ToTable("BacklogItems", "plan");
                 });
 
             modelBuilder.Entity("BoardSync.Api.Modules.OrgProject.Domain.Models.Organization", b =>
