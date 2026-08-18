@@ -3127,6 +3127,18 @@
             committed to. An item with no parent, or a parent outside the sprint, is new scope.
             </remarks>
         </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Services.ISprintService.MoveWorkItemAsync(System.Guid,System.Guid,BoardSync.Api.Modules.Sprints.DTOs.MoveSprintWorkItemRequest,System.Threading.CancellationToken)">
+            <summary>
+            Moves a single backlog item between two neighbours. One row is written.
+            </summary>
+            <returns>The item's new rank, so the caller can confirm where it landed.</returns>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Services.ISprintService.CloseAsync(System.Guid,BoardSync.Api.Modules.Sprints.DTOs.CloseSprintRequest,System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Close an active sprint.
+            Marks it Completed and routes incomplete items to the backlog or a next sprint.
+            </summary>
+        </member>
         <member name="T:BoardSync.Api.Modules.Sprints.SprintScopeResolver">
             <summary>
             Resolves a sprint to the team that runs it.

@@ -27,7 +27,21 @@ public interface ISprintService
     Task<bool> IsDecompositionOfSprintWorkAsync(Guid sprintId, Guid workItemId, CancellationToken ct = default);
     Task RemoveWorkItemAsync(Guid sprintId, Guid workItemId, Guid removedBy, CancellationToken ct = default);
     Task<PagedResult<SprintWorkItemResponse>> GetWorkItemsAsync(Guid sprintId, PaginationQuery pagination, CancellationToken ct = default);
-    Task<decimal> MoveWorkItemAsync(Guid sprintId, Guid workItemId, MoveSprintWorkItemRequest request, CancellationToken ct = default);
+    /// <summary>
+    /// Moves a single backlog item between two neighbours. One row is written.
+    /// </summary>
+    /// <returns>The item's new rank, so the caller can confirm where it landed.</returns>
+    Task<decimal> MoveWorkItemAsync(
+        Guid sprintId,
+        Guid workItemId,
+        MoveSprintWorkItemRequest request,
+        CancellationToken ct = default);
+
     Task ReorderWorkItemsAsync(Guid sprintId, ReorderSprintWorkItemsRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// Close an active sprint.
+    /// Marks it Completed and routes incomplete items to the backlog or a next sprint.
+    /// </summary>
     Task<CloseSprintResponse> CloseAsync(Guid sprintId, CloseSprintRequest request, Guid closedBy, CancellationToken ct = default);
 }

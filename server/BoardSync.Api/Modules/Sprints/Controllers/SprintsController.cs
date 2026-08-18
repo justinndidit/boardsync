@@ -274,7 +274,7 @@ public class SprintsController : ControllerBase
 
     private async Task RequireProjectRoleAsync(Guid projectId, RoleType minimum, CancellationToken ct)
     {
-        if (!await _rbac.HasPermissionAsync(_currentUser.UserId, minimum, RoleScope.Project, projectId, ct))
+        if (!await _rbac.HasPermissionAsync(_currentUser.UserId, minimum.ToString(), RoleScope.Project, projectId, ct))
             throw new ForbiddenException();
     }
 }
