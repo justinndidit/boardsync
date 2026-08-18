@@ -15,7 +15,7 @@ rebuilt underneath, and five things need frontend work:
 | 1 | **Denials are now 404 when you cannot see the resource**, 403 when you can | ⚠️ **§5.1 — affects every error path.** Read this first. |
 | 2 | **Team members automatically get access to their team's projects** | §1 — screens gate on less than they used to. |
 | 3 | **New team positions**: Team Lead, Scrum Master, Product Owner | §6 — new endpoints, new UI. |
-| 4 | **Org roles narrowed** to `OrgAdmin` / `Reader` | ⚠️ §7.1 — dropdown must change. |
+| 4 | **Every role renamed to its scope**: `Reader` splits into `Member` / `Viewer`, project `TeamMember` becomes `Contributor` | ⚠️ **§7.4 — every role string you send or display changes.** |
 | 5 | **`GET /api/users/by-email` now needs member-management rights** | ⚠️ §7.2 — breaks mention/assignee pickers if used there. |
 
 Smaller behaviour changes worth knowing: §2 (last OrgAdmin), §3 (cascade), §4 (reassignment),
@@ -216,7 +216,7 @@ never required and still isn't.
 
 ## 7. Breaking changes
 
-### 7.1 Organization roles narrowed to `OrgAdmin` and `Reader`
+### 7.1 Organization roles narrowed to `OrgAdmin` and `Reader` (see §7.4 — `Reader` is now `Member`)
 
 `PUT /api/orgs/{orgId}/members/{userId}/role` previously accepted `ProjectAdmin` and `TeamMember`.
 It now returns **400** for them.
@@ -262,6 +262,49 @@ recognised — the parse result was discarded. It now returns **422**:
 
 ---
 
+### 7.4 ⚠️ Role names are now specific to their scope
+
+`RoleType` values changed. A role name now tells you which scope the grant is on, which was not true
+before: `Reader` meant "organization member" at org scope and "read-only" at the other two, and
+`TeamMember` at project scope named a team relationship that a project grant does not have.
+
+| Scope | Was | Now |
+| --- | --- | --- |
+| Organization | `Reader` | **`Member`** |
+| Team | `Reader` | **`Viewer`** |
+| Project | `Reader` | **`Viewer`** |
+| Project | `TeamMember` | **`Contributor`** |
+| Team | `TeamMember` | `TeamMember` — unchanged, the name is accurate here |
+| — | `User` | **deleted.** Assigned by no code path, granted nothing. |
+
+`OrgAdmin`, `ProjectAdmin`, `TeamLead`, `ScrumMaster` and `ProductOwner` are unchanged.
+
+The full vocabulary, which is now the complete list of what each endpoint accepts:
+
+| Scope | Roles |
+| --- | --- |
+| Organization | `OrgAdmin`, `Member` |
+| Team | `TeamLead`, `ScrumMaster`, `ProductOwner`, `TeamMember`, `Viewer` |
+| Project | `ProjectAdmin`, `Contributor`, `Viewer` |
+
+**What to change.** Roles are serialized as strings, so this touches both directions:
+
+- **Sending.** `PUT /api/orgs/{orgId}/members/{userId}/role` takes `OrgAdmin` or `Member`.
+  `POST /api/projects/{projectId}/roles` takes `ProjectAdmin`, `Contributor` or `Viewer`. Anything
+  else is a 400 whose message lists the roles that scope accepts.
+- **Displaying.** Any label map keyed on `Reader`, project-scope `TeamMember`, or `User` needs
+  updating. A member who displayed as "Reader" now arrives as "Member" at org scope and "Viewer" on
+  a team or project.
+- **Comparing.** If anything still orders roles or compares them numerically, stop — the numeric
+  values were meaningless before this change and are still meaningless. Ask about the specific
+  capability instead.
+
+Existing rows were migrated in place, so nobody's access changed: an org `Reader` is a `Member` with
+exactly the permissions they had, and a project `TeamMember` is a `Contributor` with exactly the
+permissions they had. This is a renaming, not a regrant.
+
+---
+
 ## 8. Bug fixes you may have coded around
 
 **Cross-organization work items could be pulled into a sprint.** `POST /api/sprints/{id}/workitems`
@@ -281,8 +324,8 @@ work around this, you can stop.
 
 - No routes added beyond §6, none removed or renamed.
 - No existing request or response body changed shape.
-- Organization-level `Reader` still grants nothing inside the organization. An org member on no team
-  holding no project role still sees no projects.
+- Organization membership (`Member`, formerly `Reader`) still grants nothing inside the
+  organization. An org member on no team holding no project role still sees no projects.
 - OrgAdmin still implicitly satisfies every check inside their organization.
 - Realtime message shapes, `SubscriptionRevoked` handling and replay semantics are unchanged.
 

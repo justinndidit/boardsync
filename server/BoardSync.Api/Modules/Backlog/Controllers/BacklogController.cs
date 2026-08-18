@@ -45,7 +45,7 @@ public class BacklogController : ControllerBase
     /// <summary>
     /// Get the unscheduled product backlog for a project, ordered by rank.
     /// Optionally filter to a specific team with ?teamId=.
-    /// Requires Reader.
+    /// Requires <c>workitem:read</c>.
     /// </summary>
     [HttpGet("api/projects/{projectId:guid}/backlog")]
     [RequirePermission(Permissions.WorkItemRead, From = "projectId")]
@@ -65,7 +65,7 @@ public class BacklogController : ControllerBase
     /// <summary>
     /// Add a work item to the project backlog.
     /// Idempotent — returns the existing entry if the item is already tracked.
-    /// Requires TeamMember.
+    /// Requires <c>workitem:write</c>.
     /// </summary>
     [HttpPost("api/projects/{projectId:guid}/backlog")]
     [RequirePermission(Permissions.WorkItemWrite, From = "projectId")]
@@ -85,7 +85,7 @@ public class BacklogController : ControllerBase
 
     /// <summary>
     /// Remove a work item from the project backlog.
-    /// Requires TeamMember.
+    /// Requires <c>workitem:write</c>.
     /// </summary>
     [HttpDelete("api/projects/{projectId:guid}/backlog/{workItemId:guid}")]
     [RequirePermission(Permissions.WorkItemWrite, From = "projectId")]
@@ -104,7 +104,7 @@ public class BacklogController : ControllerBase
     /// <summary>
     /// Reorder the backlog by providing the desired work item ID sequence.
     /// Items not included are pushed to the bottom in their original relative order.
-    /// Requires TeamMember.
+    /// Requires <c>workitem:write</c>.
     /// </summary>
     [HttpPatch("api/projects/{projectId:guid}/backlog/reorder")]
     [RequirePermission(Permissions.WorkItemWrite, From = "projectId")]
@@ -124,7 +124,7 @@ public class BacklogController : ControllerBase
     /// <summary>
     /// Move one or more backlog items into a sprint.
     /// Creates SprintWorkItem entries so the sprint board reflects the change immediately.
-    /// Requires TeamMember.
+    /// Requires <c>workitem:write</c>.
     /// </summary>
     [HttpPost("api/projects/{projectId:guid}/backlog/move-to-sprint")]
     [PermissionCheckedInAction(
@@ -146,7 +146,7 @@ public class BacklogController : ControllerBase
     /// <summary>
     /// Return sprint items back to the unscheduled backlog.
     /// Removes SprintWorkItem rows and clears the sprint assignment.
-    /// Requires TeamMember.
+    /// Requires <c>workitem:write</c>.
     /// </summary>
     [HttpPost("api/projects/{projectId:guid}/backlog/return-from-sprint")]
     [PermissionCheckedInAction(

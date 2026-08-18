@@ -23,12 +23,17 @@ namespace BoardSync.Api.Modules.OrgProject.Controllers;
 public class ProjectsController : ControllerBase
 {
     /// <summary>
-    /// Roles that are meaningful at project scope. OrgAdmin is organization-wide (and already
-    /// cascades down to every project in its org), and User is the "no permissions yet" default
-    /// carried by every authenticated account — neither is assignable here.
+    /// Roles that are meaningful at project scope — <c>ProjectAdmin</c>, <c>Contributor</c> and
+    /// <c>Viewer</c>.
     /// </summary>
-    private static readonly RoleType[] AssignableProjectRoles =
-        [RoleType.ProjectAdmin, RoleType.TeamMember, RoleType.Reader];
+    /// <remarks>
+    /// Read from the permission table rather than written out here, so it cannot disagree with what
+    /// the table and the check constraint accept. OrgAdmin is absent because it is organization-wide
+    /// and already reaches every project in its organization; granting it on one project would be a
+    /// narrower thing wearing a wider name.
+    /// </remarks>
+    private static readonly IReadOnlyList<RoleType> AssignableProjectRoles =
+        RolePermissions.AssignableAt(RoleScope.Project);
 
     private readonly IProjectService _projectService;
     private readonly IOrganizationService _orgService;
@@ -85,7 +90,7 @@ public class ProjectsController : ControllerBase
         return Ok(new ApiResponse<ProjectResponse>(true, "Project retrieved.", project));
     }
 
-    /// <summary>Update project details. Requires ProjectAdmin.</summary>
+    /// <summary>Update project details. Requires <c>project:admin</c>.</summary>
     [HttpPut("api/projects/{projectId:guid}")]
     [RequirePermission(Permissions.ProjectAdmin, From = "projectId")]
     [ProducesResponseType(typeof(ApiResponse<ProjectResponse>), StatusCodes.Status200OK)]
@@ -98,7 +103,7 @@ public class ProjectsController : ControllerBase
     }
 
     /// <summary>
-    /// Reassign the project to a different team in the same organization. Requires ProjectAdmin.
+    /// Reassign the project to a different team in the same organization. Requires <c>project:admin</c>.
     /// The project's board follows the new team, so its cards come from that team's active sprint.
     /// </summary>
     [HttpPut("api/projects/{projectId:guid}/team")]
@@ -119,7 +124,7 @@ public class ProjectsController : ControllerBase
     // ── Project-scope roles ───────────────────────────────────────────────────
 
     /// <summary>
-    /// List the project-scope role assignments for a project. Requires Reader.
+    /// List the project-scope role assignments for a project. Requires <c>project:read</c>.
     /// </summary>
     [HttpGet("api/projects/{projectId:guid}/roles")]
     [RequirePermission(Permissions.ProjectRead, From = "projectId")]
@@ -139,7 +144,7 @@ public class ProjectsController : ControllerBase
 
     /// <summary>
     /// Grant a user a role on this project, replacing any project-scope role they already hold.
-    /// Requires ProjectAdmin. Valid roles: ProjectAdmin, TeamMember, Reader.
+    /// Requires <c>project:member:manage</c>. Valid roles: ProjectAdmin, Contributor, Viewer.
     /// </summary>
     /// <remarks>
     /// This is how a member of the organization gains access to a project's work items —
@@ -188,7 +193,7 @@ public class ProjectsController : ControllerBase
     }
 
     /// <summary>
-    /// Revoke a user's project-scope role. Requires ProjectAdmin.
+    /// Revoke a user's project-scope role. Requires <c>project:member:manage</c>.
     /// The last remaining ProjectAdmin cannot be revoked.
     /// </summary>
     [HttpDelete("api/projects/{projectId:guid}/roles/{userId:guid}")]

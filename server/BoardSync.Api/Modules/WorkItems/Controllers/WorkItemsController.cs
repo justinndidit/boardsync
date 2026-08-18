@@ -113,7 +113,7 @@ public class WorkItemsController : ControllerBase
         return Ok(new ApiResponse<WorkItemResponse>(true, "Work item state updated.", updated));
     }
 
-    /// <summary>Soft-delete a work item. Requires ProjectAdmin.</summary>
+    /// <summary>Soft-delete a work item. Requires <c>workitem:delete</c>.</summary>
     [HttpDelete("api/workitems/{workItemId:guid}")]
     [RequirePermission(Permissions.WorkItemDelete, From = "workItemId")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]

@@ -25,15 +25,17 @@ namespace BoardSync.Api.Modules.OrgProject.Controllers;
 public class OrganizationsController : ControllerBase
 {
     /// <summary>
-    /// Roles assignable at organization scope. User is the "no permissions yet" default carried by
-    /// every authenticated account and is never granted explicitly.
+    /// Roles assignable at organization scope — <c>OrgAdmin</c> and <c>Member</c>.
     /// </summary>
-    private static readonly RoleType[] AssignableOrgRoles =
-        // Only these two mean anything at organization scope. 'ProjectAdmin' and 'TeamMember' used
-        // to be accepted here and granted nothing beyond organization read, which made them a trap:
-        // an administrator would set someone to ProjectAdmin expecting authority over projects and
-        // hand them none. Project authority is a project-scope grant.
-        [RoleType.OrgAdmin, RoleType.Reader];
+    /// <remarks>
+    /// Read from the permission table rather than written out here, so this cannot drift from what
+    /// the table and the check constraint actually accept. It did drift once: 'ProjectAdmin' and
+    /// 'TeamMember' were assignable at organization scope and granted nothing beyond organization
+    /// read, which made them a trap — an administrator would set someone to ProjectAdmin expecting
+    /// authority over projects and hand them none. Project authority is a project-scope grant.
+    /// </remarks>
+    private static readonly IReadOnlyList<RoleType> AssignableOrgRoles =
+        RolePermissions.AssignableAt(RoleScope.Organization);
 
     private readonly IOrganizationService _orgService;
     private readonly IRbacService _rbac;
@@ -112,7 +114,7 @@ public class OrganizationsController : ControllerBase
         return Ok(new ApiResponse<OrganizationResponse>(true, "Organization updated.", org));
     }
 
-    /// <summary>List all members of an organization with their roles. Requires Reader.</summary>
+    /// <summary>List all members of an organization with their roles. Requires <c>org:read</c>.</summary>
     [HttpGet("{orgId:guid}/members")]
     [RequirePermission(Permissions.OrgRead, From = "orgId")]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<OrgMemberResponse>>), StatusCodes.Status200OK)]
@@ -149,7 +151,7 @@ public class OrganizationsController : ControllerBase
 
     /// <summary>
     /// Update a member's role within this organization. Requires OrgAdmin.
-    /// Valid roles: OrgAdmin, ProjectAdmin, TeamMember, Reader.
+    /// Valid roles: OrgAdmin, Member.
     /// </summary>
     [HttpPut("{orgId:guid}/members/{userId:guid}/role")]
     [RequirePermission(Permissions.OrgMemberManage, From = "orgId")]
@@ -177,7 +179,7 @@ public class OrganizationsController : ControllerBase
 
     /// <summary>
     /// Everything that has happened in this organization, newest first: work item, project, team,
-    /// sprint and board changes, plus membership and role changes. Requires Reader, which every
+    /// sprint and board changes, plus membership and role changes. Requires <c>org:read</c>, which every
     /// organization member holds — membership always carries at least that role.
     /// </summary>
     /// <remarks>
