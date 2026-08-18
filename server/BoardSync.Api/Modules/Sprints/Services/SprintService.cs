@@ -209,6 +209,21 @@ public class SprintService : ISprintService
 
     // ── Backlog ───────────────────────────────────────────────────────────────
 
+    public async Task<bool> IsDecompositionOfSprintWorkAsync(
+        Guid sprintId,
+        Guid workItemId,
+        CancellationToken ct = default)
+    {
+        var workItem = await _workItems.GetActiveAsync(workItemId, ct);
+
+        // A missing item is not a decomposition of anything. Saying no here also keeps the caller
+        // on the path that reports the item as not found, rather than as forbidden.
+        if (workItem?.ParentId is not Guid parentId)
+            return false;
+
+        return await _repository.BacklogContainsAsync(sprintId, parentId, ct);
+    }
+
   public async Task<SprintWorkItemResponse> AddWorkItemAsync(
     Guid sprintId,
     AddSprintWorkItemRequest request,

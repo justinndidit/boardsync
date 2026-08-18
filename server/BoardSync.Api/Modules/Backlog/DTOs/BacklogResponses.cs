@@ -9,7 +9,7 @@ public record BacklogItemResponse(
     Guid ProjectId,
     Guid? TeamId,
     Guid? SprintId,
-    int Rank,
+    decimal Rank,
     string Title,
     WorkItemType Type,
     WorkItemState State,

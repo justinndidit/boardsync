@@ -89,6 +89,19 @@ public interface IRoleAssignmentRepository
     Task<IReadOnlyList<Guid>> GetTeamMemberUserIdsAsync(Guid teamId, CancellationToken ct = default);
 
     /// <summary>
+    /// Everyone currently holding one position on a team, tracked for mutation.
+    /// </summary>
+    /// <remarks>
+    /// A list, not a single row, even though a partial unique index limits a position to one holder.
+    /// Reading it as a list is what lets a transfer clear the position outright rather than assume
+    /// the constraint has always held.
+    /// </remarks>
+    Task<IReadOnlyList<RoleAssignment>> GetHoldersOfTeamPositionAsync(
+        Guid teamId,
+        RoleType position,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Where a project sits in the scope tree, or null if it does not exist.
     /// </summary>
     Task<ProjectLocation?> GetProjectLocationAsync(Guid projectId, CancellationToken ct = default);

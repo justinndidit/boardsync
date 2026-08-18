@@ -32,27 +32,27 @@ public sealed class AccessResolver : IAccessResolver
         var assignments = await _repository.GetForUserAsync(userId, ct);
         var memberTeamIds = await _repository.GetMemberTeamIdsAsync(userId, ct);
 
-        var organizations = new Dictionary<Guid, RoleType>();
-        var teams = new Dictionary<Guid, RoleType>();
-        var projects = new Dictionary<Guid, RoleType>();
+        var organizations = new Dictionary<Guid, List<RoleType>>();
+        var teams = new Dictionary<Guid, List<RoleType>>();
+        var projects = new Dictionary<Guid, List<RoleType>>();
 
         foreach (var assignment in assignments)
         {
             // Read the scope column rather than trusting Scope alone: the check constraint
             // guarantees exactly one is populated, and that column is the authoritative target.
             if (assignment.OrganizationId is Guid orgId)
-                KeepMostPrivileged(organizations, orgId, assignment.Role);
+                Record(organizations, orgId, assignment.Role);
             else if (assignment.TeamId is Guid teamId)
-                KeepMostPrivileged(teams, teamId, assignment.Role);
+                Record(teams, teamId, assignment.Role);
             else if (assignment.ProjectId is Guid projectId)
-                KeepMostPrivileged(projects, projectId, assignment.Role);
+                Record(projects, projectId, assignment.Role);
         }
 
         // Membership of a team is a grant on that team in its own right. Folding it in here means a
         // membership row with no matching role row still works — and it is what carries access down
         // to the projects the team is assigned to.
         foreach (var teamId in memberTeamIds)
-            KeepMostPrivileged(teams, teamId, RoleType.TeamMember);
+            Record(teams, teamId, RoleType.TeamMember);
 
         return new AccessSnapshot(organizations, teams, projects);
     }
@@ -64,14 +64,20 @@ public sealed class AccessResolver : IAccessResolver
         _repository.GetTeamOrganizationIdAsync(teamId, ct);
 
     /// <summary>
-    /// Records <paramref name="role"/> against <paramref name="scopeId"/> unless something more
-    /// privileged is already there. Nothing stops a user holding several roles at one scope, and
-    /// the effective answer is the best of them.
+    /// Adds <paramref name="role"/> to what is held at <paramref name="scopeId"/>.
     /// </summary>
-    private static void KeepMostPrivileged(
-        Dictionary<Guid, RoleType> target, Guid scopeId, RoleType role)
+    /// <remarks>
+    /// Every role is kept, not just the "best" one — they are not ordered, and someone who is both
+    /// Scrum Master and Team Lead needs both sets of permissions. Duplicates are skipped because
+    /// team membership and an explicit TeamMember row commonly say the same thing.
+    /// </remarks>
+    private static void Record(
+        Dictionary<Guid, List<RoleType>> target, Guid scopeId, RoleType role)
     {
-        if (!target.TryGetValue(scopeId, out var existing) || (int)role < (int)existing)
-            target[scopeId] = role;
+        if (!target.TryGetValue(scopeId, out var roles))
+            target[scopeId] = roles = [];
+
+        if (!roles.Contains(role))
+            roles.Add(role);
     }
 }

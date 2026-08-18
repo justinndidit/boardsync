@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
 using System.Security.Claims;
+using BoardSync.Api.Shared.Auth.Authorization;
 
 namespace BoardSync.Api.Controllers;
 
@@ -144,6 +145,8 @@ public class AuthController : ControllerBase
     /// <response code="200">User logged out successfully</response>
     /// <response code="401">User not authenticated</response>
     [HttpPost("logout")]
+    [NoPermissionRequired(
+        "Ends the caller's own session; there is no other subject it could act on.")]
     [Authorize]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -215,6 +218,8 @@ public class AuthController : ControllerBase
     /// <response code="400">Token not provided</response>
     /// <response code="401">User not authenticated</response>
     [HttpPost("revoke-token")]
+    [NoPermissionRequired(
+        "Revokes the caller's own refresh token.")]
     [Authorize]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
@@ -372,6 +377,8 @@ public class AuthController : ControllerBase
     /// <response code="400">Invalid current password or validation errors</response>
     /// <response code="401">User not authenticated</response>
     [HttpPost("change-password")]
+    [NoPermissionRequired(
+        "Changes the caller's own password, verifying the current one first.")]
     [Authorize]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
@@ -396,6 +403,8 @@ public class AuthController : ControllerBase
     /// <response code="200">Token is valid and user profile was returned</response>
     /// <response code="401">Token is missing or invalid</response>
     [HttpGet("me")]
+    [NoPermissionRequired(
+        "Returns the caller's own identity from their token.")]
     [Authorize]
     [ProducesResponseType(typeof(ApiResponse<UserProfile>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -424,6 +433,8 @@ public class AuthController : ControllerBase
     /// <response code="401">User not authenticated</response>
     /// <response code="404">User profile not found</response>
     [HttpGet("profile")]
+    [NoPermissionRequired(
+        "Returns the caller's own profile.")]
     [Authorize]
     [ProducesResponseType(typeof(ApiResponse<UserProfile>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -454,6 +465,8 @@ public class AuthController : ControllerBase
     /// <response code="400">Validation errors</response>
     /// <response code="401">User not authenticated</response>
     [HttpPut("profile")]
+    [NoPermissionRequired(
+        "Updates the caller's own profile; the subject is taken from the token, not the request.")]
     [Authorize]
     [ProducesResponseType(typeof(ApiResponse<UserProfile>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]

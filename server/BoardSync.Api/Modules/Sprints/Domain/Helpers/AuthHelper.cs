@@ -19,9 +19,9 @@ public class AuthHelpers : IAuthHelpers
     _currentUser = currentUser;
   }
 
-    public async Task RequireProjectRoleAsync(Guid projectId, RoleType minimum, CancellationToken ct)
+    public async Task RequireProjectAsync(Guid projectId, string permission, CancellationToken ct)
     {
-        if (!await _rbac.HasRoleAsync(_currentUser.UserId, minimum, RoleScope.Project, projectId, ct))
+        if (!await _rbac.HasPermissionAsync(_currentUser.UserId, permission, RoleScope.Project, projectId, ct))
             throw new ForbiddenException();
     }
 }

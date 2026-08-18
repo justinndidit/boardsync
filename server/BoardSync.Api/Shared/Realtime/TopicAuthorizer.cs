@@ -51,16 +51,17 @@ public class TopicAuthorizer : ITopicAuthorizer
             // this is the one topic where being an OrgAdmin is not a reason to listen.
             TopicKind.User => id == userId,
 
-            // Reader is the floor for everything else: if you can read it over HTTP you can watch
-            // it over the socket, and if you cannot, you cannot.
+            // Reading is the floor for everything else: if you can read it over HTTP you can watch
+            // it over the socket, and if you cannot, you cannot. Each topic asks for the same
+            // permission the equivalent GET endpoint asks for.
             TopicKind.Organization =>
-                await _rbac.HasRoleAsync(userId, RoleType.Reader, RoleScope.Organization, id, ct),
+                await _rbac.HasPermissionAsync(userId, Permissions.OrgRead, RoleScope.Organization, id, ct),
 
             TopicKind.Project =>
-                await _rbac.HasRoleAsync(userId, RoleType.Reader, RoleScope.Project, id, ct),
+                await _rbac.HasPermissionAsync(userId, Permissions.ProjectRead, RoleScope.Project, id, ct),
 
             TopicKind.Team =>
-                await _rbac.HasRoleAsync(userId, RoleType.Reader, RoleScope.Team, id, ct),
+                await _rbac.HasPermissionAsync(userId, Permissions.TeamRead, RoleScope.Team, id, ct),
 
             // Sprints carry no scope of their own — they hang off a team — so the sprint's team is
             // resolved first and the team's role decides. A sprint that no longer exists denies.

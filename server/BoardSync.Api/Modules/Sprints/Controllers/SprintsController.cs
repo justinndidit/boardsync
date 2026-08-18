@@ -3,6 +3,7 @@ using BoardSync.Api.Modules.Rbac.Services.Interfaces;
 using BoardSync.Api.Modules.Sprints.DTOs;
 using BoardSync.Api.Modules.Sprints.Services;
 using BoardSync.Api.Shared.Auth;
+using BoardSync.Api.Shared.Auth.Authorization;
 using BoardSync.Api.Shared.Auth.DTOs;
 using BoardSync.Api.Shared.Kernel;
 using BoardSync.Api.Shared.Kernel.Exceptions;
@@ -68,6 +69,7 @@ public class SprintsController : ControllerBase
 
     /// <summary>Get a sprint by ID.</summary>
     [HttpGet("api/sprints/{sprintId:guid}")]
+    [RequirePermission(Permissions.SprintRead, From = "sprintId")]
     [ProducesResponseType(typeof(ApiResponse<SprintResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -97,6 +99,7 @@ public class SprintsController : ControllerBase
 
     /// <summary>Update a sprint's goal and dates. Only allowed while Planning. Requires ProjectAdmin.</summary>
     [HttpPut("api/sprints/{sprintId:guid}")]
+    [RequirePermission(Permissions.SprintManage, From = "sprintId")]
     [ProducesResponseType(typeof(ApiResponse<SprintResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
@@ -118,6 +121,7 @@ public class SprintsController : ControllerBase
     /// Requires ProjectAdmin.
     /// </summary>
     [HttpPatch("api/sprints/{sprintId:guid}/status")]
+    [RequirePermission(Permissions.SprintManage, From = "sprintId")]
     [ProducesResponseType(typeof(ApiResponse<SprintResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
@@ -136,6 +140,7 @@ public class SprintsController : ControllerBase
 
     /// <summary>Delete a Planning sprint with no work items. Requires ProjectAdmin.</summary>
     [HttpDelete("api/sprints/{sprintId:guid}")]
+    [RequirePermission(Permissions.SprintManage, From = "sprintId")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
@@ -153,6 +158,7 @@ public class SprintsController : ControllerBase
     /// or moved to a specified next sprint. Requires ProjectAdmin.
     /// </summary>
     [HttpPost("api/sprints/{sprintId:guid}/close")]
+    [RequirePermission(Permissions.SprintManage, From = "sprintId")]
     [ProducesResponseType(typeof(ApiResponse<CloseSprintResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
@@ -173,6 +179,7 @@ public class SprintsController : ControllerBase
 
     /// <summary>List work items in a sprint ordered by rank.</summary>
     [HttpGet("api/sprints/{sprintId:guid}/workitems")]
+    [RequirePermission(Permissions.SprintRead, From = "sprintId")]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<SprintWorkItemResponse>>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -189,6 +196,8 @@ public class SprintsController : ControllerBase
 
     /// <summary>Add a work item to the sprint backlog. Requires TeamMember.</summary>
     [HttpPost("api/sprints/{sprintId:guid}/workitems")]
+    [PermissionCheckedInAction(
+        "sprint:scope, unless the item decomposes work already in the sprint — depends on the item, not the caller alone.")]
     [ProducesResponseType(typeof(ApiResponse<SprintWorkItemResponse>), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
@@ -208,6 +217,8 @@ public class SprintsController : ControllerBase
 
     /// <summary>Remove a work item from the sprint backlog. Requires TeamMember.</summary>
     [HttpDelete("api/sprints/{sprintId:guid}/workitems/{workItemId:guid}")]
+    [PermissionCheckedInAction(
+        "sprint:scope, unless the item decomposes work already in the sprint.")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -224,6 +235,7 @@ public class SprintsController : ControllerBase
 
     /// <summary>Move a single backlog item between two neighbours (drag-and-drop). Requires TeamMember.</summary>
     [HttpPatch("api/sprints/{sprintId:guid}/workitems/{workItemId:guid}/move")]
+    [RequirePermission(Permissions.SprintOrder, From = "sprintId")]
     [ProducesResponseType(typeof(ApiResponse<MoveSprintWorkItemResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -242,6 +254,7 @@ public class SprintsController : ControllerBase
 
     /// <summary>Reorder the whole sprint backlog. Requires TeamMember.</summary>
     [HttpPatch("api/sprints/{sprintId:guid}/workitems/reorder")]
+    [RequirePermission(Permissions.SprintOrder, From = "sprintId")]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]

@@ -49,11 +49,12 @@ public interface IBacklogService
         CancellationToken ct = default);
 
     /// <summary>
-    /// Return items from a sprint back to the unscheduled backlog.
-    /// Removes their SprintWorkItem rows and clears SprintId on the backlog entry.
+    /// Return items from the named sprint back to the unscheduled backlog.
+    /// Clears SprintId on the backlog entry and asks the Sprints module to drop the membership.
     /// </summary>
     Task<BacklogBulkOperationResponse> ReturnToBacklogAsync(
         Guid projectId,
         ReturnToBacklogRequest request,
+        Guid returnedBy,
         CancellationToken ct = default);
 }

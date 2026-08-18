@@ -41,4 +41,11 @@ public class ReturnToBacklogRequest
     [Required]
     [MinLength(1)]
     public List<Guid> WorkItemIds { get; init; } = [];
+
+    /// <summary>
+    /// The sprint to return them from. Required: an item can sit in more than one sprint, and
+    /// without naming one this operation removed it from all of them.
+    /// </summary>
+    [Required]
+    public Guid SprintId { get; init; }
 }

@@ -188,9 +188,21 @@
         </member>
         <member name="M:BoardSync.Api.Controllers.UsersController.GetByEmail(System.String,System.Threading.CancellationToken)">
             <summary>
-            Search users by email address (exact match).
-            Used by OrgAdmins when inviting users to an organization.
+            Look a user up by email address (exact match). Requires the caller to manage members of some
+            organization.
             </summary>
+            <remarks>
+            This is the invite flow's lookup, and it is restricted to people who can actually invite.
+            Left open to any authenticated user it was a cross-tenant directory: anyone with an account
+            could confirm whether a given address belonged to a user here and read their name.
+            <para>
+            Checked with <c>anywhere</c> rather than against an organization because there is no
+            organization to check against — the person being looked up is, by definition, not yet in
+            yours. This establishes that the caller administers members somewhere; it cannot establish
+            more than that, and the residual exposure is recorded in
+            <c>docs/permissions-model.md</c> §9.6.
+            </para>
+            </remarks>
         </member>
         <member name="M:BoardSync.Api.Controllers.UsersController.GetMe(System.Threading.CancellationToken)">
             <summary>Get the currently authenticated user's own profile.</summary>
@@ -628,9 +640,9 @@
              <summary>
              Product backlog management scoped to a project.
             
-             Read:            Reader+
-             Reorder / move:  TeamMember+
-             Add / remove:    TeamMember+
+             Reading and reordering are project-scope questions. Moving items into or out of a sprint is not:
+             that changes what a team has committed to, so it is checked against the sprint's team with
+             <c>sprint:scope</c>, exactly as the equivalent endpoints on SprintsController are.
              </summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Backlog.Controllers.BacklogController.GetForProject(System.Guid,System.Nullable{System.Guid},BoardSync.Api.Shared.Kernel.PaginationQuery,System.Threading.CancellationToken)">
@@ -674,6 +686,17 @@
             Requires TeamMember.
             </summary>
         </member>
+        <member name="M:BoardSync.Api.Modules.Backlog.Controllers.BacklogController.RequireSprintScopeAsync(System.Guid,System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Guards changing what a sprint contains, from the backlog side.
+            </summary>
+            <remarks>
+            The route names a project, but committing work is a team-level decision, so the sprint is
+            resolved first and its team is what the permission is checked against. Without this the
+            backlog would be a way around the rule that the sprint's own endpoints enforce — the same
+            authority, reachable through a different door.
+            </remarks>
+        </member>
         <member name="T:BoardSync.Api.Modules.Backlog.DTOs.AddToBacklogRequest">
             <summary>Add a work item to the project backlog.</summary>
         </member>
@@ -695,10 +718,16 @@
         <member name="T:BoardSync.Api.Modules.Backlog.DTOs.ReturnToBacklogRequest">
             <summary>Return one or more sprint items back to the backlog.</summary>
         </member>
+        <member name="P:BoardSync.Api.Modules.Backlog.DTOs.ReturnToBacklogRequest.SprintId">
+            <summary>
+            The sprint to return them from. Required: an item can sit in more than one sprint, and
+            without naming one this operation removed it from all of them.
+            </summary>
+        </member>
         <member name="T:BoardSync.Api.Modules.Backlog.DTOs.BacklogItemResponse">
             <summary>A single item in the backlog list view.</summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.Backlog.DTOs.BacklogItemResponse.#ctor(System.Guid,System.Guid,System.Guid,System.Nullable{System.Guid},System.Nullable{System.Guid},System.Int32,System.String,BoardSync.Api.Modules.WorkItems.Models.WorkItemType,BoardSync.Api.Modules.WorkItems.Models.WorkItemState,BoardSync.Api.Modules.WorkItems.Models.WorkItemPriority,System.Nullable{System.Guid},System.Nullable{System.Int32},System.Collections.Generic.IReadOnlyList{System.String},System.Int32,System.DateTime)">
+        <member name="M:BoardSync.Api.Modules.Backlog.DTOs.BacklogItemResponse.#ctor(System.Guid,System.Guid,System.Guid,System.Nullable{System.Guid},System.Nullable{System.Guid},System.Decimal,System.String,BoardSync.Api.Modules.WorkItems.Models.WorkItemType,BoardSync.Api.Modules.WorkItems.Models.WorkItemState,BoardSync.Api.Modules.WorkItems.Models.WorkItemPriority,System.Nullable{System.Guid},System.Nullable{System.Int32},System.Collections.Generic.IReadOnlyList{System.String},System.Int32,System.DateTime)">
             <summary>A single item in the backlog list view.</summary>
         </member>
         <member name="T:BoardSync.Api.Modules.Backlog.DTOs.BacklogBulkOperationResponse">
@@ -721,13 +750,95 @@
             </summary>
         </member>
         <member name="P:BoardSync.Api.Modules.Backlog.Models.BacklogItem.Rank">
-            <summary>0-based display rank within the project backlog (lower = higher priority).</summary>
+            <summary>
+            Fractional sort key within the project backlog — lower sorts higher.
+            </summary>
+            <remarks>
+            Fractional rather than a 0-based index, matching <c>SprintWorkItem.Rank</c> and computed by
+            the same <c>Ranking</c> helper. Consecutive integers force a reorder to rewrite every row,
+            which makes two people dragging different cards silently revert each other — the product
+            backlog is the most concurrently-edited list in the system, so it wants this most.
+            </remarks>
         </member>
         <member name="P:BoardSync.Api.Modules.Backlog.Models.BacklogItem.SprintId">
             <summary>
             When set the item has been pulled into a sprint and should be hidden from
             the unscheduled backlog view.
             </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Backlog.Repositories.BacklogRepository">
+            <inheritdoc />
+        </member>
+        <member name="T:BoardSync.Api.Modules.Backlog.Repositories.IBacklogRepository">
+            <summary>
+            Data access for the product backlog — the <c>plan.BacklogItems</c> table.
+            </summary>
+            <remarks>
+            Pure unit of work: <c>Add</c>/<c>Remove</c> stage changes in memory and nothing is written until
+            <see cref="M:BoardSync.Api.Modules.Backlog.Repositories.IBacklogRepository.SaveChangesAsync(System.Threading.CancellationToken)"/>, so a service can compose several writes into one transaction.
+            <para>
+            Deliberately owns no sprint state. Backlog entries record <em>rank</em> and which sprint an item
+            was pulled into; membership of the sprint itself belongs to the Sprints module, which is the only
+            place that validates a work item may join a given sprint.
+            </para>
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Backlog.Repositories.IBacklogRepository.ProjectExistsAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Whether an active project exists, without loading it.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Backlog.Repositories.IBacklogRepository.GetUnscheduledPageAsync(System.Guid,System.Nullable{System.Guid},System.Int32,System.Int32,System.Threading.CancellationToken)">
+            <summary>
+            One page of the unscheduled backlog — entries with no sprint — ordered by rank.
+            </summary>
+            <param name="projectId">The project whose backlog to read.</param>
+            <param name="teamId">
+            When given, narrows to entries scoped to that team plus entries scoped to none. Entries with
+            no team belong to every team's view of the project.
+            </param>
+            <param name="skip">Rows to skip.</param>
+            <param name="take">Rows to return.</param>
+            <param name="ct">Cancellation token.</param>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Backlog.Repositories.IBacklogRepository.GetWorkItemsAsync(System.Collections.Generic.IReadOnlyCollection{System.Guid},System.Threading.CancellationToken)">
+            <summary>The work items behind a page of backlog entries, with their tags.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Backlog.Repositories.IBacklogRepository.GetChildCountsAsync(System.Collections.Generic.IReadOnlyCollection{System.Guid},System.Threading.CancellationToken)">
+            <summary>How many active children each of these work items has.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Backlog.Repositories.IBacklogRepository.GetWorkItemInProjectAsync(System.Guid,System.Guid,System.Threading.CancellationToken)">
+            <summary>An active work item, if it belongs to this project.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Backlog.Repositories.IBacklogRepository.GetEntryAsync(System.Guid,System.Guid,System.Threading.CancellationToken)">
+            <summary>One backlog entry, tracked for mutation, or null.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Backlog.Repositories.IBacklogRepository.GetEntriesAsync(System.Guid,System.Collections.Generic.IReadOnlyCollection{System.Guid},System.Threading.CancellationToken)">
+            <summary>The named backlog entries of a project, tracked for mutation.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Backlog.Repositories.IBacklogRepository.GetEntriesForSprintAsync(System.Guid,System.Collections.Generic.IReadOnlyCollection{System.Guid},System.Threading.CancellationToken)">
+            <summary>
+            The named entries that are currently assigned to one sprint, tracked for mutation.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Backlog.Repositories.IBacklogRepository.GetAllEntriesAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>Every backlog entry of a project, tracked for mutation.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Backlog.Repositories.IBacklogRepository.GetMaxRankAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>The lowest-priority rank currently in use, or null when the backlog is empty.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Backlog.Services.BacklogService">
+            <summary>
+            The product backlog: which work items a project is carrying, and in what order.
+            </summary>
+            <remarks>
+            <para>
+            A backlog entry owns <em>rank</em>, and nothing else. Whether an item is in a sprint is the
+            Sprints module's business, so the two bulk operations here delegate to
+            <see cref="T:BoardSync.Api.Modules.Sprints.Services.ISprintService"/> rather than writing <c>SprintWorkItem</c> rows themselves. That is
+            not tidiness: sprint membership carries an authorization rule — a work item may only join a
+            sprint belonging to its own team — and a second writer would be a second place for that rule to
+            be forgotten. <c>SprintId</c> here is a cached view of the answer, not the answer.
+            </para>
+            </remarks>
         </member>
         <member name="M:BoardSync.Api.Modules.Backlog.Services.IBacklogService.GetForProjectAsync(System.Guid,System.Nullable{System.Guid},BoardSync.Api.Shared.Kernel.PaginationQuery,System.Threading.CancellationToken)">
             <summary>
@@ -757,11 +868,44 @@
             Also creates SprintWorkItem rows so the sprint service sees them immediately.
             </summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.Backlog.Services.IBacklogService.ReturnToBacklogAsync(System.Guid,BoardSync.Api.Modules.Backlog.DTOs.ReturnToBacklogRequest,System.Threading.CancellationToken)">
+        <member name="M:BoardSync.Api.Modules.Backlog.Services.IBacklogService.ReturnToBacklogAsync(System.Guid,BoardSync.Api.Modules.Backlog.DTOs.ReturnToBacklogRequest,System.Guid,System.Threading.CancellationToken)">
             <summary>
-            Return items from a sprint back to the unscheduled backlog.
-            Removes their SprintWorkItem rows and clears SprintId on the backlog entry.
+            Return items from the named sprint back to the unscheduled backlog.
+            Clears SprintId on the backlog entry and asks the Sprints module to drop the membership.
             </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Backlog.Services.IBacklogSprintLink">
+            <summary>
+            The one thing the Sprints module needs from the backlog: releasing entries when their sprint
+            lets them go.
+            </summary>
+            <remarks>
+            <para>
+            Exists to break a dependency cycle. The backlog needs the Sprints module, because putting an item
+            into a sprint carries a rule the Sprints module owns. Closing a sprint needs the backlog, because
+            incomplete items go back to it. Wiring both as whole services makes
+            <c>SprintService → BacklogService → SprintService</c>, which the container refuses to resolve.
+            </para>
+            <para>
+            Narrowing one direction to this fixes it honestly rather than by indirection: sprint close does
+            not want the backlog *service*, it wants one field cleared. This depends on the backlog
+            repository and nothing else, so nothing points back.
+            </para>
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Backlog.Services.IBacklogSprintLink.ClearSprintAsync(System.Guid,System.Collections.Generic.IReadOnlyCollection{System.Guid},System.Threading.CancellationToken)">
+            <summary>
+            Clears the sprint assignment on the named entries, returning them to the unscheduled backlog.
+            </summary>
+            <remarks>
+            Scoped to <paramref name="sprintId"/>, so an item that also sits in another sprint keeps that
+            membership. Entries not in this sprint are left alone rather than treated as an error — the
+            caller is releasing a sprint, not asserting what was in it.
+            </remarks>
+            <returns>How many entries were released.</returns>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Backlog.Services.BacklogSprintLink">
+            <inheritdoc />
         </member>
         <member name="T:BoardSync.Api.Modules.Notifications.Controllers.NotificationsController">
             <summary>
@@ -1049,6 +1193,37 @@
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController.RemoveMember(System.Guid,System.Guid,System.Threading.CancellationToken)">
             <summary>Remove a member from a team. Requires ProjectAdmin.</summary>
         </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController.GetPositions(System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            List the team's positions and who holds each. Requires read access to the team.
+            </summary>
+            <remarks>
+            Every position is listed whether or not it is filled, so a vacancy is visible rather than
+            being an absence the caller has to infer.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController.AssignPosition(System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType,BoardSync.Api.Modules.OrgProject.Domain.DTOs.AssignTeamPositionRequest,System.Threading.CancellationToken)">
+            <summary>
+            Appoint someone to a team position, taking it from whoever holds it.
+            Requires <c>team:role:assign</c> — Team Lead or an org admin.
+            </summary>
+            <remarks>
+            One call rather than revoke-then-assign, so there is never a moment with the position half
+            transferred. The current holder may also hand over their own position; an org admin is the
+            backstop for when they cannot, which is the case this exists for.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController.VacatePosition(System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType,System.Threading.CancellationToken)">
+            <summary>
+            Leave a team position vacant. Requires <c>team:role:assign</c>.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController.RequirePositionAuthorityAsync(System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType,System.Threading.CancellationToken)">
+            <summary>
+            Permits the change when the caller may assign positions, or when they are handing over the
+            one they hold themselves.
+            </summary>
+        </member>
         <member name="T:BoardSync.Api.Modules.OrgProject.Controllers.WorkspaceController">
             <summary>
             Workspace-level aggregates: dashboard summary and activity feed, both scoped to the
@@ -1093,6 +1268,18 @@
         <member name="T:BoardSync.Api.Modules.OrgProject.Domain.DTOs.AssignProjectTeamRequest">
             <summary>Reassign a project to a different team in the same organization.</summary>
         </member>
+        <member name="T:BoardSync.Api.Modules.OrgProject.Domain.DTOs.AssignTeamPositionRequest">
+            <summary>
+            Who should hold a team position. No <c>[Required]</c>: a Guid cannot be absent, and an empty one
+            fails the team-membership check with a message that says what is actually wrong.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Domain.DTOs.AssignTeamPositionRequest.#ctor(System.Guid)">
+            <summary>
+            Who should hold a team position. No <c>[Required]</c>: a Guid cannot be absent, and an empty one
+            fails the team-membership check with a message that says what is actually wrong.
+            </summary>
+        </member>
         <member name="T:BoardSync.Api.Modules.OrgProject.Domain.DTOs.ProjectResponse">
             <remarks>
             A project has exactly one assigned team (a team may serve several projects), so the
@@ -1134,6 +1321,18 @@
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Domain.DTOs.GlobalSearchResponse.#ctor(System.Collections.Generic.IReadOnlyList{BoardSync.Api.Modules.OrgProject.Domain.DTOs.SearchHit},System.Collections.Generic.IReadOnlyList{BoardSync.Api.Modules.OrgProject.Domain.DTOs.SearchHit},System.Collections.Generic.IReadOnlyList{BoardSync.Api.Modules.OrgProject.Domain.DTOs.SearchHit},System.Collections.Generic.IReadOnlyList{BoardSync.Api.Modules.OrgProject.Domain.DTOs.SearchHit})">
             <summary>Response envelope for GET /api/search?q=.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.OrgProject.Domain.DTOs.TeamPositionResponse">
+            <summary>
+            One of a team's positions and who holds it. <c>UserId</c> is null when the position is vacant,
+            which is a legitimate state rather than an error.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Domain.DTOs.TeamPositionResponse.#ctor(BoardSync.Api.Modules.Rbac.Models.RoleType,System.Nullable{System.Guid})">
+            <summary>
+            One of a team's positions and who holds it. <c>UserId</c> is null when the position is vacant,
+            which is a legitimate state rather than an error.
+            </summary>
         </member>
         <member name="T:BoardSync.Api.Modules.OrgProject.Domain.DTOs.OrganizationSummaryRecord">
              <summary>
@@ -1177,6 +1376,30 @@
             <summary>
             A membership row joined to the member's user profile fields. The join to Users happens in SQL
             so that member listings can be paged and ordered by display name without loading every row.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.OrgProject.Domain.Events.TeamPositionTransferred">
+            <summary>
+            A team position changed hands. <c>FromUserId</c> is null when the position was vacant.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Domain.Events.TeamPositionTransferred.#ctor(System.Guid,System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType,System.Nullable{System.Guid},System.Guid,System.Guid)">
+            <summary>
+            A team position changed hands. <c>FromUserId</c> is null when the position was vacant.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.OrgProject.Domain.Events.TeamPositionVacated">
+            <summary>
+            A team position was left vacant. Nothing enforces that it is filled — a team can run without a
+            Scrum Master, and blocking a removal to avoid it would be the worse failure — so this exists so
+            somebody can be told.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.OrgProject.Domain.Events.TeamPositionVacated.#ctor(System.Guid,System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType,System.Guid,System.Guid)">
+            <summary>
+            A team position was left vacant. Nothing enforces that it is filled — a team can run without a
+            Scrum Master, and blocking a removal to avoid it would be the worse failure — so this exists so
+            somebody can be told.
             </summary>
         </member>
         <member name="T:BoardSync.Api.Modules.OrgProject.Domain.Helpers.Slug">
@@ -1468,10 +1691,12 @@
             </summary>
             <remarks>
             <para>
-            Each dictionary maps a scope id to the <em>most privileged</em> role the user holds directly at
-            that scope — lowest <see cref="T:BoardSync.Api.Modules.Rbac.Models.RoleType"/> value wins. Team membership is folded into
-            <see cref="P:BoardSync.Api.Modules.Rbac.Models.AccessSnapshot.TeamRoles"/> when the snapshot is built, because membership of a team is a grant on
-            that team whether or not a matching role row exists.
+            Each dictionary maps a scope id to <em>every</em> role the user holds directly at that scope.
+            A set rather than a single role, because the roles are not ordered: someone can be both the
+            Scrum Master and the Team Lead, and neither subsumes the other. What they may do is the union of
+            what those roles permit. Team membership is folded into <see cref="P:BoardSync.Api.Modules.Rbac.Models.AccessSnapshot.TeamRoles"/> when the snapshot
+            is built, because membership of a team is a grant on that team whether or not a matching role row
+            exists.
             </para>
             <para>
             <b>This holds grants, not their consequences.</b> It deliberately does not expand OrgAdmin into
@@ -1488,17 +1713,19 @@
             </para>
             </remarks>
         </member>
-        <member name="M:BoardSync.Api.Modules.Rbac.Models.AccessSnapshot.#ctor(System.Collections.Generic.Dictionary{System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType},System.Collections.Generic.Dictionary{System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType},System.Collections.Generic.Dictionary{System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType})">
+        <member name="M:BoardSync.Api.Modules.Rbac.Models.AccessSnapshot.#ctor(System.Collections.Generic.Dictionary{System.Guid,System.Collections.Generic.List{BoardSync.Api.Modules.Rbac.Models.RoleType}},System.Collections.Generic.Dictionary{System.Guid,System.Collections.Generic.List{BoardSync.Api.Modules.Rbac.Models.RoleType}},System.Collections.Generic.Dictionary{System.Guid,System.Collections.Generic.List{BoardSync.Api.Modules.Rbac.Models.RoleType}})">
             <summary>
             Everything the system knows about what one user has been granted, in a form that answers
             permission questions without touching the database.
             </summary>
             <remarks>
             <para>
-            Each dictionary maps a scope id to the <em>most privileged</em> role the user holds directly at
-            that scope — lowest <see cref="T:BoardSync.Api.Modules.Rbac.Models.RoleType"/> value wins. Team membership is folded into
-            <see cref="P:BoardSync.Api.Modules.Rbac.Models.AccessSnapshot.TeamRoles"/> when the snapshot is built, because membership of a team is a grant on
-            that team whether or not a matching role row exists.
+            Each dictionary maps a scope id to <em>every</em> role the user holds directly at that scope.
+            A set rather than a single role, because the roles are not ordered: someone can be both the
+            Scrum Master and the Team Lead, and neither subsumes the other. What they may do is the union of
+            what those roles permit. Team membership is folded into <see cref="P:BoardSync.Api.Modules.Rbac.Models.AccessSnapshot.TeamRoles"/> when the snapshot
+            is built, because membership of a team is a grant on that team whether or not a matching role row
+            exists.
             </para>
             <para>
             <b>This holds grants, not their consequences.</b> It deliberately does not expand OrgAdmin into
@@ -1518,25 +1745,110 @@
         <member name="P:BoardSync.Api.Modules.Rbac.Models.AccessSnapshot.Empty">
             <summary>A user with no grants anywhere. Every question against it answers no.</summary>
         </member>
-        <member name="T:BoardSync.Api.Modules.Rbac.Models.RoleType">
+        <member name="M:BoardSync.Api.Modules.Rbac.Models.AccessSnapshot.RolesAt(System.Collections.Generic.Dictionary{System.Guid,System.Collections.Generic.List{BoardSync.Api.Modules.Rbac.Models.RoleType}},System.Guid)">
             <summary>
-            Roles available in the system, ordered from most to least privileged within a scope.
+            The roles held at one scope id, or an empty span. A list rather than a set because these hold
+            at most a handful of entries, where scanning beats hashing and serialises more cheaply.
             </summary>
         </member>
+        <member name="T:BoardSync.Api.Modules.Rbac.Models.Permissions">
+            <summary>
+            Every capability the system gates on, named.
+            </summary>
+            <remarks>
+            <para>
+            These replaced a rank ladder. A ladder can express "at least a TeamMember" but cannot express
+            "may start a sprint" when the people who may do that — a Scrum Master and a Product Owner — are
+            peers rather than one being above the other. Roles are now bundles of these; see
+            <see cref="T:BoardSync.Api.Modules.Rbac.Models.RolePermissions"/>.
+            </para>
+            <para>
+            Constants rather than an enum so they can sit in an attribute argument and read the same way in
+            the code as they do in the design doc. The value is what appears in logs, so it is the name that
+            matters, not the identifier.
+            </para>
+            </remarks>
+        </member>
+        <member name="F:BoardSync.Api.Modules.Rbac.Models.Permissions.TeamManage">
+            <summary>Rename or archive the team.</summary>
+        </member>
+        <member name="F:BoardSync.Api.Modules.Rbac.Models.Permissions.TeamMemberManage">
+            <summary>Add and remove team members.</summary>
+        </member>
+        <member name="F:BoardSync.Api.Modules.Rbac.Models.Permissions.TeamRoleAssign">
+            <summary>Appoint, transfer and vacate the team's positions.</summary>
+        </member>
+        <member name="F:BoardSync.Api.Modules.Rbac.Models.Permissions.SprintManage">
+            <summary>Create, update, start, complete and delete sprints.</summary>
+        </member>
+        <member name="F:BoardSync.Api.Modules.Rbac.Models.Permissions.SprintScope">
+            <summary>
+            Decide what a sprint contains. Distinct from <see cref="F:BoardSync.Api.Modules.Rbac.Models.Permissions.SprintOrder"/> because what is in a
+            sprint is a commitment, while how it is ordered is execution.
+            </summary>
+        </member>
+        <member name="F:BoardSync.Api.Modules.Rbac.Models.Permissions.SprintOrder">
+            <summary>Move and reorder items within a sprint.</summary>
+        </member>
+        <member name="F:BoardSync.Api.Modules.Rbac.Models.Permissions.ProjectAdmin">
+            <summary>Rename, archive, and reassign the project's team.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Rbac.Models.RoleType">
+            <summary>
+            Roles available in the system.
+            </summary>
+            <remarks>
+            <para>
+            <b>The numeric values no longer carry meaning.</b> They were once a privilege ladder, compared
+            with <c>&lt;=</c> to answer "at least a TeamMember?". That stopped working the moment team
+            positions arrived: a Scrum Master and a Product Owner are peers holding different authority, and
+            no ordering of them is truthful. What a role permits is now declared in
+            <see cref="T:BoardSync.Api.Modules.Rbac.Models.RolePermissions"/> and resolved by union, never by comparison. The values remain only
+            because they are persisted, and are otherwise arbitrary.
+            </para>
+            <para>
+            Stored as names, so adding a value is a non-breaking change and removing one is not.
+            </para>
+            </remarks>
+        </member>
         <member name="F:BoardSync.Api.Modules.Rbac.Models.RoleType.OrgAdmin">
-            <summary>Can manage the entire organization: create/delete projects, manage all members.</summary>
+            <summary>Administers the entire organization and everything inside it.</summary>
         </member>
         <member name="F:BoardSync.Api.Modules.Rbac.Models.RoleType.ProjectAdmin">
-            <summary>Can manage a project: configure board, manage team members, create iterations.</summary>
+            <summary>Administers one project: its settings, its board, and its direct role grants.</summary>
+        </member>
+        <member name="F:BoardSync.Api.Modules.Rbac.Models.RoleType.TeamLead">
+            <summary>Leads a team: its composition, and who holds its positions.</summary>
+        </member>
+        <member name="F:BoardSync.Api.Modules.Rbac.Models.RoleType.ScrumMaster">
+            <summary>Owns a team's process: runs the sprint lifecycle.</summary>
+        </member>
+        <member name="F:BoardSync.Api.Modules.Rbac.Models.RoleType.ProductOwner">
+            <summary>Owns a team's backlog: decides what a sprint commits to.</summary>
         </member>
         <member name="F:BoardSync.Api.Modules.Rbac.Models.RoleType.TeamMember">
-            <summary>Full contributor on a team: create/edit/move work items, manage sprints.</summary>
+            <summary>Contributes on a team: creates and edits work, orders the sprint.</summary>
         </member>
         <member name="F:BoardSync.Api.Modules.Rbac.Models.RoleType.Reader">
-            <summary>Read-only stakeholder: can view boards, backlogs, and reports but cannot mutate.</summary>
+            <summary>Read-only: can view boards, backlogs and reports but cannot mutate.</summary>
         </member>
         <member name="F:BoardSync.Api.Modules.Rbac.Models.RoleType.User">
-            <summary>Regular authenticated user with no org-specific permissions yet assigned.</summary>
+            <summary>
+            Legacy. Never assigned by any code path and grants nothing; retained only because the column
+            stores names and an old row could still say so.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Rbac.Models.TeamPositions">
+            <summary>
+            The roles that are appointments rather than plain grants — held by one person per team at a
+            time, and handed over as an explicit act.
+            </summary>
+        </member>
+        <member name="F:BoardSync.Api.Modules.Rbac.Models.TeamPositions.All">
+            <summary>The positions, in the order a UI should list them.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Models.TeamPositions.Includes(BoardSync.Api.Modules.Rbac.Models.RoleType)">
+            <summary>Whether a role is a singular team position rather than an ordinary grant.</summary>
         </member>
         <member name="T:BoardSync.Api.Modules.Rbac.Models.RoleScope">
             <summary>
@@ -1564,6 +1876,59 @@
             For Scope=Organization this is the OrgId,
             for Scope=Project this is the ProjectId,
             for Scope=Team this is the TeamId.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Rbac.Models.RolePermissions">
+            <summary>
+            What each role permits, and how a grant at one scope reaches the scopes beneath it.
+            </summary>
+            <remarks>
+            <para>
+            This table is the permission model. Everything else — the resolver, the evaluator, the endpoint
+            guards — is machinery for applying it, so a question about who may do what is answered by reading
+            this file rather than by tracing call sites.
+            </para>
+            <para>
+            A user may hold several roles at one scope, and the answer is the <b>union</b> of what they
+            permit. Never a comparison: the roles are not ordered (see <see cref="T:BoardSync.Api.Modules.Rbac.Models.RoleType"/>).
+            </para>
+            </remarks>
+        </member>
+        <member name="F:BoardSync.Api.Modules.Rbac.Models.RolePermissions.ProjectContributor">
+            <summary>What contributing to a project means — read, write, comment, but not administer.</summary>
+        </member>
+        <member name="F:BoardSync.Api.Modules.Rbac.Models.RolePermissions.Everything">
+            <summary>
+            Everything. Held only by OrgAdmin, which by definition administers everything in its
+            organization, at every scope beneath it.
+            </summary>
+        </member>
+        <member name="F:BoardSync.Api.Modules.Rbac.Models.RolePermissions.TeamToProject">
+            <summary>
+            What a role held on a team permits on that team's projects.
+            </summary>
+            <remarks>
+            Every team role confers contribution and nothing more — deliberately flat. A team can serve
+            several projects, so letting a position administer them would hand its holder authority over
+            every sibling project at once. Project administration stays a direct project grant.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Models.RolePermissions.ForOrganization(BoardSync.Api.Modules.Rbac.Models.RoleType)">
+            <summary>What this role permits when held directly at an organization.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Models.RolePermissions.ForTeam(BoardSync.Api.Modules.Rbac.Models.RoleType)">
+            <summary>What this role permits when held directly at a team.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Models.RolePermissions.ForProject(BoardSync.Api.Modules.Rbac.Models.RoleType)">
+            <summary>What this role permits when held directly at a project.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Models.RolePermissions.ForProjectViaTeam(BoardSync.Api.Modules.Rbac.Models.RoleType)">
+            <summary>What this role, held at a team, permits on that team's projects.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Models.RolePermissions.IsValidAt(BoardSync.Api.Modules.Rbac.Models.RoleType,BoardSync.Api.Modules.Rbac.Models.RoleScope)">
+            <summary>
+            Whether a role may be assigned at a scope at all. Mirrors the database check constraint, so
+            a request is rejected before it reaches a constraint violation.
             </summary>
         </member>
         <member name="T:BoardSync.Api.Modules.Rbac.Repositories.Implementations.RoleAssignmentRepository">
@@ -1646,6 +2011,16 @@
             what both teams' members may see without touching anyone's role assignments.
             </remarks>
         </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Repositories.Interfaces.IRoleAssignmentRepository.GetHoldersOfTeamPositionAsync(System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType,System.Threading.CancellationToken)">
+            <summary>
+            Everyone currently holding one position on a team, tracked for mutation.
+            </summary>
+            <remarks>
+            A list, not a single row, even though a partial unique index limits a position to one holder.
+            Reading it as a list is what lets a transfer clear the position outright rather than assume
+            the constraint has always held.
+            </remarks>
+        </member>
         <member name="M:BoardSync.Api.Modules.Rbac.Repositories.Interfaces.IRoleAssignmentRepository.GetProjectLocationAsync(System.Guid,System.Threading.CancellationToken)">
             <summary>
             Where a project sits in the scope tree, or null if it does not exist.
@@ -1723,7 +2098,8 @@
         </member>
         <member name="T:BoardSync.Api.Modules.Rbac.Services.AccessEvaluator">
             <summary>
-            Turns a user's grants into an answer about one scope. Pure: no I/O, no state, no dependencies.
+            Decides whether a user's grants permit something at one scope. Pure: no I/O, no state, no
+            dependencies.
             </summary>
             <remarks>
             <para>
@@ -1743,26 +2119,32 @@
             would hand them the sprints of every sibling project.
             </para>
             <para>
-            Being pure is what makes this testable without a database and what lets both the cached and
-            uncached paths share one definition of the rules. Anything needing I/O — loading the snapshot,
-            locating a project in the tree — happens before this is called.
+            Answers are computed by <b>union</b>, never by comparison. A user may hold several roles at one
+            scope, and holding one role does not imply another: a Scrum Master and a Product Owner are peers.
+            What each role permits is declared in <see cref="T:BoardSync.Api.Modules.Rbac.Models.RolePermissions"/>.
+            </para>
+            <para>
+            Being pure is what makes this testable without a database and what lets the cached and uncached
+            paths share one definition of the rules. Anything needing I/O — loading the snapshot, locating a
+            project in the tree — happens before this is called.
             </para>
             </remarks>
         </member>
-        <member name="M:BoardSync.Api.Modules.Rbac.Services.AccessEvaluator.EffectiveOrganizationRole(BoardSync.Api.Modules.Rbac.Models.AccessSnapshot,System.Guid)">
+        <member name="M:BoardSync.Api.Modules.Rbac.Services.AccessEvaluator.GrantsAtOrganization(BoardSync.Api.Modules.Rbac.Models.AccessSnapshot,System.String,System.Guid)">
             <summary>
-            The user's effective role at an organization, or null if they hold none.
+            Whether the user may do <paramref name="permission"/> at an organization.
             </summary>
             <remarks>
             Organizations are the root, so there is nothing above them to inherit from — a direct
-            assignment is the only way to hold a role here.
+            assignment is the only way to hold anything here.
             </remarks>
         </member>
-        <member name="M:BoardSync.Api.Modules.Rbac.Services.AccessEvaluator.EffectiveTeamRole(BoardSync.Api.Modules.Rbac.Models.AccessSnapshot,System.Guid,System.Nullable{System.Guid})">
+        <member name="M:BoardSync.Api.Modules.Rbac.Services.AccessEvaluator.GrantsAtTeam(BoardSync.Api.Modules.Rbac.Models.AccessSnapshot,System.String,System.Guid,System.Nullable{System.Guid})">
             <summary>
-            The user's effective role on a team, or null if they hold none.
+            Whether the user may do <paramref name="permission"/> on a team.
             </summary>
             <param name="snapshot">The user's grants.</param>
+            <param name="permission">The capability being asked about.</param>
             <param name="teamId">The team being asked about.</param>
             <param name="organizationId">
             The team's owning organization, or null when it could not be resolved (a team that no longer
@@ -1770,50 +2152,39 @@
             to direct grants.
             </param>
         </member>
-        <member name="M:BoardSync.Api.Modules.Rbac.Services.AccessEvaluator.EffectiveProjectRole(BoardSync.Api.Modules.Rbac.Models.AccessSnapshot,System.Guid,BoardSync.Api.Modules.Rbac.Models.ProjectLocation)">
+        <member name="M:BoardSync.Api.Modules.Rbac.Services.AccessEvaluator.GrantsAnywhere(BoardSync.Api.Modules.Rbac.Models.AccessSnapshot,System.String)">
             <summary>
-            The user's effective role on a project, or null if they hold none.
+            Whether the user may do <paramref name="permission"/> <em>anywhere at all</em>.
+            </summary>
+            <remarks>
+            <para>
+            For the handful of endpoints that are not keyed on a scope and cannot be — looking a user up
+            by email during an invite, for instance, where the whole point is to find someone who is not
+            yet in any of your organizations. There is no scope to name, so the question becomes whether
+            the caller holds this authority somewhere.
+            </para>
+            <para>
+            A weaker guarantee than the scoped checks, and deliberately so: it establishes that the caller
+            administers <em>something</em>, not that they administer the thing they are asking about. Use
+            it only where no scope exists to check, never as a shortcut for one that does.
+            </para>
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Services.AccessEvaluator.GrantsAtProject(BoardSync.Api.Modules.Rbac.Models.AccessSnapshot,System.String,System.Guid,BoardSync.Api.Modules.Rbac.Models.ProjectLocation)">
+            <summary>
+            Whether the user may do <paramref name="permission"/> on a project.
             </summary>
             <param name="snapshot">The user's grants.</param>
+            <param name="permission">The capability being asked about.</param>
             <param name="projectId">The project being asked about.</param>
             <param name="location">
             Where the project sits in the tree, or null when it could not be resolved (a project that no
             longer exists). Null falls back to direct project grants only.
             </param>
             <remarks>
-            Three ways to hold a role on a project, and the most privileged wins:
-            a direct project assignment, OrgAdmin of the owning organization, or a grant on the team the
-            project is assigned to.
+            Three routes, and any one of them suffices: a direct project assignment, a grant on the team
+            the project is assigned to, or OrgAdmin of the owning organization.
             </remarks>
-        </member>
-        <member name="M:BoardSync.Api.Modules.Rbac.Services.AccessEvaluator.Satisfies(System.Nullable{BoardSync.Api.Modules.Rbac.Models.RoleType},BoardSync.Api.Modules.Rbac.Models.RoleType)">
-            <summary>
-            Whether <paramref name="held"/> satisfies a requirement of <paramref name="minimumRole"/>.
-            </summary>
-            <remarks>
-            Lower <see cref="T:BoardSync.Api.Modules.Rbac.Models.RoleType"/> value means more privileged, so a role satisfies a requirement
-            when its value is less than or equal to it. This comparison stays in memory on purpose:
-            <c>RoleType</c> is persisted with <c>HasConversion&lt;string&gt;()</c>, so the same
-            comparison in SQL would order the <em>names</em> — under which 'TeamMember' &lt;= 'Reader'
-            is false and 'Reader' &lt;= 'TeamMember' is true, denying team members read access and
-            letting readers perform team-member writes.
-            </remarks>
-        </member>
-        <member name="M:BoardSync.Api.Modules.Rbac.Services.AccessEvaluator.ProjectRoleFromTeamRole(BoardSync.Api.Modules.Rbac.Models.RoleType)">
-            <summary>
-            What a grant on a team confers on that team's projects.
-            </summary>
-            <remarks>
-            Clamped so it can never exceed <see cref="F:BoardSync.Api.Modules.Rbac.Models.RoleType.TeamMember"/> — contribution, not
-            administration. Two reasons. A team can serve several projects, so anything higher would let
-            a grant on the shared team administer every one of them. And nothing today assigns a role
-            more privileged than TeamMember at team scope, so a row that says otherwise is corrupt data
-            rather than an intention worth honouring. Raising this ceiling is a deliberate act — it is
-            what introducing a team-lead role will mean.
-            </remarks>
-        </member>
-        <member name="M:BoardSync.Api.Modules.Rbac.Services.AccessEvaluator.MostPrivileged(System.Nullable{BoardSync.Api.Modules.Rbac.Models.RoleType},BoardSync.Api.Modules.Rbac.Models.RoleType)">
-            <summary>The more privileged of two roles, treating null as "nothing held".</summary>
         </member>
         <member name="T:BoardSync.Api.Modules.Rbac.Services.Implementations.AccessResolver">
             <summary>
@@ -1826,12 +2197,15 @@
             an OrgAdmin of one.
             </remarks>
         </member>
-        <member name="M:BoardSync.Api.Modules.Rbac.Services.Implementations.AccessResolver.KeepMostPrivileged(System.Collections.Generic.Dictionary{System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType},System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType)">
+        <member name="M:BoardSync.Api.Modules.Rbac.Services.Implementations.AccessResolver.Record(System.Collections.Generic.Dictionary{System.Guid,System.Collections.Generic.List{BoardSync.Api.Modules.Rbac.Models.RoleType}},System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType)">
             <summary>
-            Records <paramref name="role"/> against <paramref name="scopeId"/> unless something more
-            privileged is already there. Nothing stops a user holding several roles at one scope, and
-            the effective answer is the best of them.
+            Adds <paramref name="role"/> to what is held at <paramref name="scopeId"/>.
             </summary>
+            <remarks>
+            Every role is kept, not just the "best" one — they are not ordered, and someone who is both
+            Scrum Master and Team Lead needs both sets of permissions. Duplicates are skipped because
+            team membership and an explicit TeamMember row commonly say the same thing.
+            </remarks>
         </member>
         <member name="T:BoardSync.Api.Modules.Rbac.Services.Implementations.CachingAccessResolver">
             <summary>
@@ -1880,6 +2254,12 @@
             </para>
             </remarks>
         </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Services.Implementations.InvalidatingRbacService.TransferTeamPositionAsync(System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType,System.Guid,System.Guid,System.Threading.CancellationToken)">
+            <remarks>
+            A transfer changes what two people may do, so both generations advance — the incoming holder
+            and whoever the position was taken from.
+            </remarks>
+        </member>
         <member name="T:BoardSync.Api.Modules.Rbac.Services.Implementations.MemoizingAccessResolver">
             <summary>
             Scoped decorator that loads a user's grants at most once per request.
@@ -1915,10 +2295,7 @@
             dictionaries that only ever hold a handful of entries.
             </remarks>
         </member>
-        <member name="M:BoardSync.Api.Modules.Rbac.Services.Implementations.RbacService.GetEffectiveRoleAsync(System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid,System.Threading.CancellationToken)">
-            <summary>
-            The best role this user holds at one scope by any route, or null if they hold none.
-            </summary>
+        <member name="M:BoardSync.Api.Modules.Rbac.Services.Implementations.RbacService.HasPermissionAsync(System.Guid,System.String,BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid,System.Threading.CancellationToken)">
             <remarks>
             Loads the user's grants once, then locates the scope in the tree so
             <see cref="T:BoardSync.Api.Modules.Rbac.Services.AccessEvaluator"/> can apply inheritance to it. Organization questions skip the
@@ -1982,18 +2359,63 @@
             organization resolves against its own scope and never consults membership.
             </remarks>
         </member>
-        <member name="M:BoardSync.Api.Modules.Rbac.Services.Interfaces.IRbacService.HasRoleAsync(System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType,BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid,System.Threading.CancellationToken)">
+        <member name="M:BoardSync.Api.Modules.Rbac.Services.Interfaces.IRbacService.HasPermissionAsync(System.Guid,System.String,BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid,System.Threading.CancellationToken)">
             <summary>
-            Check whether a user holds at least <paramref name="minimumRole"/> at the given scope.
-            A more-privileged role (lower enum value) satisfies a less-privileged requirement.
-            OrgAdmin implicitly satisfies any project or team scope check within that org.
+            Whether a user may do <paramref name="permission"/> at the given scope.
             </summary>
+            <remarks>
+            <para>
+            The single authorization question in the system. Grants reach a scope by three routes — a
+            direct assignment, a role on the team a project is assigned to, or OrgAdmin of the owning
+            organization — and any one of them suffices. What each role permits is declared in
+            <see cref="T:BoardSync.Api.Modules.Rbac.Models.RolePermissions"/>.
+            </para>
+            <para>
+            Replaced a rank check (<c>HasRoleAsync(minimumRole)</c>), which could not express questions
+            whose answer is a set of peers rather than a threshold — "may start a sprint" is permitted to
+            a Scrum Master and a Product Owner, neither of whom outranks the other.
+            </para>
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Services.Interfaces.IRbacService.HasPermissionAnywhereAsync(System.Guid,System.String,System.Threading.CancellationToken)">
+            <summary>
+            Whether a user holds <paramref name="permission"/> at any scope at all.
+            </summary>
+            <remarks>
+            Only for endpoints with no scope to check — looking a user up by email during an invite is
+            the case it exists for, since the person being looked up is by definition not yet in your
+            organization. It answers "does this caller administer something", which is weaker than "may
+            they do this here", so it is never a substitute for
+            <see cref="M:BoardSync.Api.Modules.Rbac.Services.Interfaces.IRbacService.HasPermissionAsync(System.Guid,System.String,BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid,System.Threading.CancellationToken)"/> where a scope is available.
+            </remarks>
         </member>
         <member name="M:BoardSync.Api.Modules.Rbac.Services.Interfaces.IRbacService.GetUserRolesAsync(System.Guid,System.Threading.CancellationToken)">
             <summary>Return all role assignments for a user.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Rbac.Services.Interfaces.IRbacService.GetScopeRolesAsync(BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid,System.Threading.CancellationToken)">
             <summary>Return all role assignments for a specific scope resource.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Services.Interfaces.IRbacService.TransferTeamPositionAsync(System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType,System.Guid,System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Hands a team position to <paramref name="toUserId"/>, taking it from whoever holds it.
+            </summary>
+            <remarks>
+            <para>
+            One operation rather than revoke-then-assign, because a handover is a single act: doing it as
+            two calls leaves a window with no Scrum Master, and a half-finished transfer if the second
+            one fails.
+            </para>
+            <para>
+            Returns the previous holder, or null if the position was vacant, so the caller can report
+            what actually changed.
+            </para>
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Services.Interfaces.IRbacService.VacateTeamPositionAsync(System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType,System.Threading.CancellationToken)">
+            <summary>
+            Leaves a team position vacant.
+            </summary>
+            <returns>The user who held it, or null if it was already vacant.</returns>
         </member>
         <member name="T:BoardSync.Api.Modules.Search.Repositories.ISearchRepository">
             <summary>
@@ -2084,7 +2506,7 @@
         <member name="M:BoardSync.Api.Modules.Sprints.Controllers.BoardsController.ReorderColumns(System.Guid,BoardSync.Api.Modules.Sprints.DTOs.ReorderBoardColumnsRequest,System.Threading.CancellationToken)">
             <summary>Reorder columns by providing the desired left-to-right column ID sequence. Requires ProjectAdmin.</summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.Sprints.Controllers.BoardsController.RequireColumnProjectRoleAsync(System.Guid,BoardSync.Api.Modules.Rbac.Models.RoleType,System.Threading.CancellationToken)">
+        <member name="M:BoardSync.Api.Modules.Sprints.Controllers.BoardsController.RequireColumnProjectAsync(System.Guid,System.String,System.Threading.CancellationToken)">
             <summary>
             Resolves the project owning a column (column → board → project) then checks the role.
             </summary>
@@ -2142,6 +2564,27 @@
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.ReorderWorkItems(System.Guid,BoardSync.Api.Modules.Sprints.DTOs.ReorderSprintWorkItemsRequest,System.Threading.CancellationToken)">
             <summary>Reorder the whole sprint backlog. Requires TeamMember.</summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.RequireSprintScopeAsync(System.Guid,System.Guid,System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Guards changing what a sprint contains, allowing a team member to decompose work that is
+            already committed.
+            </summary>
+            <remarks>
+            <para>
+            What is in a sprint is a commitment, so it belongs to <see cref="F:BoardSync.Api.Modules.Rbac.Models.Permissions.SprintScope"/> —
+            the Product Owner, Scrum Master, Team Lead or an org admin. Breaking committed work down is
+            not a commitment, though: if the parent is already in the sprint, adding a child changes
+            nothing about what the team promised, and gating that on the Product Owner would put them in
+            the middle of ordinary task breakdown.
+            </para>
+            <para>
+            A work item with no parent, or whose parent is not in this sprint, is new scope and needs the
+            permission. That includes a bug found mid-sprint — which is deliberate, if debatable: an
+            unplanned bug genuinely does change the commitment. Exempting a type is easy to add later and
+            hard to remove once people rely on it.
+            </para>
+            </remarks>
         </member>
         <member name="T:BoardSync.Api.Modules.Sprints.Domain.Ranking">
             <summary>
@@ -2694,6 +3137,55 @@
             </remarks>
             <exception cref="T:BoardSync.Api.Shared.Kernel.Exceptions.NotFoundException">No such column.</exception>
         </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Services.ISprintService.IsDecompositionOfSprintWorkAsync(System.Guid,System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Whether this work item is a breakdown of something the sprint already contains — that is,
+            whether its parent is in the sprint.
+            </summary>
+            <remarks>
+            Lets a team member add or remove their own task breakdown without holding
+            <c>sprint:scope</c>, because decomposing committed work does not change what the team
+            committed to. An item with no parent, or a parent outside the sprint, is new scope.
+            </remarks>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.SprintScopeResolver">
+            <summary>
+            Resolves a sprint to the team that runs it.
+            </summary>
+            <remarks>
+            Sprints are team-scoped — they have no scope of their own — so every sprint permission is really
+            a question about its team.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.SprintScopeResolver.#ctor(BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository)">
+            <summary>
+            Resolves a sprint to the team that runs it.
+            </summary>
+            <remarks>
+            Sprints are team-scoped — they have no scope of their own — so every sprint permission is really
+            a question about its team.
+            </remarks>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.BoardScopeResolver">
+            <summary>
+            Resolves a board to its project.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.BoardScopeResolver.#ctor(BoardSync.Api.Modules.Sprints.Repositories.Interfaces.IBoardRepository)">
+            <summary>
+            Resolves a board to its project.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Modules.Sprints.BoardColumnScopeResolver">
+            <summary>
+            Resolves a board column to the project whose board it belongs to.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.BoardColumnScopeResolver.#ctor(BoardSync.Api.Modules.Sprints.Repositories.Interfaces.IBoardRepository)">
+            <summary>
+            Resolves a board column to the project whose board it belongs to.
+            </summary>
+        </member>
         <member name="T:BoardSync.Api.Modules.WorkItems.Controllers.WorkItemsController">
             <summary>
             Work item CRUD, state transitions, comments, history, and links.
@@ -2964,6 +3456,36 @@
             (WorkItemId, Name) index allows.
             </summary>
         </member>
+        <member name="T:BoardSync.Api.Modules.WorkItems.WorkItemScopeResolver">
+            <summary>
+            Resolves work item ids, and the ids of things hanging off them, to the project that governs them.
+            </summary>
+            <remarks>
+            Work items, their comments and their links all take their permissions from the project the item
+            belongs to. These let an endpoint keyed on any of those be authorized before it loads anything.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.WorkItems.WorkItemScopeResolver.#ctor(BoardSync.Api.Modules.WorkItems.Repository.IWorkItemRepository)">
+            <summary>
+            Resolves work item ids, and the ids of things hanging off them, to the project that governs them.
+            </summary>
+            <remarks>
+            Work items, their comments and their links all take their permissions from the project the item
+            belongs to. These let an endpoint keyed on any of those be authorized before it loads anything.
+            </remarks>
+        </member>
+        <member name="T:BoardSync.Api.Modules.WorkItems.WorkItemCommentScopeResolver">
+            <inheritdoc cref="T:BoardSync.Api.Modules.WorkItems.WorkItemScopeResolver"/>
+        </member>
+        <member name="M:BoardSync.Api.Modules.WorkItems.WorkItemCommentScopeResolver.#ctor(BoardSync.Api.Modules.WorkItems.Repository.IWorkItemRepository)">
+            <inheritdoc cref="T:BoardSync.Api.Modules.WorkItems.WorkItemScopeResolver"/>
+        </member>
+        <member name="T:BoardSync.Api.Modules.WorkItems.WorkItemLinkScopeResolver">
+            <inheritdoc cref="T:BoardSync.Api.Modules.WorkItems.WorkItemScopeResolver"/>
+        </member>
+        <member name="M:BoardSync.Api.Modules.WorkItems.WorkItemLinkScopeResolver.#ctor(BoardSync.Api.Modules.WorkItems.Repository.IWorkItemRepository)">
+            <inheritdoc cref="T:BoardSync.Api.Modules.WorkItems.WorkItemScopeResolver"/>
+        </member>
         <member name="T:BoardSync.Api.Shared.Auth.Attributes.RequireAuthenticationAttribute">
             <summary>
             Requires the user to be authenticated
@@ -2978,6 +3500,308 @@
             <summary>
             Requires the user to be active (not locked or deactivated)
             </summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Auth.Authorization.ResolvedScope">
+            <summary>
+            Where a scope was found, or why it could not be.
+            </summary>
+            <param name="Scope">The scope kind the permission should be checked against.</param>
+            <param name="ScopeId">The scope's id.</param>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Auth.Authorization.ResolvedScope.#ctor(BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid)">
+            <summary>
+            Where a scope was found, or why it could not be.
+            </summary>
+            <param name="Scope">The scope kind the permission should be checked against.</param>
+            <param name="ScopeId">The scope's id.</param>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Auth.Authorization.ResolvedScope.Scope">
+            <summary>The scope kind the permission should be checked against.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Auth.Authorization.ResolvedScope.ScopeId">
+            <summary>The scope's id.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Auth.Authorization.IScopeResolver">
+            <summary>
+            Turns a route parameter into the scope a permission should be checked against.
+            </summary>
+            <remarks>
+            <para>
+            Most endpoints are keyed on something that is not itself a scope. <c>workItemId</c> names a work
+            item whose project carries the permission; <c>sprintId</c> names a sprint whose team does;
+            <c>commentId</c>, <c>columnId</c> and <c>linkId</c> are each one hop further out. A resolver is
+            that hop, and it is the reason authorization can happen before the handler rather than after the
+            handler has already fetched the record.
+            </para>
+            <para>
+            Each resolver is registered by the module that owns the data it walks, so this does not become a
+            place where every module's queries accumulate.
+            </para>
+            </remarks>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Auth.Authorization.IScopeResolver.RouteParameter">
+            <summary>
+            The route parameter this resolver handles — <c>workItemId</c>, <c>projectId</c>, and so on.
+            Matched case-insensitively against the route.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Auth.Authorization.IScopeResolver.ResolveAsync(System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Resolves the parameter's value to a scope, or null when nothing of that id exists.
+            </summary>
+            <remarks>
+            Null means "no such record", which the filter reports as 404 — the same answer an
+            unauthorized caller gets, so the two are indistinguishable from outside.
+            </remarks>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Auth.Authorization.DirectScopeResolver">
+            <summary>
+            A resolver for a parameter that already names a scope — <c>orgId</c>, <c>teamId</c>,
+            <c>projectId</c>.
+            </summary>
+            <remarks>
+            Deliberately does not check that the scope exists. A caller with no access must not be able to
+            tell an id that exists from one that does not, and the permission check answers both with 404
+            anyway; verifying existence first would only add a query whose result changes nothing.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Auth.Authorization.DirectScopeResolver.#ctor(System.String,BoardSync.Api.Modules.Rbac.Models.RoleScope)">
+            <summary>
+            A resolver for a parameter that already names a scope — <c>orgId</c>, <c>teamId</c>,
+            <c>projectId</c>.
+            </summary>
+            <remarks>
+            Deliberately does not check that the scope exists. A caller with no access must not be able to
+            tell an id that exists from one that does not, and the permission check answers both with 404
+            anyway; verifying existence first would only add a query whose result changes nothing.
+            </remarks>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Auth.Authorization.ScopeResolverRegistry">
+            <summary>
+            The resolvers available, indexed by route parameter name.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Auth.Authorization.ScopeResolverRegistry.For(System.String)">
+            <summary>The resolver for a route parameter, or null if none is registered.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Auth.Authorization.ScopeResolverRegistry.KnownParameters">
+            <summary>Every parameter name that can be resolved — used by the coverage test's diagnostics.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Auth.Authorization.PermissionAuthorizationFilter">
+            <summary>
+            Enforces <see cref="T:BoardSync.Api.Shared.Auth.Authorization.RequirePermissionAttribute"/> before the action runs.
+            </summary>
+            <remarks>
+            <para>
+            Registered globally, so it sees every action; actions without the attribute are left alone and
+            the coverage test is what ensures there are none by accident.
+            </para>
+            <para>
+            <b>On telling 403 from 404.</b> The temptation is to answer 404 for every refusal, so that no
+            response ever confirms an id names something real. That over-corrects: someone who can see a
+            project but lacks <c>project:admin</c> knows perfectly well it exists, and answering "not found"
+            to their rename attempt is a lie that makes the UI unexplainable. The rule here splits on
+            visibility instead:
+            </para>
+            <list type="bullet">
+              <item><description>
+                Cannot even read the scope → <b>404</b>. Indistinguishable from an id that does not exist,
+                which is the disclosure this closes.
+              </description></item>
+              <item><description>
+                Can read the scope but lacks the permission → <b>403</b>, which is the truth and is
+                actionable.
+              </description></item>
+            </list>
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Auth.Authorization.PermissionAuthorizationFilter.#ctor(BoardSync.Api.Modules.Rbac.Services.Interfaces.IRbacService,BoardSync.Api.Shared.Auth.ICurrentUserContext,BoardSync.Api.Shared.Auth.Authorization.ScopeResolverRegistry,Microsoft.Extensions.Logging.ILogger{BoardSync.Api.Shared.Auth.Authorization.PermissionAuthorizationFilter})">
+            <summary>
+            Enforces <see cref="T:BoardSync.Api.Shared.Auth.Authorization.RequirePermissionAttribute"/> before the action runs.
+            </summary>
+            <remarks>
+            <para>
+            Registered globally, so it sees every action; actions without the attribute are left alone and
+            the coverage test is what ensures there are none by accident.
+            </para>
+            <para>
+            <b>On telling 403 from 404.</b> The temptation is to answer 404 for every refusal, so that no
+            response ever confirms an id names something real. That over-corrects: someone who can see a
+            project but lacks <c>project:admin</c> knows perfectly well it exists, and answering "not found"
+            to their rename attempt is a lie that makes the UI unexplainable. The rule here splits on
+            visibility instead:
+            </para>
+            <list type="bullet">
+              <item><description>
+                Cannot even read the scope → <b>404</b>. Indistinguishable from an id that does not exist,
+                which is the disclosure this closes.
+              </description></item>
+              <item><description>
+                Can read the scope but lacks the permission → <b>403</b>, which is the truth and is
+                actionable.
+              </description></item>
+            </list>
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Auth.Authorization.PermissionAuthorizationFilter.ReadPermissionFor(BoardSync.Api.Modules.Rbac.Models.RoleScope)">
+            <summary>
+            The permission that means "may see this at all", per scope. Lacking it is what turns a
+            refusal into a 404.
+            </summary>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Auth.Authorization.PermissionAuthorizationFilter.Denied(Microsoft.AspNetCore.Mvc.Filters.AuthorizationFilterContext,System.Int32)">
+            <summary>
+            Bodies matching what the exception middleware produces for the same statuses, so a refusal
+            looks the same to a client whether it came from here or from a service throwing.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Auth.Authorization.RequirePermissionAttribute">
+            <summary>
+            Declares the permission an action needs, and the route parameter naming what it applies to.
+            </summary>
+            <remarks>
+            <para>
+            Replaces a hand-written guard as the first line of the action body. Two things follow from
+            moving it onto the signature. Authorization runs <em>before</em> the handler, so an endpoint no
+            longer loads a record only to discard it on denial — and no longer reveals, through the
+            difference between 403 and 404, that an id it refused names something real. And whether an
+            endpoint is guarded at all becomes a question reflection can answer, which is what
+            <c>EveryEndpointIsGuarded</c> in the test project asks of every action at build time.
+            </para>
+            <para>
+            <paramref name="permission"/> is one of the constants on <see cref="T:BoardSync.Api.Modules.Rbac.Models.Permissions"/>, and
+            <see cref="P:BoardSync.Api.Shared.Auth.Authorization.RequirePermissionAttribute.From"/> is the name of a route parameter on the action. The parameter does not have to
+            be the scope itself: <c>workItemId</c> resolves through the item to its project, <c>sprintId</c>
+            through the sprint to its team. See <see cref="T:BoardSync.Api.Shared.Auth.Authorization.IScopeResolver"/>.
+            </para>
+            </remarks>
+            <param name="permission">The capability required, from <see cref="T:BoardSync.Api.Modules.Rbac.Models.Permissions"/>.</param>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Auth.Authorization.RequirePermissionAttribute.#ctor(System.String)">
+            <summary>
+            Declares the permission an action needs, and the route parameter naming what it applies to.
+            </summary>
+            <remarks>
+            <para>
+            Replaces a hand-written guard as the first line of the action body. Two things follow from
+            moving it onto the signature. Authorization runs <em>before</em> the handler, so an endpoint no
+            longer loads a record only to discard it on denial — and no longer reveals, through the
+            difference between 403 and 404, that an id it refused names something real. And whether an
+            endpoint is guarded at all becomes a question reflection can answer, which is what
+            <c>EveryEndpointIsGuarded</c> in the test project asks of every action at build time.
+            </para>
+            <para>
+            <paramref name="permission"/> is one of the constants on <see cref="T:BoardSync.Api.Modules.Rbac.Models.Permissions"/>, and
+            <see cref="P:BoardSync.Api.Shared.Auth.Authorization.RequirePermissionAttribute.From"/> is the name of a route parameter on the action. The parameter does not have to
+            be the scope itself: <c>workItemId</c> resolves through the item to its project, <c>sprintId</c>
+            through the sprint to its team. See <see cref="T:BoardSync.Api.Shared.Auth.Authorization.IScopeResolver"/>.
+            </para>
+            </remarks>
+            <param name="permission">The capability required, from <see cref="T:BoardSync.Api.Modules.Rbac.Models.Permissions"/>.</param>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Auth.Authorization.RequirePermissionAttribute.Permission">
+            <summary>The capability required.</summary>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Auth.Authorization.RequirePermissionAttribute.From">
+            <summary>
+            The route parameter naming what the permission applies to — <c>projectId</c>,
+            <c>workItemId</c>, and so on. Must have a registered <see cref="T:BoardSync.Api.Shared.Auth.Authorization.IScopeResolver"/>.
+            </summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Auth.Authorization.RequirePermissionAnywhereAttribute">
+            <summary>
+            Declares that an action requires a permission held <em>somewhere</em>, for the few endpoints that
+            have no scope to check.
+            </summary>
+            <remarks>
+            <para>
+            Looking a user up by email during an invite is the case this exists for: the person being looked
+            up is by definition not yet in your organization, so there is no scope the check could name.
+            What can be established is that the caller administers something.
+            </para>
+            <para>
+            A weaker guarantee than <see cref="T:BoardSync.Api.Shared.Auth.Authorization.RequirePermissionAttribute"/> and not a substitute for it.
+            Reach for this only when no scope exists — if the route carries one, name it.
+            </para>
+            </remarks>
+            <param name="permission">The capability required, from <see cref="T:BoardSync.Api.Modules.Rbac.Models.Permissions"/>.</param>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Auth.Authorization.RequirePermissionAnywhereAttribute.#ctor(System.String)">
+            <summary>
+            Declares that an action requires a permission held <em>somewhere</em>, for the few endpoints that
+            have no scope to check.
+            </summary>
+            <remarks>
+            <para>
+            Looking a user up by email during an invite is the case this exists for: the person being looked
+            up is by definition not yet in your organization, so there is no scope the check could name.
+            What can be established is that the caller administers something.
+            </para>
+            <para>
+            A weaker guarantee than <see cref="T:BoardSync.Api.Shared.Auth.Authorization.RequirePermissionAttribute"/> and not a substitute for it.
+            Reach for this only when no scope exists — if the route carries one, name it.
+            </para>
+            </remarks>
+            <param name="permission">The capability required, from <see cref="T:BoardSync.Api.Modules.Rbac.Models.Permissions"/>.</param>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Auth.Authorization.RequirePermissionAnywhereAttribute.Permission">
+            <summary>The capability required, at any scope.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Auth.Authorization.NoPermissionRequiredAttribute">
+            <summary>
+            Marks an action as deliberately unguarded, so the coverage test can tell "no permission needed"
+            apart from "somebody forgot".
+            </summary>
+            <remarks>
+            Every use needs the reason in <see cref="P:BoardSync.Api.Shared.Auth.Authorization.NoPermissionRequiredAttribute.Because"/>. The point is not documentation for its own
+            sake — it is that an exemption should cost a sentence of justification, so adding one is a
+            decision rather than the easy way to make a failing test pass.
+            </remarks>
+            <param name="because">Why this action needs no permission check.</param>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Auth.Authorization.NoPermissionRequiredAttribute.#ctor(System.String)">
+            <summary>
+            Marks an action as deliberately unguarded, so the coverage test can tell "no permission needed"
+            apart from "somebody forgot".
+            </summary>
+            <remarks>
+            Every use needs the reason in <see cref="P:BoardSync.Api.Shared.Auth.Authorization.NoPermissionRequiredAttribute.Because"/>. The point is not documentation for its own
+            sake — it is that an exemption should cost a sentence of justification, so adding one is a
+            decision rather than the easy way to make a failing test pass.
+            </remarks>
+            <param name="because">Why this action needs no permission check.</param>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Auth.Authorization.NoPermissionRequiredAttribute.Because">
+            <summary>Why this action needs no permission check.</summary>
+        </member>
+        <member name="T:BoardSync.Api.Shared.Auth.Authorization.PermissionCheckedInActionAttribute">
+            <summary>
+            Marks an action whose authorization is real but conditional, and therefore lives in the body
+            rather than on the signature.
+            </summary>
+            <remarks>
+            Deliberately distinct from <see cref="T:BoardSync.Api.Shared.Auth.Authorization.NoPermissionRequiredAttribute"/>. Both satisfy the coverage
+            test, but they mean opposite things — one says no check is needed, the other says a check exists
+            that an attribute cannot express — and conflating them would make the exemption list useless for
+            telling which endpoints still deserve scrutiny.
+            </remarks>
+            <param name="because">Why the check cannot be expressed as an attribute.</param>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Auth.Authorization.PermissionCheckedInActionAttribute.#ctor(System.String)">
+            <summary>
+            Marks an action whose authorization is real but conditional, and therefore lives in the body
+            rather than on the signature.
+            </summary>
+            <remarks>
+            Deliberately distinct from <see cref="T:BoardSync.Api.Shared.Auth.Authorization.NoPermissionRequiredAttribute"/>. Both satisfy the coverage
+            test, but they mean opposite things — one says no check is needed, the other says a check exists
+            that an attribute cannot express — and conflating them would make the exemption list useless for
+            telling which endpoints still deserve scrutiny.
+            </remarks>
+            <param name="because">Why the check cannot be expressed as an attribute.</param>
+        </member>
+        <member name="P:BoardSync.Api.Shared.Auth.Authorization.PermissionCheckedInActionAttribute.Because">
+            <summary>Why the check cannot be expressed as an attribute.</summary>
         </member>
         <member name="T:BoardSync.Api.Shared.Auth.DTOs.UserRoleResponse">
             <summary>A single role assignment returned inside a user's profile.</summary>
@@ -3241,7 +4065,27 @@
             <inheritdoc />
         </member>
         <member name="T:BoardSync.Api.Shared.Data.Migrations.Phase4_Backlog">
-            <inheritdoc />
+            <summary>
+            Intentionally empty.
+            </summary>
+            <remarks>
+            <para>
+            Scaffolded alongside the backlog module, but it never contained the backlog table — that is
+            created by <c>20260811110255_AddSprintsAndBoards</c>, which is misnamed but correct. What this
+            one held was a single <c>AddColumn</c> for <c>work.WorkItems.xmin</c>.
+            </para>
+            <para>
+            <c>xmin</c> is Postgres' own system column, mapped in <c>BoardSyncDbContext</c> as a
+            concurrency token and deliberately backed by no column of ours. Creating it is not merely
+            redundant — Postgres rejects the name, so applying this migration as written fails and blocks
+            every migration after it. The scaffolder emits it whenever the model snapshot has drifted;
+            the snapshot has since been corrected so it stops being suggested.
+            </para>
+            <para>
+            Emptied rather than deleted so the migration history stays stable for anyone who has already
+            recorded this id.
+            </para>
+            </remarks>
         </member>
         <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase4_Backlog.Up(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
             <inheritdoc />
@@ -3262,6 +4106,26 @@
             <inheritdoc />
         </member>
         <member name="M:BoardSync.Api.Shared.Data.Migrations.AddSprintProjectId.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="T:BoardSync.Api.Shared.Data.Migrations.Stage2_TeamPositions">
+            <summary>
+            Makes the role/scope pairing and the single-holder rule for team positions structural.
+            </summary>
+            <remarks>
+            Written by hand. The scaffolder also wanted to add an <c>xmin</c> column to
+            <c>work.WorkItems</c>; that is Postgres' own system column, mapped as a concurrency token in
+            <c>BoardSyncDbContext</c> and deliberately backed by no column of ours, so creating it would
+            fail. It is left out.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.Stage2_TeamPositions.Up(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.Stage2_TeamPositions.Down(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.Stage2_TeamPositions.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
             <inheritdoc />
         </member>
         <member name="T:BoardSync.Api.Shared.Kernel.BaseEntity">

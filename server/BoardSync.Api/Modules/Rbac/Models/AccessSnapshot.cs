@@ -17,10 +17,12 @@ public sealed record ProjectLocation(Guid OrganizationId, Guid AssignedTeamId);
 /// </summary>
 /// <remarks>
 /// <para>
-/// Each dictionary maps a scope id to the <em>most privileged</em> role the user holds directly at
-/// that scope — lowest <see cref="RoleType"/> value wins. Team membership is folded into
-/// <see cref="TeamRoles"/> when the snapshot is built, because membership of a team is a grant on
-/// that team whether or not a matching role row exists.
+/// Each dictionary maps a scope id to <em>every</em> role the user holds directly at that scope.
+/// A set rather than a single role, because the roles are not ordered: someone can be both the
+/// Scrum Master and the Team Lead, and neither subsumes the other. What they may do is the union of
+/// what those roles permit. Team membership is folded into <see cref="TeamRoles"/> when the snapshot
+/// is built, because membership of a team is a grant on that team whether or not a matching role row
+/// exists.
 /// </para>
 /// <para>
 /// <b>This holds grants, not their consequences.</b> It deliberately does not expand OrgAdmin into
@@ -37,10 +39,18 @@ public sealed record ProjectLocation(Guid OrganizationId, Guid AssignedTeamId);
 /// </para>
 /// </remarks>
 public sealed record AccessSnapshot(
-    Dictionary<Guid, RoleType> OrganizationRoles,
-    Dictionary<Guid, RoleType> TeamRoles,
-    Dictionary<Guid, RoleType> ProjectRoles)
+    Dictionary<Guid, List<RoleType>> OrganizationRoles,
+    Dictionary<Guid, List<RoleType>> TeamRoles,
+    Dictionary<Guid, List<RoleType>> ProjectRoles)
 {
     /// <summary>A user with no grants anywhere. Every question against it answers no.</summary>
     public static AccessSnapshot Empty { get; } = new([], [], []);
+
+    /// <summary>
+    /// The roles held at one scope id, or an empty span. A list rather than a set because these hold
+    /// at most a handful of entries, where scanning beats hashing and serialises more cheaply.
+    /// </summary>
+    public static IReadOnlyList<RoleType> RolesAt(
+        Dictionary<Guid, List<RoleType>> source, Guid scopeId) =>
+        source.TryGetValue(scopeId, out var roles) ? roles : [];
 }

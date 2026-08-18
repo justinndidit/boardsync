@@ -32,15 +32,76 @@ public interface IRbacService
     Task RemoveAllRolesInOrganizationAsync(Guid userId, Guid organizationId, CancellationToken ct = default);
 
     /// <summary>
-    /// Check whether a user holds at least <paramref name="minimumRole"/> at the given scope.
-    /// A more-privileged role (lower enum value) satisfies a less-privileged requirement.
-    /// OrgAdmin implicitly satisfies any project or team scope check within that org.
+    /// Whether a user may do <paramref name="permission"/> at the given scope.
     /// </summary>
-    Task<bool> HasRoleAsync(Guid userId, RoleType minimumRole, RoleScope scope, Guid scopeId, CancellationToken ct = default);
+    /// <remarks>
+    /// <para>
+    /// The single authorization question in the system. Grants reach a scope by three routes — a
+    /// direct assignment, a role on the team a project is assigned to, or OrgAdmin of the owning
+    /// organization — and any one of them suffices. What each role permits is declared in
+    /// <see cref="Models.RolePermissions"/>.
+    /// </para>
+    /// <para>
+    /// Replaced a rank check (<c>HasRoleAsync(minimumRole)</c>), which could not express questions
+    /// whose answer is a set of peers rather than a threshold — "may start a sprint" is permitted to
+    /// a Scrum Master and a Product Owner, neither of whom outranks the other.
+    /// </para>
+    /// </remarks>
+    Task<bool> HasPermissionAsync(
+        Guid userId,
+        string permission,
+        RoleScope scope,
+        Guid scopeId,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Whether a user holds <paramref name="permission"/> at any scope at all.
+    /// </summary>
+    /// <remarks>
+    /// Only for endpoints with no scope to check — looking a user up by email during an invite is
+    /// the case it exists for, since the person being looked up is by definition not yet in your
+    /// organization. It answers "does this caller administer something", which is weaker than "may
+    /// they do this here", so it is never a substitute for
+    /// <see cref="HasPermissionAsync"/> where a scope is available.
+    /// </remarks>
+    Task<bool> HasPermissionAnywhereAsync(
+        Guid userId,
+        string permission,
+        CancellationToken ct = default);
 
     /// <summary>Return all role assignments for a user.</summary>
     Task<IReadOnlyList<RoleAssignment>> GetUserRolesAsync(Guid userId, CancellationToken ct = default);
 
     /// <summary>Return all role assignments for a specific scope resource.</summary>
     Task<IReadOnlyList<RoleAssignment>> GetScopeRolesAsync(RoleScope scope, Guid scopeId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Hands a team position to <paramref name="toUserId"/>, taking it from whoever holds it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// One operation rather than revoke-then-assign, because a handover is a single act: doing it as
+    /// two calls leaves a window with no Scrum Master, and a half-finished transfer if the second
+    /// one fails.
+    /// </para>
+    /// <para>
+    /// Returns the previous holder, or null if the position was vacant, so the caller can report
+    /// what actually changed.
+    /// </para>
+    /// </remarks>
+    Task<Guid?> TransferTeamPositionAsync(
+        Guid teamId,
+        RoleType position,
+        Guid toUserId,
+        Guid assignedBy,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Leaves a team position vacant.
+    /// </summary>
+    /// <returns>The user who held it, or null if it was already vacant.</returns>
+    Task<Guid?> VacateTeamPositionAsync(
+        Guid teamId,
+        RoleType position,
+        CancellationToken ct = default);
 }

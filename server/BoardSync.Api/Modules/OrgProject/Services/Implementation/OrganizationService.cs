@@ -187,7 +187,7 @@ public class OrganizationService : IOrganizationService
                 await _organizationRepo.SaveChangesAsync(token);
             }
 
-            if (!await _rbac.HasRoleAsync(userId, RoleType.Reader, RoleScope.Organization, orgId, token))
+            if (!await _rbac.HasPermissionAsync(userId, Permissions.OrgRead, RoleScope.Organization, orgId, token))
                 await _rbac.AssignRoleAsync(userId, RoleType.Reader, RoleScope.Organization, orgId, addedBy, token);
 
             _eventBus.Enqueue(new MemberAddedToOrg(orgId, userId, addedBy));

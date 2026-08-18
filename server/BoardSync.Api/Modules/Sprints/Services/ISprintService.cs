@@ -14,6 +14,17 @@ public interface ISprintService
     Task<SprintResponse> UpdateStatusAsync(Guid sprintId, SprintStatus newStatus, Guid updatedBy, CancellationToken ct = default);
     Task DeleteAsync(Guid sprintId, Guid deletedBy, CancellationToken ct = default);
     Task<SprintWorkItemResponse> AddWorkItemAsync(Guid sprintId, AddSprintWorkItemRequest request, Guid addedBy, CancellationToken ct = default);
+
+    /// <summary>
+    /// Whether this work item is a breakdown of something the sprint already contains — that is,
+    /// whether its parent is in the sprint.
+    /// </summary>
+    /// <remarks>
+    /// Lets a team member add or remove their own task breakdown without holding
+    /// <c>sprint:scope</c>, because decomposing committed work does not change what the team
+    /// committed to. An item with no parent, or a parent outside the sprint, is new scope.
+    /// </remarks>
+    Task<bool> IsDecompositionOfSprintWorkAsync(Guid sprintId, Guid workItemId, CancellationToken ct = default);
     Task RemoveWorkItemAsync(Guid sprintId, Guid workItemId, Guid removedBy, CancellationToken ct = default);
     Task<PagedResult<SprintWorkItemResponse>> GetWorkItemsAsync(Guid sprintId, PaginationQuery pagination, CancellationToken ct = default);
     Task<decimal> MoveWorkItemAsync(Guid sprintId, Guid workItemId, MoveSprintWorkItemRequest request, CancellationToken ct = default);

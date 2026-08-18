@@ -5,6 +5,7 @@ using BoardSync.Api.Modules.OrgProject.Services.Interfaces;
 using BoardSync.Api.Modules.Rbac.Models;
 using BoardSync.Api.Modules.Rbac.Services.Interfaces;
 using BoardSync.Api.Shared.Auth;
+using BoardSync.Api.Shared.Auth.Authorization;
 using BoardSync.Api.Shared.Auth.DTOs;
 using BoardSync.Api.Shared.Kernel;
 using BoardSync.Api.Shared.Kernel.Exceptions;
@@ -28,7 +29,11 @@ public class OrganizationsController : ControllerBase
     /// every authenticated account and is never granted explicitly.
     /// </summary>
     private static readonly RoleType[] AssignableOrgRoles =
-        [RoleType.OrgAdmin, RoleType.ProjectAdmin, RoleType.TeamMember, RoleType.Reader];
+        // Only these two mean anything at organization scope. 'ProjectAdmin' and 'TeamMember' used
+        // to be accepted here and granted nothing beyond organization read, which made them a trap:
+        // an administrator would set someone to ProjectAdmin expecting authority over projects and
+        // hand them none. Project authority is a project-scope grant.
+        [RoleType.OrgAdmin, RoleType.Reader];
 
     private readonly IOrganizationService _orgService;
     private readonly IRbacService _rbac;
@@ -49,6 +54,8 @@ public class OrganizationsController : ControllerBase
 
     /// <summary>Get all organizations the current user belongs to.</summary>
     [HttpGet]
+    [NoPermissionRequired(
+        "Returns only the caller\u0027s own organizations; the query is scoped to their memberships.")]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<OrganizationSummaryResponse>>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetMyOrgs([FromQuery] PaginationQuery pagination, CancellationToken ct)
     {
@@ -58,6 +65,8 @@ public class OrganizationsController : ControllerBase
 
     /// <summary>Create a new organization. The caller automatically becomes OrgAdmin.</summary>
     [HttpPost]
+    [NoPermissionRequired(
+        "Creating an organization is self-service; the creator becomes its OrgAdmin.")]
     [ProducesResponseType(typeof(ApiResponse<OrganizationResponse>), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Create([FromBody] CreateOrganizationRequest request, CancellationToken ct)
@@ -69,69 +78,71 @@ public class OrganizationsController : ControllerBase
 
     /// <summary>Get organization by ID.</summary>
     [HttpGet("{orgId:guid}")]
+    [RequirePermission(Permissions.OrgRead, From = "orgId")]
     [ProducesResponseType(typeof(ApiResponse<OrganizationResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetById(Guid orgId, CancellationToken ct)
     {
-        await RequireOrgRoleAsync(orgId, RoleType.Reader, ct);
         var org = await _orgService.GetByIdAsync(orgId, _currentUser.UserId, ct);
         return Ok(new ApiResponse<OrganizationResponse>(true, "Organization retrieved.", org));
     }
 
     /// <summary>Get organization by slug.</summary>
     [HttpGet("by-slug/{slug}")]
+    [PermissionCheckedInAction(
+        "Keyed on a slug, not a scope id — the organization must be resolved before it can be authorized.")]
     [ProducesResponseType(typeof(ApiResponse<OrganizationResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetBySlug(string slug, CancellationToken ct)
     {
         var org = await _orgService.GetBySlugAsync(slug, _currentUser.UserId, ct);
-        await RequireOrgRoleAsync(org.Id, RoleType.Reader, ct);
+        await RequireOrgAsync(org.Id, Permissions.OrgRead, ct);
         return Ok(new ApiResponse<OrganizationResponse>(true, "Organization retrieved.", org));
     }
 
     /// <summary>Update organization details. Requires OrgAdmin.</summary>
     [HttpPut("{orgId:guid}")]
+    [RequirePermission(Permissions.OrgAdmin, From = "orgId")]
     [ProducesResponseType(typeof(ApiResponse<OrganizationResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Update(Guid orgId, [FromBody] UpdateOrganizationRequest request, CancellationToken ct)
     {
-        await RequireOrgRoleAsync(orgId, RoleType.OrgAdmin, ct);
         var org = await _orgService.UpdateAsync(orgId, request, _currentUser.UserId, ct);
         return Ok(new ApiResponse<OrganizationResponse>(true, "Organization updated.", org));
     }
 
     /// <summary>List all members of an organization with their roles. Requires Reader.</summary>
     [HttpGet("{orgId:guid}/members")]
+    [RequirePermission(Permissions.OrgRead, From = "orgId")]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<OrgMemberResponse>>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetMembers(Guid orgId, [FromQuery] PaginationQuery pagination, CancellationToken ct)
     {
-        await RequireOrgRoleAsync(orgId, RoleType.Reader, ct);
         var result = await _orgService.GetMembersAsync(orgId, pagination, ct);
         return Ok(new ApiResponse<PagedResult<OrgMemberResponse>>(true, "Members retrieved.", result));
     }
 
     /// <summary>Add a user to the organization. Requires OrgAdmin.</summary>
     [HttpPost("{orgId:guid}/members")]
+    [RequirePermission(Permissions.OrgMemberManage, From = "orgId")]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> AddMember(Guid orgId, [FromBody] AddTeamMemberRequest request, CancellationToken ct)
     {
-        await RequireOrgRoleAsync(orgId, RoleType.OrgAdmin, ct);
         await _orgService.AddMemberAsync(orgId, request.UserId, _currentUser.UserId, ct);
         return Ok(new ApiResponse(true, "Member added to organization."));
     }
 
     /// <summary>Remove a user from the organization. Requires OrgAdmin.</summary>
     [HttpDelete("{orgId:guid}/members/{userId:guid}")]
+    [RequirePermission(Permissions.OrgMemberManage, From = "orgId")]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> RemoveMember(Guid orgId, Guid userId, CancellationToken ct)
     {
-        await RequireOrgRoleAsync(orgId, RoleType.OrgAdmin, ct);
         await _orgService.RemoveMemberAsync(orgId, userId, _currentUser.UserId, ct);
         return Ok(new ApiResponse(true, "Member removed from organization."));
     }
@@ -141,6 +152,7 @@ public class OrganizationsController : ControllerBase
     /// Valid roles: OrgAdmin, ProjectAdmin, TeamMember, Reader.
     /// </summary>
     [HttpPut("{orgId:guid}/members/{userId:guid}/role")]
+    [RequirePermission(Permissions.OrgMemberManage, From = "orgId")]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
@@ -151,7 +163,6 @@ public class OrganizationsController : ControllerBase
         [FromBody] UpdateMemberRoleRequest request,
         CancellationToken ct)
     {
-        await RequireOrgRoleAsync(orgId, RoleType.OrgAdmin, ct);
 
         if (!AssignableOrgRoles.Contains(request.Role))
             return BadRequest(new ApiResponse(false,
@@ -174,6 +185,7 @@ public class OrganizationsController : ControllerBase
     /// every organization the caller belongs to instead of one.
     /// </remarks>
     [HttpGet("{orgId:guid}/activity")]
+    [RequirePermission(Permissions.OrgRead, From = "orgId")]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<ActivityResponse>>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -182,16 +194,15 @@ public class OrganizationsController : ControllerBase
         [FromQuery] PaginationQuery pagination,
         CancellationToken ct)
     {
-        await RequireOrgRoleAsync(orgId, RoleType.Reader, ct);
 
         var result = await _activity.GetForOrganizationsAsync([orgId], pagination, ct);
 
         return Ok(new ApiResponse<PagedResult<ActivityResponse>>(true, "Activity retrieved.", result));
     }
 
-    private async Task RequireOrgRoleAsync(Guid orgId, RoleType minimum, CancellationToken ct)
+    private async Task RequireOrgAsync(Guid orgId, string permission, CancellationToken ct)
     {
-        var permitted = await _rbac.HasRoleAsync(_currentUser.UserId, minimum, RoleScope.Organization, orgId, ct);
+        var permitted = await _rbac.HasPermissionAsync(_currentUser.UserId, permission, RoleScope.Organization, orgId, ct);
         if (!permitted)
             throw new ForbiddenException();
     }

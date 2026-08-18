@@ -20,7 +20,10 @@ namespace BoardSync.Api.Shared.Data.Migrations
                     ProjectId = table.Column<Guid>(type: "uuid", nullable: false),
                     WorkItemId = table.Column<Guid>(type: "uuid", nullable: false),
                     TeamId = table.Column<Guid>(type: "uuid", nullable: true),
-                    Rank = table.Column<int>(type: "integer", nullable: false),
+                    // Fractional, matching plan.SprintWorkItems.Rank — see Phase2_FractionalRanks.
+                    // Edited before this migration was ever applied; the table it creates does not
+                    // exist anywhere yet, so there is nothing to alter after the fact.
+                    Rank = table.Column<decimal>(type: "numeric", nullable: false),
                     SprintId = table.Column<Guid>(type: "uuid", nullable: true),
                     CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
                     UpdatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),

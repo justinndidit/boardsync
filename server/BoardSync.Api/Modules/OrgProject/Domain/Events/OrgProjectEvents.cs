@@ -122,3 +122,28 @@ public record MemberRemovedFromTeam(
     Guid UserId,
     Guid RemovedByUserId
 ) : DomainEvent;
+
+/// <summary>
+/// A team position changed hands. <c>FromUserId</c> is null when the position was vacant.
+/// </summary>
+public record TeamPositionTransferred(
+    Guid TeamId,
+    Guid OrganizationId,
+    RoleType Position,
+    Guid? FromUserId,
+    Guid ToUserId,
+    Guid AssignedByUserId
+) : DomainEvent;
+
+/// <summary>
+/// A team position was left vacant. Nothing enforces that it is filled — a team can run without a
+/// Scrum Master, and blocking a removal to avoid it would be the worse failure — so this exists so
+/// somebody can be told.
+/// </summary>
+public record TeamPositionVacated(
+    Guid TeamId,
+    Guid OrganizationId,
+    RoleType Position,
+    Guid PreviousUserId,
+    Guid VacatedByUserId
+) : DomainEvent;
