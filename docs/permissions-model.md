@@ -294,9 +294,15 @@ Make the role/scope pairing structural rather than conventional:
 
 | Scope | Roles | Meaning |
 |---|---|---|
-| Organization | `OrgAdmin` | administers the org and everything under it |
-| Team | `TeamLead`, `ScrumMaster`, `ProductOwner`, `TeamMember` | see below |
+| Organization | `OrgAdmin`, `Member` | administers the org and everything under it / belongs to it |
+| Team | `TeamLead`, `ScrumMaster`, `ProductOwner`, `TeamMember`, `Viewer` | see below |
 | Project | `ProjectAdmin`, `Contributor`, `Viewer` | administers one project / writes / reads |
+
+**Shipped as `Stage3_ScopedRoleNames`.** `Member` and the team-scope `Viewer` were added during
+implementation: organization membership needed a name of its own (`Reader` was being auto-granted to
+every joiner, so it named membership rather than a reading permission), and read-only access to a
+team's sprints needed somewhere to land. `Viewer` is the one name held at two scopes, deliberately —
+read-only on a team and read-only on a project are the same idea applied to different things.
 
 Enforce the pairing with a check constraint alongside `CK_RoleAssignment_ExactlyOneScope`, which
 makes §3.4 unrepresentable rather than merely discouraged.
@@ -321,7 +327,8 @@ someone who is not a team member is rejected, matching the precedent in
 
 Migration note: existing `ProjectAdmin` rows at team scope should not exist (§3.2 proves none are
 created), but the migration must assert that rather than assume it. `TeamMember` at team scope maps
-across unchanged. `Reader` and `User` retire — `Reader` becomes `Viewer` at project scope, and `User`
+across unchanged. `Reader` and `User` retire — `Reader` becomes `Member` at organization scope and
+`Viewer` at team and project scope, `TeamMember` at project scope becomes `Contributor`, and `User`
 is not a grant at all.
 
 #### 4.2.1 Appointment and transfer

@@ -66,7 +66,10 @@ public static class RolePermissions
         new Dictionary<RoleType, FrozenSet<string>>
         {
             [RoleType.OrgAdmin] = Everything,
-            [RoleType.Reader] = new[] { Permissions.OrgRead }.ToFrozenSet()
+
+            // What organization membership itself confers, and the whole of it. Access to anything
+            // inside the organization is a team or project grant; see the note on Everything.
+            [RoleType.Member] = new[] { Permissions.OrgRead }.ToFrozenSet()
         }.ToFrozenDictionary();
 
     // ── Team scope ────────────────────────────────────────────────────────────
@@ -111,7 +114,7 @@ public static class RolePermissions
                 Permissions.TeamRead, Permissions.SprintRead, Permissions.SprintOrder
             }.ToFrozenSet(),
 
-            [RoleType.Reader] = new[]
+            [RoleType.Viewer] = new[]
             {
                 Permissions.TeamRead, Permissions.SprintRead
             }.ToFrozenSet()
@@ -122,10 +125,13 @@ public static class RolePermissions
     private static readonly FrozenDictionary<RoleType, FrozenSet<string>> AtProject =
         new Dictionary<RoleType, FrozenSet<string>>
         {
-            [RoleType.OrgAdmin] = Everything,
+            // No OrgAdmin entry. An organization administrator reaches a project through
+            // GrantsAtProject's final hop to the owning organization, never through a project-scope
+            // row — the check constraint forbids one. Listing it here would grant nothing extra and
+            // would make IsValidAt disagree with the database about what may be assigned.
             [RoleType.ProjectAdmin] = ProjectAdministrator.ToFrozenSet(),
-            [RoleType.TeamMember] = ProjectContributor.ToFrozenSet(),
-            [RoleType.Reader] = ProjectViewer.ToFrozenSet()
+            [RoleType.Contributor] = ProjectContributor.ToFrozenSet(),
+            [RoleType.Viewer] = ProjectViewer.ToFrozenSet()
         }.ToFrozenDictionary();
 
     // ── Team → project inheritance ────────────────────────────────────────────
@@ -145,7 +151,7 @@ public static class RolePermissions
             [RoleType.ScrumMaster] = ProjectContributor.ToFrozenSet(),
             [RoleType.ProductOwner] = ProjectContributor.ToFrozenSet(),
             [RoleType.TeamMember] = ProjectContributor.ToFrozenSet(),
-            [RoleType.Reader] = ProjectViewer.ToFrozenSet()
+            [RoleType.Viewer] = ProjectViewer.ToFrozenSet()
         }.ToFrozenDictionary();
 
     // ── Lookups ───────────────────────────────────────────────────────────────
@@ -172,11 +178,40 @@ public static class RolePermissions
     /// Whether a role may be assigned at a scope at all. Mirrors the database check constraint, so
     /// a request is rejected before it reaches a constraint violation.
     /// </summary>
-    public static bool IsValidAt(RoleType role, RoleScope scope) => scope switch
+    public static bool IsValidAt(RoleType role, RoleScope scope) =>
+        RolesAt(scope).ContainsKey(role);
+
+    /// <summary>
+    /// Every role that means something at a scope, ordered by enum value so the list is stable.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The endpoints that hand out roles validate against this rather than against a list of their
+    /// own. Two copies of "which roles belong at project scope" is one copy too many: the table
+    /// above, the check constraint and the endpoint have to agree, and a hand-maintained third list
+    /// is the one that silently falls behind — as the organization list did, still advertising
+    /// <c>ProjectAdmin</c> and <c>TeamMember</c> in its documentation long after both were rejected.
+    /// </para>
+    /// <para>
+    /// Team scope includes the positions, which are appointed through
+    /// <c>/api/teams/{teamId}/positions/{position}</c> rather than granted, and <c>TeamMember</c>,
+    /// which team membership confers. There is deliberately no general role-assignment endpoint at
+    /// team scope for this to feed.
+    /// </para>
+    /// <para>
+    /// Sorted rather than taken in the table's order: <see cref="FrozenDictionary{TKey,TValue}"/>
+    /// does not promise to enumerate keys in insertion order, and this list reaches users — it is
+    /// what the "valid roles are …" rejection message enumerates.
+    /// </para>
+    /// </remarks>
+    public static IReadOnlyList<RoleType> AssignableAt(RoleScope scope) =>
+        [.. RolesAt(scope).Keys.Order()];
+
+    private static FrozenDictionary<RoleType, FrozenSet<string>> RolesAt(RoleScope scope) => scope switch
     {
-        RoleScope.Organization => AtOrganization.ContainsKey(role),
-        RoleScope.Team => AtTeam.ContainsKey(role),
-        RoleScope.Project => AtProject.ContainsKey(role),
-        _ => false
+        RoleScope.Organization => AtOrganization,
+        RoleScope.Team => AtTeam,
+        RoleScope.Project => AtProject,
+        _ => FrozenDictionary<RoleType, FrozenSet<string>>.Empty
     };
 }
