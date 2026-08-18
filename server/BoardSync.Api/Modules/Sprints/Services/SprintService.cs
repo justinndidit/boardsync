@@ -445,9 +445,10 @@ public class SprintService : ISprintService
             if (request.IncompleteItemsDestination == IncompleteItemsDestination.ReturnToBacklog)
             {
                 await _backlogService.ReturnToBacklogAsync(
-                    projectId,
-                    new Backlog.DTOs.ReturnToBacklogRequest { WorkItemIds = incompleteIds },
-                    ct);
+                projectId,
+                new Backlog.DTOs.ReturnToBacklogRequest { WorkItemIds = incompleteIds },
+                closedBy,   // ← the user closing the sprint is the one returning items
+                 ct);
             }
             else
             {

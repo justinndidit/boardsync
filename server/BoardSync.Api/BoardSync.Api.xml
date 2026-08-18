@@ -2565,27 +2565,6 @@
         <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.ReorderWorkItems(System.Guid,BoardSync.Api.Modules.Sprints.DTOs.ReorderSprintWorkItemsRequest,System.Threading.CancellationToken)">
             <summary>Reorder the whole sprint backlog. Requires TeamMember.</summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.RequireSprintScopeAsync(System.Guid,System.Guid,System.Guid,System.Threading.CancellationToken)">
-            <summary>
-            Guards changing what a sprint contains, allowing a team member to decompose work that is
-            already committed.
-            </summary>
-            <remarks>
-            <para>
-            What is in a sprint is a commitment, so it belongs to <see cref="F:BoardSync.Api.Modules.Rbac.Models.Permissions.SprintScope"/> —
-            the Product Owner, Scrum Master, Team Lead or an org admin. Breaking committed work down is
-            not a commitment, though: if the parent is already in the sprint, adding a child changes
-            nothing about what the team promised, and gating that on the Product Owner would put them in
-            the middle of ordinary task breakdown.
-            </para>
-            <para>
-            A work item with no parent, or whose parent is not in this sprint, is new scope and needs the
-            permission. That includes a bug found mid-sprint — which is deliberate, if debatable: an
-            unplanned bug genuinely does change the commitment. Exempting a type is easy to add later and
-            hard to remove once people rely on it.
-            </para>
-            </remarks>
-        </member>
         <member name="T:BoardSync.Api.Modules.Sprints.Domain.Ranking">
             <summary>
             Computes fractional sort keys for backlog ordering.
@@ -4096,18 +4075,6 @@
         <member name="M:BoardSync.Api.Shared.Data.Migrations.Phase4_Backlog.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
             <inheritdoc />
         </member>
-        <member name="T:BoardSync.Api.Shared.Data.Migrations.AddSprintProjectId">
-            <inheritdoc />
-        </member>
-        <member name="M:BoardSync.Api.Shared.Data.Migrations.AddSprintProjectId.Up(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
-            <inheritdoc />
-        </member>
-        <member name="M:BoardSync.Api.Shared.Data.Migrations.AddSprintProjectId.Down(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
-            <inheritdoc />
-        </member>
-        <member name="M:BoardSync.Api.Shared.Data.Migrations.AddSprintProjectId.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
-            <inheritdoc />
-        </member>
         <member name="T:BoardSync.Api.Shared.Data.Migrations.Stage2_TeamPositions">
             <summary>
             Makes the role/scope pairing and the single-holder rule for team positions structural.
@@ -4126,6 +4093,18 @@
             <inheritdoc />
         </member>
         <member name="M:BoardSync.Api.Shared.Data.Migrations.Stage2_TeamPositions.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="T:BoardSync.Api.Shared.Data.Migrations.AddSprintProjectId">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.AddSprintProjectId.Up(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.AddSprintProjectId.Down(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.AddSprintProjectId.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
             <inheritdoc />
         </member>
         <member name="T:BoardSync.Api.Shared.Kernel.BaseEntity">

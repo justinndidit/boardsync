@@ -188,14 +188,14 @@ public class BacklogController : ControllerBase
         var sprint = await _sprintService.GetByIdAsync(sprintId, ct);
 
         if (await _rbac.HasPermissionAsync(
-                _currentUser.UserId, Permissions.SprintScope, RoleScope.Team, sprint.TeamId, ct))
+                _currentUser.UserId, Permissions.SprintScope, RoleScope.Team, sprint.ProjectId, ct))
             return;
 
         // Same split the endpoint filter applies: a caller who cannot even see this sprint's team
         // gets the answer they would get for a sprint that does not exist, so the status code does
         // not confirm one belonging to somebody else is real.
         if (!await _rbac.HasPermissionAsync(
-                _currentUser.UserId, Permissions.SprintRead, RoleScope.Team, sprint.TeamId, ct))
+                _currentUser.UserId, Permissions.SprintRead, RoleScope.Team, sprint.ProjectId, ct))
             throw new NotFoundException("Sprint", sprintId);
 
         throw new ForbiddenException(
