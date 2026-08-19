@@ -17,14 +17,14 @@ public enum SprintStatus
 }
 
 /// <summary>
-/// A time-boxed iteration scoped to a team.
+/// A time-boxed iteration scoped to a project.
 /// </summary>
 public class Sprint : BaseEntity
 {
-    /// <summary>The team this sprint belongs to.</summary>
-    public Guid TeamId { get; set; }
+    /// <summary>The project this sprint belongs to.</summary>
+    public Guid ProjectId { get; set; }
 
-    /// <summary>Auto-incremented sprint number within the team (Sprint 1, Sprint 2 …).</summary>
+    /// <summary>Auto-incremented sprint number within the project (Sprint 1, Sprint 2 …).</summary>
     public int Number { get; set; }
 
     /// <summary>Optional sprint goal / focus statement shown on the board header.</summary>

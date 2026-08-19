@@ -71,13 +71,17 @@ public class TopicAuthorizer : ITopicAuthorizer
         };
     }
 
-    private async Task<bool> CanSubscribeToSprintAsync(Guid userId, Guid sprintId, CancellationToken ct)
-    {
-        var sprint = await _sprints.GetByIdAsync(sprintId, ct);
+  private async Task<bool> CanSubscribeToSprintAsync(Guid userId, Guid sprintId, CancellationToken ct)
+  {
+    var sprint = await _sprints.GetByIdAsync(sprintId, ct);
 
-        if (sprint is null) return false;
+    if (sprint is null) return false;
 
-        return await _rbac.HasPermissionAsync(
-            userId, Permissions.SprintRead, RoleScope.Team, sprint.TeamId, ct);
-    }
+    return await _rbac.HasPermissionAsync(
+        userId,
+        Permissions.ProjectRead,  // ← matches ProjectId scope
+        RoleScope.Project,        // ← changed from Team to Project
+        sprint.ProjectId,         // ← your original, correct
+        ct);
+   }
 }

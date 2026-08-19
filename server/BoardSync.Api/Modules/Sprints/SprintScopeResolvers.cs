@@ -19,7 +19,7 @@ public sealed class SprintScopeResolver(ISprintRepository repository) : IScopeRe
     {
         var sprint = await repository.GetByIdAsync(value, ct);
 
-        return sprint is null ? null : new ResolvedScope(RoleScope.Team, sprint.TeamId);
+        return sprint is null ? null : new ResolvedScope(RoleScope.Team, sprint.ProjectId);
     }
 }
 
