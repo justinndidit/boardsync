@@ -2569,8 +2569,6 @@
         </member>
         <member name="T:BoardSync.Api.Modules.Sprints.Controllers.SprintsController">
             <summary>
-            Sprint lifecycle and backlog management scoped to a team.
-            Read operations:      sprint:read
             Sprint lifecycle and backlog management scoped to a project.
             Read operations:      Reader+
             Sprint management:    ProjectAdmin+
@@ -2597,8 +2595,6 @@
             Transition sprint status: Planning → Active → Completed.
             Only one Active sprint per project is allowed at a time.
             Requires ProjectAdmin.
-            Only one Active sprint per team is allowed at a time.
-            Requires <c>sprint:manage</c>.
             </summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.Delete(System.Guid,System.Threading.CancellationToken)">
@@ -2606,9 +2602,6 @@
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.Close(System.Guid,BoardSync.Api.Modules.Sprints.DTOs.CloseSprintRequest,System.Threading.CancellationToken)">
             <summary>
-            Close an active sprint. Incomplete items (not Resolved or Closed) are either
-            returned to the project backlog or moved to a specified next sprint.
-            Requires <c>sprint:manage</c>.
             Close an active sprint. Incomplete items are either returned to the backlog
             or moved to a specified next sprint. Requires ProjectAdmin.
             </summary>
@@ -2632,7 +2625,6 @@
             unlike the whole-list reorder below, which submits an entire ordering.
             Omit <c>afterWorkItemId</c> to move to the top, or <c>beforeWorkItemId</c> to move to the end.
             </remarks>
-            <summary>Move a single backlog item between two neighbours (drag-and-drop). Requires TeamMember.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.ReorderWorkItems(System.Guid,BoardSync.Api.Modules.Sprints.DTOs.ReorderSprintWorkItemsRequest,System.Threading.CancellationToken)">
             <summary>
@@ -2643,28 +2635,6 @@
             move existed, so a second caller silently reverts the first. Fine for a single editor;
             prefer the move endpoint above wherever more than one person can drag at once.
             </remarks>
-        </member>
-        <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.RequireSprintScopeAsync(System.Guid,System.Guid,System.Guid,System.Threading.CancellationToken)">
-            <summary>
-            Guards changing what a sprint contains, allowing a team member to decompose work that is
-            already committed.
-            </summary>
-            <remarks>
-            <para>
-            What is in a sprint is a commitment, so it belongs to <see cref="F:BoardSync.Api.Modules.Rbac.Models.Permissions.SprintScope"/> —
-            the Product Owner, Scrum Master, Team Lead or an org admin. Breaking committed work down is
-            not a commitment, though: if the parent is already in the sprint, adding a child changes
-            nothing about what the team promised, and gating that on the Product Owner would put them in
-            the middle of ordinary task breakdown.
-            </para>
-            <para>
-            A work item with no parent, or whose parent is not in this sprint, is new scope and needs the
-            permission. That includes a bug found mid-sprint — which is deliberate, if debatable: an
-            unplanned bug genuinely does change the commitment. Exempting a type is easy to add later and
-            hard to remove once people rely on it.
-            </para>
-            </remarks>
-            <summary>Reorder the whole sprint backlog. Requires TeamMember.</summary>
         </member>
         <member name="T:BoardSync.Api.Modules.Sprints.Domain.Ranking">
             <summary>
@@ -4208,6 +4178,18 @@
         <member name="M:BoardSync.Api.Shared.Data.Migrations.Stage2_TeamPositions.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
             <inheritdoc />
         </member>
+        <member name="T:BoardSync.Api.Shared.Data.Migrations.AddSprintProjectId">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.AddSprintProjectId.Up(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.AddSprintProjectId.Down(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.AddSprintProjectId.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
+            <inheritdoc />
+        </member>
         <member name="T:BoardSync.Api.Shared.Data.Migrations.Stage3_ScopedRoleNames">
             <summary>
             Gives each scope its own role vocabulary, so no role name means two different things.
@@ -4238,18 +4220,6 @@
             <inheritdoc />
         </member>
         <member name="M:BoardSync.Api.Shared.Data.Migrations.Stage3_ScopedRoleNames.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
-            <inheritdoc />
-        </member>
-        <member name="T:BoardSync.Api.Shared.Data.Migrations.AddSprintProjectId">
-            <inheritdoc />
-        </member>
-        <member name="M:BoardSync.Api.Shared.Data.Migrations.AddSprintProjectId.Up(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
-            <inheritdoc />
-        </member>
-        <member name="M:BoardSync.Api.Shared.Data.Migrations.AddSprintProjectId.Down(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
-            <inheritdoc />
-        </member>
-        <member name="M:BoardSync.Api.Shared.Data.Migrations.AddSprintProjectId.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
             <inheritdoc />
         </member>
         <member name="T:BoardSync.Api.Shared.Kernel.BaseEntity">

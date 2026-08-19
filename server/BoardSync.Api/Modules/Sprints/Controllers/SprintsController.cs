@@ -49,7 +49,7 @@ public class SprintsController : ControllerBase
         [FromQuery] PaginationQuery pagination,
         CancellationToken ct)
     {
-        await RequireProjectRoleAsync(projectId, RoleType.Reader, ct);
+        await RequireProjectRoleAsync(projectId, RoleType.Viewer, ct);
         var result = await _sprintService.GetForProjectAsync(projectId, pagination, ct);
         return Ok(new ApiResponse<PagedResult<SprintSummaryResponse>>(true, "Sprints retrieved.", result));
     }
@@ -61,7 +61,7 @@ public class SprintsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetActive(Guid projectId, CancellationToken ct)
     {
-        await RequireProjectRoleAsync(projectId, RoleType.Reader, ct);
+        await RequireProjectRoleAsync(projectId, RoleType.Viewer, ct);
         var sprint = await _sprintService.GetActiveForProjectAsync(projectId, ct);
         return Ok(new ApiResponse<SprintResponse?>(true,
             sprint is null ? "No active sprint." : "Active sprint retrieved.", sprint));
@@ -76,7 +76,7 @@ public class SprintsController : ControllerBase
     public async Task<IActionResult> GetById(Guid sprintId, CancellationToken ct)
     {
         var sprint = await _sprintService.GetByIdAsync(sprintId, ct);
-        await RequireProjectRoleAsync(sprint.ProjectId, RoleType.Reader, ct);
+        await RequireProjectRoleAsync(sprint.ProjectId, RoleType.Viewer, ct);
         return Ok(new ApiResponse<SprintResponse>(true, "Sprint retrieved.", sprint));
     }
 
@@ -189,7 +189,7 @@ public class SprintsController : ControllerBase
         CancellationToken ct)
     {
         var sprint = await _sprintService.GetByIdAsync(sprintId, ct);
-        await RequireProjectRoleAsync(sprint.ProjectId, RoleType.Reader, ct);
+        await RequireProjectRoleAsync(sprint.ProjectId, RoleType.Viewer, ct);
         var result = await _sprintService.GetWorkItemsAsync(sprintId, pagination, ct);
         return Ok(new ApiResponse<PagedResult<SprintWorkItemResponse>>(true, "Sprint backlog retrieved.", result));
     }
