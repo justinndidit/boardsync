@@ -46,9 +46,9 @@ public class AccessEvaluatorTests
             Snapshot(orgs: [(Org, RoleType.OrgAdmin)]), Permissions.OrgRead, Guid.NewGuid()));
 
     [Fact]
-    public void OrganizationReaderCannotAdminister() =>
+    public void OrganizationMemberCannotAdminister() =>
         Assert.False(AccessEvaluator.GrantsAtOrganization(
-            Snapshot(orgs: [(Org, RoleType.Reader)]), Permissions.OrgAdmin, Org));
+            Snapshot(orgs: [(Org, RoleType.Member)]), Permissions.OrgAdmin, Org));
 
     // ── Inheritance runs down, never up ───────────────────────────────────────
 
@@ -64,7 +64,7 @@ public class AccessEvaluatorTests
     [Fact]
     public void OrganizationReaderReachesNothingBelowTheOrganization()
     {
-        var snapshot = Snapshot(orgs: [(Org, RoleType.Reader)]);
+        var snapshot = Snapshot(orgs: [(Org, RoleType.Member)]);
 
         Assert.False(AccessEvaluator.GrantsAtTeam(snapshot, Permissions.TeamRead, Team, Org));
         Assert.False(AccessEvaluator.GrantsAtProject(snapshot, Permissions.ProjectRead, Project, Location));
@@ -189,7 +189,7 @@ public class AccessEvaluatorTests
     [Fact]
     public void AnOrganizationReaderManagesMembersNowhere() =>
         Assert.False(AccessEvaluator.GrantsAnywhere(
-            Snapshot(orgs: [(Org, RoleType.Reader)]), Permissions.OrgMemberManage));
+            Snapshot(orgs: [(Org, RoleType.Member)]), Permissions.OrgMemberManage));
 
     /// <summary>
     /// A team lead manages team membership, which is not organization membership. The two are

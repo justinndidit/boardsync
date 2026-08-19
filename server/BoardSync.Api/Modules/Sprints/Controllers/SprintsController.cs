@@ -97,7 +97,7 @@ public class SprintsController : ControllerBase
             new ApiResponse<SprintResponse>(true, "Sprint created.", sprint));
     }
 
-    /// <summary>Update a sprint's goal and dates. Only allowed while Planning. Requires ProjectAdmin.</summary>
+    /// <summary>Update a sprint's goal and dates. Only allowed while Planning. Requires <c>sprint:manage</c>.</summary>
     [HttpPut("api/sprints/{sprintId:guid}")]
     [RequirePermission(Permissions.SprintManage, From = "sprintId")]
     [ProducesResponseType(typeof(ApiResponse<SprintResponse>), StatusCodes.Status200OK)]
@@ -138,7 +138,7 @@ public class SprintsController : ControllerBase
         return Ok(new ApiResponse<SprintResponse>(true, $"Sprint status updated to {request.Status}.", updated));
     }
 
-    /// <summary>Delete a Planning sprint with no work items. Requires ProjectAdmin.</summary>
+    /// <summary>Delete a Planning sprint with no work items. Requires <c>sprint:manage</c>.</summary>
     [HttpDelete("api/sprints/{sprintId:guid}")]
     [RequirePermission(Permissions.SprintManage, From = "sprintId")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
@@ -194,7 +194,7 @@ public class SprintsController : ControllerBase
         return Ok(new ApiResponse<PagedResult<SprintWorkItemResponse>>(true, "Sprint backlog retrieved.", result));
     }
 
-    /// <summary>Add a work item to the sprint backlog. Requires TeamMember.</summary>
+    /// <summary>Add a work item to the sprint backlog. Requires <c>sprint:scope</c>.</summary>
     [HttpPost("api/sprints/{sprintId:guid}/workitems")]
     [PermissionCheckedInAction(
         "sprint:scope, unless the item decomposes work already in the sprint — depends on the item, not the caller alone.")]
@@ -215,7 +215,7 @@ public class SprintsController : ControllerBase
             new ApiResponse<SprintWorkItemResponse>(true, "Work item added to sprint.", item));
     }
 
-    /// <summary>Remove a work item from the sprint backlog. Requires TeamMember.</summary>
+    /// <summary>Remove a work item from the sprint backlog. Requires <c>sprint:scope</c>.</summary>
     [HttpDelete("api/sprints/{sprintId:guid}/workitems/{workItemId:guid}")]
     [PermissionCheckedInAction(
         "sprint:scope, unless the item decomposes work already in the sprint.")]
@@ -233,7 +233,15 @@ public class SprintsController : ControllerBase
         return NoContent();
     }
 
-    /// <summary>Move a single backlog item between two neighbours (drag-and-drop). Requires TeamMember.</summary>
+    /// <summary>
+    /// Move one backlog item between two neighbours. Requires <c>sprint:order</c>.
+    /// </summary>
+    /// <remarks>
+    /// The drag-and-drop endpoint. Names only the card that moved and where it landed, so two
+    /// people rearranging different cards write different rows and cannot revert each other —
+    /// unlike the whole-list reorder below, which submits an entire ordering.
+    /// Omit <c>afterWorkItemId</c> to move to the top, or <c>beforeWorkItemId</c> to move to the end.
+    /// </remarks>
     [HttpPatch("api/sprints/{sprintId:guid}/workitems/{workItemId:guid}/move")]
     [RequirePermission(Permissions.SprintOrder, From = "sprintId")]
     [ProducesResponseType(typeof(ApiResponse<MoveSprintWorkItemResponse>), StatusCodes.Status200OK)]
@@ -252,7 +260,14 @@ public class SprintsController : ControllerBase
             true, "Work item moved.", new MoveSprintWorkItemResponse(workItemId, rank)));
     }
 
-    /// <summary>Reorder the whole sprint backlog. Requires TeamMember.</summary>
+    /// <summary>
+    /// Reorder the whole sprint backlog. Requires <c>sprint:order</c>.
+    /// </summary>
+    /// <remarks>
+    /// Last-writer-wins across every item: it submits an ordering computed before any concurrent
+    /// move existed, so a second caller silently reverts the first. Fine for a single editor;
+    /// prefer the move endpoint above wherever more than one person can drag at once.
+    /// </remarks>
     [HttpPatch("api/sprints/{sprintId:guid}/workitems/reorder")]
     [RequirePermission(Permissions.SprintOrder, From = "sprintId")]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status200OK)]

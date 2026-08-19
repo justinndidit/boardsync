@@ -15,7 +15,7 @@ namespace BoardSync.Api.Modules.Sprints.Controllers;
 /// Kanban board management scoped to a project — one board per project,
 /// auto-created with four default columns on first access.
 /// Cards are drawn from the active sprint of the project's assigned team.
-/// Read:              Reader+ on the project
+/// Read:              board:read on the project
 /// Column management: ProjectAdmin+ on the project
 /// </summary>
 [ApiController]
@@ -44,7 +44,7 @@ public class BoardsController : ControllerBase
 
     /// <summary>
     /// Get (or auto-create) the board for a project, populated with active-sprint cards.
-    /// Requires Reader.
+    /// Requires <c>board:read</c>.
     /// </summary>
     [HttpGet("api/projects/{projectId:guid}/board")]
     [RequirePermission(Permissions.BoardRead, From = "projectId")]
@@ -57,7 +57,7 @@ public class BoardsController : ControllerBase
         return Ok(new ApiResponse<BoardResponse>(true, "Board retrieved.", board));
     }
 
-    /// <summary>Get a board by ID with all columns and cards. Requires Reader.</summary>
+    /// <summary>Get a board by ID with all columns and cards. Requires <c>board:read</c>.</summary>
     [HttpGet("api/boards/{boardId:guid}")]
     [RequirePermission(Permissions.BoardRead, From = "boardId")]
     [ProducesResponseType(typeof(ApiResponse<BoardResponse>), StatusCodes.Status200OK)]
@@ -69,7 +69,7 @@ public class BoardsController : ControllerBase
         return Ok(new ApiResponse<BoardResponse>(true, "Board retrieved.", board));
     }
 
-    /// <summary>Rename a board. Requires ProjectAdmin.</summary>
+    /// <summary>Rename a board. Requires <c>board:configure</c>.</summary>
     [HttpPut("api/boards/{boardId:guid}")]
     [RequirePermission(Permissions.BoardConfigure, From = "boardId")]
     [ProducesResponseType(typeof(ApiResponse<BoardResponse>), StatusCodes.Status200OK)]
@@ -88,7 +88,7 @@ public class BoardsController : ControllerBase
 
     // ── Columns ───────────────────────────────────────────────────────────────
 
-    /// <summary>Add a column to a board. Requires ProjectAdmin.</summary>
+    /// <summary>Add a column to a board. Requires <c>board:configure</c>.</summary>
     [HttpPost("api/boards/{boardId:guid}/columns")]
     [RequirePermission(Permissions.BoardConfigure, From = "boardId")]
     [ProducesResponseType(typeof(ApiResponse<BoardColumnDetailResponse>), StatusCodes.Status201Created)]
@@ -106,7 +106,7 @@ public class BoardsController : ControllerBase
             new ApiResponse<BoardColumnDetailResponse>(true, "Column added.", column));
     }
 
-    /// <summary>Update a column's name, mapped state, WIP limit, or position. Requires ProjectAdmin.</summary>
+    /// <summary>Update a column's name, mapped state, WIP limit, or position. Requires <c>board:configure</c>.</summary>
     [HttpPut("api/boards/columns/{columnId:guid}")]
     [RequirePermission(Permissions.BoardConfigure, From = "columnId")]
     [ProducesResponseType(typeof(ApiResponse<BoardColumnDetailResponse>), StatusCodes.Status200OK)]
@@ -122,7 +122,7 @@ public class BoardsController : ControllerBase
         return Ok(new ApiResponse<BoardColumnDetailResponse>(true, "Column updated.", updated));
     }
 
-    /// <summary>Delete a column from a board. Requires ProjectAdmin.</summary>
+    /// <summary>Delete a column from a board. Requires <c>board:configure</c>.</summary>
     [HttpDelete("api/boards/columns/{columnId:guid}")]
     [RequirePermission(Permissions.BoardConfigure, From = "columnId")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
@@ -134,7 +134,7 @@ public class BoardsController : ControllerBase
         return NoContent();
     }
 
-    /// <summary>Reorder columns by providing the desired left-to-right column ID sequence. Requires ProjectAdmin.</summary>
+    /// <summary>Reorder columns by providing the desired left-to-right column ID sequence. Requires <c>board:configure</c>.</summary>
     [HttpPatch("api/boards/{boardId:guid}/columns/reorder")]
     [RequirePermission(Permissions.BoardConfigure, From = "boardId")]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status200OK)]

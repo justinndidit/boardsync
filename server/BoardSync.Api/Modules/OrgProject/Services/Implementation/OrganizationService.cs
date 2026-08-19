@@ -188,7 +188,7 @@ public class OrganizationService : IOrganizationService
             }
 
             if (!await _rbac.HasPermissionAsync(userId, Permissions.OrgRead, RoleScope.Organization, orgId, token))
-                await _rbac.AssignRoleAsync(userId, RoleType.Reader, RoleScope.Organization, orgId, addedBy, token);
+                await _rbac.AssignRoleAsync(userId, RoleType.Member, RoleScope.Organization, orgId, addedBy, token);
 
             _eventBus.Enqueue(new MemberAddedToOrg(orgId, userId, addedBy));
             await _organizationRepo.SaveChangesAsync(token);
@@ -256,9 +256,12 @@ public class OrganizationService : IOrganizationService
             var orgRoles = await _rbac.GetScopeRolesAsync(RoleScope.Organization, orgId, token);
             var held = orgRoles.Where(ra => ra.UserId == userId).Select(ra => ra.Role).ToList();
 
-            // Most privileged wins when reporting what the member held, matching how the role is
-            // resolved everywhere else. Min is over the enum value, where lower means higher rank.
-            previousRole = held.Count == 0 ? null : held.Min();
+            // Reported for the event only. OrgAdmin wins when both are held, because that is the
+            // one worth naming; it is asked for explicitly rather than by ordering the enum, whose
+            // values stopped meaning anything when the rank ladder was removed.
+            previousRole = held.Contains(RoleType.OrgAdmin)
+                ? RoleType.OrgAdmin
+                : held.Count == 0 ? null : held[0];
 
             // Refuse to demote the last OrgAdmin — the organization would become unmanageable, and
             // OrgAdmin is the only role that can hand out organization roles in the first place.

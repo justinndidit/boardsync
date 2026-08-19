@@ -649,41 +649,41 @@
             <summary>
             Get the unscheduled product backlog for a project, ordered by rank.
             Optionally filter to a specific team with ?teamId=.
-            Requires Reader.
+            Requires <c>workitem:read</c>.
             </summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Backlog.Controllers.BacklogController.Add(System.Guid,BoardSync.Api.Modules.Backlog.DTOs.AddToBacklogRequest,System.Threading.CancellationToken)">
             <summary>
             Add a work item to the project backlog.
             Idempotent — returns the existing entry if the item is already tracked.
-            Requires TeamMember.
+            Requires <c>workitem:write</c>.
             </summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Backlog.Controllers.BacklogController.Remove(System.Guid,System.Guid,System.Threading.CancellationToken)">
             <summary>
             Remove a work item from the project backlog.
-            Requires TeamMember.
+            Requires <c>workitem:write</c>.
             </summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Backlog.Controllers.BacklogController.Reorder(System.Guid,BoardSync.Api.Modules.Backlog.DTOs.ReorderBacklogRequest,System.Threading.CancellationToken)">
             <summary>
             Reorder the backlog by providing the desired work item ID sequence.
             Items not included are pushed to the bottom in their original relative order.
-            Requires TeamMember.
+            Requires <c>workitem:write</c>.
             </summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Backlog.Controllers.BacklogController.MoveToSprint(System.Guid,BoardSync.Api.Modules.Backlog.DTOs.MoveToSprintRequest,System.Threading.CancellationToken)">
             <summary>
             Move one or more backlog items into a sprint.
             Creates SprintWorkItem entries so the sprint board reflects the change immediately.
-            Requires TeamMember.
+            Requires <c>workitem:write</c>.
             </summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Backlog.Controllers.BacklogController.ReturnToBacklog(System.Guid,BoardSync.Api.Modules.Backlog.DTOs.ReturnToBacklogRequest,System.Threading.CancellationToken)">
             <summary>
             Return sprint items back to the unscheduled backlog.
             Removes SprintWorkItem rows and clears the sprint assignment.
-            Requires TeamMember.
+            Requires <c>workitem:write</c>.
             </summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Backlog.Controllers.BacklogController.RequireSprintScopeAsync(System.Guid,System.Guid,System.Threading.CancellationToken)">
@@ -1039,9 +1039,15 @@
         </member>
         <member name="F:BoardSync.Api.Modules.OrgProject.Controllers.OrganizationsController.AssignableOrgRoles">
             <summary>
-            Roles assignable at organization scope. User is the "no permissions yet" default carried by
-            every authenticated account and is never granted explicitly.
+            Roles assignable at organization scope — <c>OrgAdmin</c> and <c>Member</c>.
             </summary>
+            <remarks>
+            Read from the permission table rather than written out here, so this cannot drift from what
+            the table and the check constraint actually accept. It did drift once: 'ProjectAdmin' and
+            'TeamMember' were assignable at organization scope and granted nothing beyond organization
+            read, which made them a trap — an administrator would set someone to ProjectAdmin expecting
+            authority over projects and hand them none. Project authority is a project-scope grant.
+            </remarks>
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.OrganizationsController.GetMyOrgs(BoardSync.Api.Shared.Kernel.PaginationQuery,System.Threading.CancellationToken)">
             <summary>Get all organizations the current user belongs to.</summary>
@@ -1059,7 +1065,7 @@
             <summary>Update organization details. Requires OrgAdmin.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.OrganizationsController.GetMembers(System.Guid,BoardSync.Api.Shared.Kernel.PaginationQuery,System.Threading.CancellationToken)">
-            <summary>List all members of an organization with their roles. Requires Reader.</summary>
+            <summary>List all members of an organization with their roles. Requires <c>org:read</c>.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.OrganizationsController.AddMember(System.Guid,BoardSync.Api.Modules.OrgProject.Domain.DTOs.AddTeamMemberRequest,System.Threading.CancellationToken)">
             <summary>Add a user to the organization. Requires OrgAdmin.</summary>
@@ -1070,13 +1076,13 @@
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.OrganizationsController.UpdateMemberRole(System.Guid,System.Guid,BoardSync.Api.Modules.OrgProject.Controllers.UpdateMemberRoleRequest,System.Threading.CancellationToken)">
             <summary>
             Update a member's role within this organization. Requires OrgAdmin.
-            Valid roles: OrgAdmin, ProjectAdmin, TeamMember, Reader.
+            Valid roles: OrgAdmin, Member.
             </summary>
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.OrganizationsController.GetActivity(System.Guid,BoardSync.Api.Shared.Kernel.PaginationQuery,System.Threading.CancellationToken)">
             <summary>
             Everything that has happened in this organization, newest first: work item, project, team,
-            sprint and board changes, plus membership and role changes. Requires Reader, which every
+            sprint and board changes, plus membership and role changes. Requires <c>org:read</c>, which every
             organization member holds — membership always carries at least that role.
             </summary>
             <remarks>
@@ -1097,10 +1103,15 @@
         </member>
         <member name="F:BoardSync.Api.Modules.OrgProject.Controllers.ProjectsController.AssignableProjectRoles">
             <summary>
-            Roles that are meaningful at project scope. OrgAdmin is organization-wide (and already
-            cascades down to every project in its org), and User is the "no permissions yet" default
-            carried by every authenticated account — neither is assignable here.
+            Roles that are meaningful at project scope — <c>ProjectAdmin</c>, <c>Contributor</c> and
+            <c>Viewer</c>.
             </summary>
+            <remarks>
+            Read from the permission table rather than written out here, so it cannot disagree with what
+            the table and the check constraint accept. OrgAdmin is absent because it is organization-wide
+            and already reaches every project in its organization; granting it on one project would be a
+            narrower thing wearing a wider name.
+            </remarks>
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.ProjectsController.GetForOrg(System.Guid,BoardSync.Api.Shared.Kernel.PaginationQuery,System.Threading.CancellationToken)">
             <summary>List all projects in an organization.</summary>
@@ -1112,23 +1123,23 @@
             <summary>Get a project by ID.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.ProjectsController.Update(System.Guid,BoardSync.Api.Modules.OrgProject.Domain.DTOs.UpdateProjectRequest,System.Threading.CancellationToken)">
-            <summary>Update project details. Requires ProjectAdmin.</summary>
+            <summary>Update project details. Requires <c>project:admin</c>.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.ProjectsController.AssignTeam(System.Guid,BoardSync.Api.Modules.OrgProject.Domain.DTOs.AssignProjectTeamRequest,System.Threading.CancellationToken)">
             <summary>
-            Reassign the project to a different team in the same organization. Requires ProjectAdmin.
+            Reassign the project to a different team in the same organization. Requires <c>project:admin</c>.
             The project's board follows the new team, so its cards come from that team's active sprint.
             </summary>
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.ProjectsController.GetRoles(System.Guid,System.Threading.CancellationToken)">
             <summary>
-            List the project-scope role assignments for a project. Requires Reader.
+            List the project-scope role assignments for a project. Requires <c>project:read</c>.
             </summary>
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.ProjectsController.AssignRole(System.Guid,BoardSync.Api.Modules.OrgProject.Controllers.AssignProjectRoleRequest,System.Threading.CancellationToken)">
             <summary>
             Grant a user a role on this project, replacing any project-scope role they already hold.
-            Requires ProjectAdmin. Valid roles: ProjectAdmin, TeamMember, Reader.
+            Requires <c>project:member:manage</c>. Valid roles: ProjectAdmin, Contributor, Viewer.
             </summary>
             <remarks>
             This is how a member of the organization gains access to a project's work items —
@@ -1137,7 +1148,7 @@
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.ProjectsController.RemoveRole(System.Guid,System.Guid,System.Threading.CancellationToken)">
             <summary>
-            Revoke a user's project-scope role. Requires ProjectAdmin.
+            Revoke a user's project-scope role. Requires <c>project:member:manage</c>.
             The last remaining ProjectAdmin cannot be revoked.
             </summary>
         </member>
@@ -1160,7 +1171,7 @@
             </summary>
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController.GetForOrg(System.Guid,BoardSync.Api.Shared.Kernel.PaginationQuery,System.Threading.CancellationToken)">
-            <summary>List all active teams in an organization. Requires Reader on the organization.</summary>
+            <summary>List all active teams in an organization. Requires <c>org:read</c>.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController.Create(System.Guid,BoardSync.Api.Modules.OrgProject.Domain.DTOs.CreateTeamRequest,System.Threading.CancellationToken)">
             <summary>Create a new team in an organization. Requires OrgAdmin.</summary>
@@ -1169,11 +1180,11 @@
             <summary>Get a team by ID.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController.Update(System.Guid,BoardSync.Api.Modules.OrgProject.Domain.DTOs.UpdateTeamRequest,System.Threading.CancellationToken)">
-            <summary>Update team details. Requires ProjectAdmin.</summary>
+            <summary>Update team details. Requires <c>team:manage</c>.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController.Deactivate(System.Guid,System.Threading.CancellationToken)">
             <summary>
-            Archive a team. Requires ProjectAdmin. Fails with 400 if the team is still assigned
+            Archive a team. Requires <c>team:manage</c>. Fails with 400 if the team is still assigned
             to active projects — reassign those projects first.
             </summary>
         </member>
@@ -1181,17 +1192,17 @@
             <summary>Get team members.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController.AddMember(System.Guid,BoardSync.Api.Modules.OrgProject.Domain.DTOs.AddTeamMemberRequest,System.Threading.CancellationToken)">
-            <summary>Add a member to a team. Requires ProjectAdmin.</summary>
+            <summary>Add a member to a team. Requires <c>team:member:manage</c>.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController.IsMember(System.Guid,System.Guid,System.Threading.CancellationToken)">
             <summary>
-            Check whether a user is a member of the team. Requires Reader.
+            Check whether a user is a member of the team. Requires <c>team:read</c>.
             Returns the membership flag rather than 404-ing on a non-member, so callers can
             use it as a plain predicate.
             </summary>
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController.RemoveMember(System.Guid,System.Guid,System.Threading.CancellationToken)">
-            <summary>Remove a member from a team. Requires ProjectAdmin.</summary>
+            <summary>Remove a member from a team. Requires <c>team:member:manage</c>.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.OrgProject.Controllers.TeamsController.GetPositions(System.Guid,System.Threading.CancellationToken)">
             <summary>
@@ -1799,23 +1810,43 @@
             </summary>
             <remarks>
             <para>
-            <b>The numeric values no longer carry meaning.</b> They were once a privilege ladder, compared
-            with <c>&lt;=</c> to answer "at least a TeamMember?". That stopped working the moment team
-            positions arrived: a Scrum Master and a Product Owner are peers holding different authority, and
-            no ordering of them is truthful. What a role permits is now declared in
-            <see cref="T:BoardSync.Api.Modules.Rbac.Models.RolePermissions"/> and resolved by union, never by comparison. The values remain only
-            because they are persisted, and are otherwise arbitrary.
+            <b>Every role belongs to exactly one scope</b>, and no name means two different things at two
+            different scopes. That is the point of the vocabulary: reading <c>Contributor</c> on a role
+            assignment tells you it is a grant on a project, without having to look at which column is
+            populated. <see cref="M:BoardSync.Api.Modules.Rbac.Models.RolePermissions.IsValidAt(BoardSync.Api.Modules.Rbac.Models.RoleType,BoardSync.Api.Modules.Rbac.Models.RoleScope)"/> declares the pairing and the
+            <c>CK_RoleAssignment_RoleMatchesScope</c> check constraint enforces it, so an ill-scoped grant is
+            unrepresentable rather than merely discouraged.
             </para>
             <para>
-            Stored as names, so adding a value is a non-breaking change and removing one is not.
+            <see cref="F:BoardSync.Api.Modules.Rbac.Models.RoleType.Viewer"/> is the one name held at two scopes, and deliberately: read-only on a team
+            and read-only on a project are the same idea applied to different things, unlike the
+            <c>Reader</c> it replaced, which meant "organization member" at one scope and "read-only" at the
+            other two.
+            </para>
+            <para>
+            <b>The numeric values carry no meaning.</b> They were once a privilege ladder, compared with
+            <c>&lt;=</c> to answer "at least a TeamMember?". That stopped working the moment team positions
+            arrived: a Scrum Master and a Product Owner are peers holding different authority, and no
+            ordering of them is truthful. What a role permits is declared in <see cref="T:BoardSync.Api.Modules.Rbac.Models.RolePermissions"/>
+            and resolved by union, never by comparison.
+            </para>
+            <para>
+            Stored as names, so adding a value is a non-breaking change and removing one needs a data
+            migration. 40 and 50 are left unused: they were <c>Reader</c> and <c>User</c>, retired by
+            <c>Stage3_ScopedRoleNames</c>, and reusing a number whose name changed meaning is the one way
+            these values could still mislead.
             </para>
             </remarks>
         </member>
         <member name="F:BoardSync.Api.Modules.Rbac.Models.RoleType.OrgAdmin">
             <summary>Administers the entire organization and everything inside it.</summary>
         </member>
-        <member name="F:BoardSync.Api.Modules.Rbac.Models.RoleType.ProjectAdmin">
-            <summary>Administers one project: its settings, its board, and its direct role grants.</summary>
+        <member name="F:BoardSync.Api.Modules.Rbac.Models.RoleType.Member">
+            <summary>
+            Belongs to the organization. Carries organization read and nothing else — every member holds
+            it from the moment they join, and access to anything inside comes from a team or project
+            grant rather than from this.
+            </summary>
         </member>
         <member name="F:BoardSync.Api.Modules.Rbac.Models.RoleType.TeamLead">
             <summary>Leads a team: its composition, and who holds its positions.</summary>
@@ -1827,16 +1858,16 @@
             <summary>Owns a team's backlog: decides what a sprint commits to.</summary>
         </member>
         <member name="F:BoardSync.Api.Modules.Rbac.Models.RoleType.TeamMember">
-            <summary>Contributes on a team: creates and edits work, orders the sprint.</summary>
+            <summary>Contributes on a team: orders the sprint, and contributes to the team's projects.</summary>
         </member>
-        <member name="F:BoardSync.Api.Modules.Rbac.Models.RoleType.Reader">
-            <summary>Read-only: can view boards, backlogs and reports but cannot mutate.</summary>
+        <member name="F:BoardSync.Api.Modules.Rbac.Models.RoleType.ProjectAdmin">
+            <summary>Administers one project: its settings, its board, and its direct role grants.</summary>
         </member>
-        <member name="F:BoardSync.Api.Modules.Rbac.Models.RoleType.User">
-            <summary>
-            Legacy. Never assigned by any code path and grants nothing; retained only because the column
-            stores names and an old row could still say so.
-            </summary>
+        <member name="F:BoardSync.Api.Modules.Rbac.Models.RoleType.Contributor">
+            <summary>Contributes to one project: creates, edits and comments on its work.</summary>
+        </member>
+        <member name="F:BoardSync.Api.Modules.Rbac.Models.RoleType.Viewer">
+            <summary>Read-only: may view a team's sprints, or a project's board and work items.</summary>
         </member>
         <member name="T:BoardSync.Api.Modules.Rbac.Models.TeamPositions">
             <summary>
@@ -1931,6 +1962,31 @@
             a request is rejected before it reaches a constraint violation.
             </summary>
         </member>
+        <member name="M:BoardSync.Api.Modules.Rbac.Models.RolePermissions.AssignableAt(BoardSync.Api.Modules.Rbac.Models.RoleScope)">
+            <summary>
+            Every role that means something at a scope, ordered by enum value so the list is stable.
+            </summary>
+            <remarks>
+            <para>
+            The endpoints that hand out roles validate against this rather than against a list of their
+            own. Two copies of "which roles belong at project scope" is one copy too many: the table
+            above, the check constraint and the endpoint have to agree, and a hand-maintained third list
+            is the one that silently falls behind — as the organization list did, still advertising
+            <c>ProjectAdmin</c> and <c>TeamMember</c> in its documentation long after both were rejected.
+            </para>
+            <para>
+            Team scope includes the positions, which are appointed through
+            <c>/api/teams/{teamId}/positions/{position}</c> rather than granted, and <c>TeamMember</c>,
+            which team membership confers. There is deliberately no general role-assignment endpoint at
+            team scope for this to feed.
+            </para>
+            <para>
+            Sorted rather than taken in the table's order: <see cref="T:System.Collections.Frozen.FrozenDictionary`2"/>
+            does not promise to enumerate keys in insertion order, and this list reaches users — it is
+            what the "valid roles are …" rejection message enumerates.
+            </para>
+            </remarks>
+        </member>
         <member name="T:BoardSync.Api.Modules.Rbac.Repositories.Implementations.RoleAssignmentRepository">
             <inheritdoc />
         </member>
@@ -1956,11 +2012,11 @@
             <see cref="T:BoardSync.Api.Modules.Rbac.Models.AccessSnapshot"/>.
             </summary>
             <remarks>
-            Returns the assignments rather than a yes/no answer because the privilege comparison cannot
-            happen in SQL: <see cref="T:BoardSync.Api.Modules.Rbac.Models.RoleType"/> is persisted with <c>HasConversion&lt;string&gt;()</c>,
-            so a database-side <c>&lt;=</c> would compare the *names*. 'TeamMember' &lt;= 'Reader' is
-            false and 'Reader' &lt;= 'TeamMember' is true, which would both deny team members read access
-            and let readers perform team-member writes. See <c>AccessEvaluator.Satisfies</c>.
+            Returns the assignments rather than a yes/no answer because the question is not one SQL can
+            answer. What a role permits is a lookup into <see cref="T:BoardSync.Api.Modules.Rbac.Models.RolePermissions"/> unioned
+            across every role held at the scope, and the scope itself may be reached by inheritance from
+            an organization or a team — none of which is expressible as a predicate over this table. The
+            rows come back and <see cref="T:BoardSync.Api.Modules.Rbac.Services.AccessEvaluator"/> interprets them.
             </remarks>
         </member>
         <member name="M:BoardSync.Api.Modules.Rbac.Repositories.Interfaces.IRoleAssignmentRepository.GetForScopeAsync(BoardSync.Api.Modules.Rbac.Models.RoleScope,System.Guid,System.Threading.CancellationToken)">
@@ -2478,33 +2534,33 @@
             Kanban board management scoped to a project — one board per project,
             auto-created with four default columns on first access.
             Cards are drawn from the active sprint of the project's assigned team.
-            Read:              Reader+ on the project
+            Read:              board:read on the project
             Column management: ProjectAdmin+ on the project
             </summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Controllers.BoardsController.GetForProject(System.Guid,System.Threading.CancellationToken)">
             <summary>
             Get (or auto-create) the board for a project, populated with active-sprint cards.
-            Requires Reader.
+            Requires <c>board:read</c>.
             </summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Controllers.BoardsController.GetById(System.Guid,System.Threading.CancellationToken)">
-            <summary>Get a board by ID with all columns and cards. Requires Reader.</summary>
+            <summary>Get a board by ID with all columns and cards. Requires <c>board:read</c>.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Controllers.BoardsController.Update(System.Guid,BoardSync.Api.Modules.Sprints.DTOs.UpdateBoardRequest,System.Threading.CancellationToken)">
-            <summary>Rename a board. Requires ProjectAdmin.</summary>
+            <summary>Rename a board. Requires <c>board:configure</c>.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Controllers.BoardsController.AddColumn(System.Guid,BoardSync.Api.Modules.Sprints.DTOs.CreateBoardColumnRequest,System.Threading.CancellationToken)">
-            <summary>Add a column to a board. Requires ProjectAdmin.</summary>
+            <summary>Add a column to a board. Requires <c>board:configure</c>.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Controllers.BoardsController.UpdateColumn(System.Guid,BoardSync.Api.Modules.Sprints.DTOs.UpdateBoardColumnRequest,System.Threading.CancellationToken)">
-            <summary>Update a column's name, mapped state, WIP limit, or position. Requires ProjectAdmin.</summary>
+            <summary>Update a column's name, mapped state, WIP limit, or position. Requires <c>board:configure</c>.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Controllers.BoardsController.DeleteColumn(System.Guid,System.Threading.CancellationToken)">
-            <summary>Delete a column from a board. Requires ProjectAdmin.</summary>
+            <summary>Delete a column from a board. Requires <c>board:configure</c>.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Controllers.BoardsController.ReorderColumns(System.Guid,BoardSync.Api.Modules.Sprints.DTOs.ReorderBoardColumnsRequest,System.Threading.CancellationToken)">
-            <summary>Reorder columns by providing the desired left-to-right column ID sequence. Requires ProjectAdmin.</summary>
+            <summary>Reorder columns by providing the desired left-to-right column ID sequence. Requires <c>board:configure</c>.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Controllers.BoardsController.RequireColumnProjectAsync(System.Guid,System.String,System.Threading.CancellationToken)">
             <summary>
@@ -2513,6 +2569,8 @@
         </member>
         <member name="T:BoardSync.Api.Modules.Sprints.Controllers.SprintsController">
             <summary>
+            Sprint lifecycle and backlog management scoped to a team.
+            Read operations:      sprint:read
             Sprint lifecycle and backlog management scoped to a project.
             Read operations:      Reader+
             Sprint management:    ProjectAdmin+
@@ -2532,20 +2590,25 @@
             <summary>Create a new sprint for a project. Requires ProjectAdmin.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.Update(System.Guid,BoardSync.Api.Modules.Sprints.DTOs.UpdateSprintRequest,System.Threading.CancellationToken)">
-            <summary>Update a sprint's goal and dates. Only allowed while Planning. Requires ProjectAdmin.</summary>
+            <summary>Update a sprint's goal and dates. Only allowed while Planning. Requires <c>sprint:manage</c>.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.UpdateStatus(System.Guid,BoardSync.Api.Modules.Sprints.DTOs.UpdateSprintStatusRequest,System.Threading.CancellationToken)">
             <summary>
             Transition sprint status: Planning → Active → Completed.
             Only one Active sprint per project is allowed at a time.
             Requires ProjectAdmin.
+            Only one Active sprint per team is allowed at a time.
+            Requires <c>sprint:manage</c>.
             </summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.Delete(System.Guid,System.Threading.CancellationToken)">
-            <summary>Delete a Planning sprint with no work items. Requires ProjectAdmin.</summary>
+            <summary>Delete a Planning sprint with no work items. Requires <c>sprint:manage</c>.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.Close(System.Guid,BoardSync.Api.Modules.Sprints.DTOs.CloseSprintRequest,System.Threading.CancellationToken)">
             <summary>
+            Close an active sprint. Incomplete items (not Resolved or Closed) are either
+            returned to the project backlog or moved to a specified next sprint.
+            Requires <c>sprint:manage</c>.
             Close an active sprint. Incomplete items are either returned to the backlog
             or moved to a specified next sprint. Requires ProjectAdmin.
             </summary>
@@ -2554,15 +2617,53 @@
             <summary>List work items in a sprint ordered by rank.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.AddWorkItem(System.Guid,BoardSync.Api.Modules.Sprints.DTOs.AddSprintWorkItemRequest,System.Threading.CancellationToken)">
-            <summary>Add a work item to the sprint backlog. Requires TeamMember.</summary>
+            <summary>Add a work item to the sprint backlog. Requires <c>sprint:scope</c>.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.RemoveWorkItem(System.Guid,System.Guid,System.Threading.CancellationToken)">
-            <summary>Remove a work item from the sprint backlog. Requires TeamMember.</summary>
+            <summary>Remove a work item from the sprint backlog. Requires <c>sprint:scope</c>.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.MoveWorkItem(System.Guid,System.Guid,BoardSync.Api.Modules.Sprints.DTOs.MoveSprintWorkItemRequest,System.Threading.CancellationToken)">
+            <summary>
+            Move one backlog item between two neighbours. Requires <c>sprint:order</c>.
+            </summary>
+            <remarks>
+            The drag-and-drop endpoint. Names only the card that moved and where it landed, so two
+            people rearranging different cards write different rows and cannot revert each other —
+            unlike the whole-list reorder below, which submits an entire ordering.
+            Omit <c>afterWorkItemId</c> to move to the top, or <c>beforeWorkItemId</c> to move to the end.
+            </remarks>
             <summary>Move a single backlog item between two neighbours (drag-and-drop). Requires TeamMember.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.ReorderWorkItems(System.Guid,BoardSync.Api.Modules.Sprints.DTOs.ReorderSprintWorkItemsRequest,System.Threading.CancellationToken)">
+            <summary>
+            Reorder the whole sprint backlog. Requires <c>sprint:order</c>.
+            </summary>
+            <remarks>
+            Last-writer-wins across every item: it submits an ordering computed before any concurrent
+            move existed, so a second caller silently reverts the first. Fine for a single editor;
+            prefer the move endpoint above wherever more than one person can drag at once.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.RequireSprintScopeAsync(System.Guid,System.Guid,System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Guards changing what a sprint contains, allowing a team member to decompose work that is
+            already committed.
+            </summary>
+            <remarks>
+            <para>
+            What is in a sprint is a commitment, so it belongs to <see cref="F:BoardSync.Api.Modules.Rbac.Models.Permissions.SprintScope"/> —
+            the Product Owner, Scrum Master, Team Lead or an org admin. Breaking committed work down is
+            not a commitment, though: if the parent is already in the sprint, adding a child changes
+            nothing about what the team promised, and gating that on the Product Owner would put them in
+            the middle of ordinary task breakdown.
+            </para>
+            <para>
+            A work item with no parent, or whose parent is not in this sprint, is new scope and needs the
+            permission. That includes a bug found mid-sprint — which is deliberate, if debatable: an
+            unplanned bug genuinely does change the commitment. Exempting a type is easy to add later and
+            hard to remove once people rely on it.
+            </para>
+            </remarks>
             <summary>Reorder the whole sprint backlog. Requires TeamMember.</summary>
         </member>
         <member name="T:BoardSync.Api.Modules.Sprints.Domain.Ranking">
@@ -3198,7 +3299,7 @@
             <summary>Transition work item state (New → Active → Resolved → Closed).</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.WorkItems.Controllers.WorkItemsController.Delete(System.Guid,System.Threading.CancellationToken)">
-            <summary>Soft-delete a work item. Requires ProjectAdmin.</summary>
+            <summary>Soft-delete a work item. Requires <c>workitem:delete</c>.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.WorkItems.Controllers.WorkItemsController.GetComments(System.Guid,BoardSync.Api.Shared.Kernel.PaginationQuery,System.Threading.CancellationToken)">
             <summary>List comments on a work item.</summary>
@@ -4105,6 +4206,38 @@
             <inheritdoc />
         </member>
         <member name="M:BoardSync.Api.Shared.Data.Migrations.Stage2_TeamPositions.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="T:BoardSync.Api.Shared.Data.Migrations.Stage3_ScopedRoleNames">
+            <summary>
+            Gives each scope its own role vocabulary, so no role name means two different things.
+            </summary>
+            <remarks>
+            <para>
+            <c>Reader</c> was held at all three scopes and meant something different at each: at
+            organization scope it was what every member is granted on joining — membership, not a
+            reading permission — while at team and project scope it was genuinely read-only. It splits
+            into <c>Member</c> and <c>Viewer</c> accordingly. <c>TeamMember</c> at project scope named a
+            team relationship that project grants do not have, and becomes <c>Contributor</c>; at team
+            scope, where the name is accurate, it stays.
+            </para>
+            <para>
+            <c>User</c> retires outright. It was assigned by no code path and mapped to no permissions
+            at any scope, so it is deleted rather than translated — there is nothing to preserve.
+            </para>
+            <para>
+            Written by hand: the model is unchanged (roles are a string column, and the pairing lives in
+            a raw-SQL check constraint), so the scaffolder produced an empty migration.
+            </para>
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.Stage3_ScopedRoleNames.Up(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.Stage3_ScopedRoleNames.Down(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.Stage3_ScopedRoleNames.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
             <inheritdoc />
         </member>
         <member name="T:BoardSync.Api.Shared.Data.Migrations.AddSprintProjectId">

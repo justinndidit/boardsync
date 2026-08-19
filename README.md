@@ -96,9 +96,19 @@ behind the write, at worst one dispatcher poll interval.
 
 ### Roles
 
-`RoleType` — `OrgAdmin`, `ProjectAdmin`, `TeamMember`, `Reader`, `User` — assigned at a
-`RoleScope` of `Organization`, `Project`, or `Team`. `RbacService` resolves the effective role for
-a user against a scope; controllers authorize through it rather than through raw claims.
+Every role belongs to one scope, and no name means two things at two scopes:
+
+| `RoleScope` | `RoleType` |
+| --- | --- |
+| `Organization` | `OrgAdmin`, `Member` |
+| `Team` | `TeamLead`, `ScrumMaster`, `ProductOwner`, `TeamMember`, `Viewer` |
+| `Project` | `ProjectAdmin`, `Contributor`, `Viewer` |
+
+Roles are bundles of named permissions (`org:admin`, `sprint:scope`, `workitem:write`, …) declared
+in `RolePermissions`, and a user holding several roles at one scope gets the **union** of what they
+permit — never a rank comparison, since a Scrum Master and a Product Owner are peers. Controllers
+authorize by declaring the permission an endpoint needs, `[RequirePermission(Permissions.SprintManage,
+From = "sprintId")]`, rather than by checking roles or raw claims.
 
 ## 3) API Surface
 

@@ -22,11 +22,11 @@ public interface IRoleAssignmentRepository
     /// <see cref="Models.AccessSnapshot"/>.
     /// </summary>
     /// <remarks>
-    /// Returns the assignments rather than a yes/no answer because the privilege comparison cannot
-    /// happen in SQL: <see cref="RoleType"/> is persisted with <c>HasConversion&lt;string&gt;()</c>,
-    /// so a database-side <c>&lt;=</c> would compare the *names*. 'TeamMember' &lt;= 'Reader' is
-    /// false and 'Reader' &lt;= 'TeamMember' is true, which would both deny team members read access
-    /// and let readers perform team-member writes. See <c>AccessEvaluator.Satisfies</c>.
+    /// Returns the assignments rather than a yes/no answer because the question is not one SQL can
+    /// answer. What a role permits is a lookup into <see cref="Models.RolePermissions"/> unioned
+    /// across every role held at the scope, and the scope itself may be reached by inheritance from
+    /// an organization or a team — none of which is expressible as a predicate over this table. The
+    /// rows come back and <see cref="Services.AccessEvaluator"/> interprets them.
     /// </remarks>
     Task<IReadOnlyList<RoleAssignment>> GetForUserAsync(Guid userId, CancellationToken ct = default);
 

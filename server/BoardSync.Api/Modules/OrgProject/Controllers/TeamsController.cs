@@ -40,7 +40,7 @@ public class TeamsController : ControllerBase
         _currentUser = currentUser;
     }
 
-    /// <summary>List all active teams in an organization. Requires Reader on the organization.</summary>
+    /// <summary>List all active teams in an organization. Requires <c>org:read</c>.</summary>
     [HttpGet("api/orgs/{orgId:guid}/teams")]
     [RequirePermission(Permissions.OrgRead, From = "orgId")]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<TeamResponse>>), StatusCodes.Status200OK)]
@@ -76,7 +76,7 @@ public class TeamsController : ControllerBase
         return Ok(new ApiResponse<TeamResponse>(true, "Team retrieved.", team));
     }
 
-    /// <summary>Update team details. Requires ProjectAdmin.</summary>
+    /// <summary>Update team details. Requires <c>team:manage</c>.</summary>
     [HttpPut("api/teams/{teamId:guid}")]
     [RequirePermission(Permissions.TeamManage, From = "teamId")]
     [ProducesResponseType(typeof(ApiResponse<TeamResponse>), StatusCodes.Status200OK)]
@@ -88,7 +88,7 @@ public class TeamsController : ControllerBase
     }
 
     /// <summary>
-    /// Archive a team. Requires ProjectAdmin. Fails with 400 if the team is still assigned
+    /// Archive a team. Requires <c>team:manage</c>. Fails with 400 if the team is still assigned
     /// to active projects — reassign those projects first.
     /// </summary>
     [HttpDelete("api/teams/{teamId:guid}")]
@@ -114,7 +114,7 @@ public class TeamsController : ControllerBase
         return Ok(new ApiResponse<PagedResult<TeamMemberResponse>>(true, "Members retrieved.", result));
     }
 
-    /// <summary>Add a member to a team. Requires ProjectAdmin.</summary>
+    /// <summary>Add a member to a team. Requires <c>team:member:manage</c>.</summary>
     [HttpPost("api/teams/{teamId:guid}/members")]
     [RequirePermission(Permissions.TeamMemberManage, From = "teamId")]
     [ProducesResponseType(typeof(ApiResponse<TeamMemberResponse>), StatusCodes.Status200OK)]
@@ -127,7 +127,7 @@ public class TeamsController : ControllerBase
     }
 
     /// <summary>
-    /// Check whether a user is a member of the team. Requires Reader.
+    /// Check whether a user is a member of the team. Requires <c>team:read</c>.
     /// Returns the membership flag rather than 404-ing on a non-member, so callers can
     /// use it as a plain predicate.
     /// </summary>
@@ -142,7 +142,7 @@ public class TeamsController : ControllerBase
         return Ok(new ApiResponse<bool>(true, isMember ? "User is a team member." : "User is not a team member.", isMember));
     }
 
-    /// <summary>Remove a member from a team. Requires ProjectAdmin.</summary>
+    /// <summary>Remove a member from a team. Requires <c>team:member:manage</c>.</summary>
     [HttpDelete("api/teams/{teamId:guid}/members/{userId:guid}")]
     [RequirePermission(Permissions.TeamMemberManage, From = "teamId")]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status200OK)]
