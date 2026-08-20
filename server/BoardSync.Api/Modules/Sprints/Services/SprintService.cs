@@ -78,8 +78,8 @@ public class SprintService : ISprintService
 
         await _repository.SaveChangesAsync(ct);
 
-        _logger.LogInformation("Sprint {Number} created for team {TeamId} by {UserId}",
-            sprint.Number, teamId, createdBy);
+        _logger.LogInformation("Sprint {Number} created for project {ProjectId} by {UserId}",
+            sprint.Number, sprint.ProjectId, createdBy);
 
         return await BuildResponseAsync(sprint.Id, ct);
     }
@@ -240,18 +240,15 @@ public class SprintService : ISprintService
         var workItem = await _workItems.GetActiveAsync(request.WorkItemId, ct)
             ?? throw new NotFoundException("WorkItem", request.WorkItemId);
 
-        // The caller was authorized against the *sprint's* team; nothing so far has authorized the
-        // *work item*. Without this check any team member could name any work item id in the system
-        // — including one in another organization — and read its title, assignee and points back
-        // off their own backlog and board. The sprint's team is the boundary: a team can hold
-        // several projects and one sprint spans all of them, so a sibling project is fine and
-        // anything outside the team is not.
+        // The caller was authorized against the *sprint's* project; nothing so far has authorized
+        // the *work item*. Without this check any contributor could name any work item id in the
+        // system — including one in another organization — and read its title, assignee and points
+        // back off their own backlog and board. The sprint's project is the boundary: a sprint
+        // belongs to exactly one project, so an item from any other project does not belong in it.
         //
         // Reported as not-found rather than forbidden on purpose. The caller cannot see this work
         // item, and answering "forbidden" would confirm the id names something real.
-        var owningTeamId = await _repository.GetAssignedTeamForProjectAsync(workItem.ProjectId, ct);
-
-        if (owningTeamId != sprint.ProjectId)
+        if (workItem.ProjectId != sprint.ProjectId)
             throw new NotFoundException("WorkItem", request.WorkItemId);
 
         if (await _repository.BacklogContainsAsync(sprintId, request.WorkItemId, ct))

@@ -3,12 +3,12 @@ using BoardSync.Api.Shared.Kernel.Events;
 
 namespace BoardSync.Api.Modules.Sprints.Events;
 
-// Sprints hang off a team, boards off a project. Both carry OrganizationId for the same reason
-// the OrgProject events do — the activity log filters on it.
+// Sprints and boards both hang off a project. Both carry OrganizationId for the same reason the
+// OrgProject events do — the activity log filters on it.
 
 public record SprintCreated(
     Guid SprintId,
-    Guid TeamId,
+    Guid ProjectId,
     Guid OrganizationId,
     string Name,
     Guid CreatedByUserId
@@ -16,7 +16,7 @@ public record SprintCreated(
 
 public record SprintUpdated(
     Guid SprintId,
-    Guid TeamId,
+    Guid ProjectId,
     Guid OrganizationId,
     string Name,
     string FieldName,
@@ -27,7 +27,7 @@ public record SprintUpdated(
 
 public record SprintStatusChanged(
     Guid SprintId,
-    Guid TeamId,
+    Guid ProjectId,
     Guid OrganizationId,
     string Name,
     SprintStatus OldStatus,
@@ -37,7 +37,7 @@ public record SprintStatusChanged(
 
 public record SprintDeleted(
     Guid SprintId,
-    Guid TeamId,
+    Guid ProjectId,
     Guid OrganizationId,
     string Name,
     Guid DeletedByUserId
@@ -45,7 +45,7 @@ public record SprintDeleted(
 
 public record SprintWorkItemAdded(
     Guid SprintId,
-    Guid TeamId,
+    Guid ProjectId,
     Guid OrganizationId,
     string SprintName,
     Guid WorkItemId,
@@ -55,7 +55,7 @@ public record SprintWorkItemAdded(
 
 public record SprintWorkItemRemoved(
     Guid SprintId,
-    Guid TeamId,
+    Guid ProjectId,
     Guid OrganizationId,
     string SprintName,
     Guid WorkItemId,

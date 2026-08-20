@@ -47,7 +47,6 @@ public interface ISprintRepository
     /// A sprint is project-scoped and a project can hold several projects, so items from any of the
     /// project's projects are legitimate — items from anywhere else are not.
     /// </remarks>
-    Task<Guid?> GetAssignedTeamForProjectAsync(Guid projectId, CancellationToken ct = default);
 
     /// <summary>
     /// Whether the project already has a non-completed sprint covering any part of the given range.

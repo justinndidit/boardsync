@@ -116,30 +116,30 @@ public partial class ActivityEventHandlers :
 
     public Task HandleAsync(SprintCreated e, CancellationToken ct = default) =>
         RecordAsync(e, e.OrganizationId, ActivityEntityType.Sprint, e.SprintId,
-            e.Name, ActivityVerb.Created, e.CreatedByUserId, ct, teamId: e.TeamId);
+            e.Name, ActivityVerb.Created, e.CreatedByUserId, ct, projectId: e.ProjectId);
 
     public Task HandleAsync(SprintUpdated e, CancellationToken ct = default) =>
         RecordAsync(e, e.OrganizationId, ActivityEntityType.Sprint, e.SprintId,
-            e.Name, ActivityVerb.Updated, e.UpdatedByUserId, ct, teamId: e.TeamId,
+            e.Name, ActivityVerb.Updated, e.UpdatedByUserId, ct, projectId: e.ProjectId,
             fieldName: e.FieldName, oldValue: e.OldValue, newValue: e.NewValue);
 
     public Task HandleAsync(SprintStatusChanged e, CancellationToken ct = default) =>
         RecordAsync(e, e.OrganizationId, ActivityEntityType.Sprint, e.SprintId,
-            e.Name, ActivityVerb.StateChanged, e.ChangedByUserId, ct, teamId: e.TeamId,
+            e.Name, ActivityVerb.StateChanged, e.ChangedByUserId, ct, projectId: e.ProjectId,
             fieldName: "Status", oldValue: e.OldStatus.ToString(), newValue: e.NewStatus.ToString());
 
     public Task HandleAsync(SprintDeleted e, CancellationToken ct = default) =>
         RecordAsync(e, e.OrganizationId, ActivityEntityType.Sprint, e.SprintId,
-            e.Name, ActivityVerb.Deleted, e.DeletedByUserId, ct, teamId: e.TeamId);
+            e.Name, ActivityVerb.Deleted, e.DeletedByUserId, ct, projectId: e.ProjectId);
 
     public Task HandleAsync(SprintWorkItemAdded e, CancellationToken ct = default) =>
         RecordAsync(e, e.OrganizationId, ActivityEntityType.Sprint, e.SprintId,
-            e.SprintName, ActivityVerb.Updated, e.AddedByUserId, ct, teamId: e.TeamId,
+            e.SprintName, ActivityVerb.Updated, e.AddedByUserId, ct, projectId: e.ProjectId,
             fieldName: "Work item added", newValue: e.WorkItemTitle);
 
     public Task HandleAsync(SprintWorkItemRemoved e, CancellationToken ct = default) =>
         RecordAsync(e, e.OrganizationId, ActivityEntityType.Sprint, e.SprintId,
-            e.SprintName, ActivityVerb.Updated, e.RemovedByUserId, ct, teamId: e.TeamId,
+            e.SprintName, ActivityVerb.Updated, e.RemovedByUserId, ct, projectId: e.ProjectId,
             fieldName: "Work item removed", oldValue: e.WorkItemTitle);
 
     public Task HandleAsync(BoardChanged e, CancellationToken ct = default) =>

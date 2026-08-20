@@ -20,21 +20,44 @@ public static class RolePermissions
 {
     // ── Building blocks ───────────────────────────────────────────────────────
 
-    /// <summary>What contributing to a project means — read, write, comment, but not administer.</summary>
+    /// <summary>
+    /// What contributing to a project means — read, write, comment, and order the sprint, but
+    /// neither administer the project nor decide what its sprint commits to.
+    /// </summary>
     private static readonly string[] ProjectContributor =
     [
         Permissions.ProjectRead,
         Permissions.BoardRead,
         Permissions.WorkItemRead,
         Permissions.WorkItemWrite,
-        Permissions.WorkItemComment
+        Permissions.WorkItemComment,
+        Permissions.SprintRead,
+        Permissions.SprintOrder
     ];
 
     private static readonly string[] ProjectViewer =
     [
         Permissions.ProjectRead,
         Permissions.BoardRead,
-        Permissions.WorkItemRead
+        Permissions.WorkItemRead,
+        Permissions.SprintRead
+    ];
+
+    /// <summary>
+    /// Contribution plus authority over the sprint itself — the lifecycle and what it commits to,
+    /// but nothing else about the project.
+    /// </summary>
+    /// <remarks>
+    /// What a Scrum Master or Product Owner carries onto their team's projects. Deliberately not
+    /// <see cref="ProjectAdministrator"/>: running a sprint is their job, renaming the project,
+    /// reconfiguring its board or handing out its roles is not. The distinction is the whole reason
+    /// sprint authority is separable from project administration.
+    /// </remarks>
+    private static readonly string[] ProjectSprintRunner =
+    [
+        .. ProjectContributor,
+        Permissions.SprintManage,
+        Permissions.SprintScope
     ];
 
     private static readonly string[] ProjectAdministrator =
@@ -43,7 +66,9 @@ public static class RolePermissions
         Permissions.ProjectAdmin,
         Permissions.ProjectMemberManage,
         Permissions.BoardConfigure,
-        Permissions.WorkItemDelete
+        Permissions.WorkItemDelete,
+        Permissions.SprintManage,
+        Permissions.SprintScope
     ];
 
     /// <summary>
@@ -77,47 +102,24 @@ public static class RolePermissions
     private static readonly FrozenDictionary<RoleType, FrozenSet<string>> AtTeam =
         new Dictionary<RoleType, FrozenSet<string>>
         {
-            // Leads the people: composition, and who holds the other positions. Also carries the
-            // sprint rights, because a lead standing in for an absent Scrum Master is the ordinary
-            // case rather than an escalation.
+            // Leads the people: composition, and who holds the other positions.
             [RoleType.TeamLead] = new[]
             {
                 Permissions.TeamRead, Permissions.TeamManage, Permissions.TeamMemberManage,
-                Permissions.TeamRoleAssign,
-                Permissions.SprintRead, Permissions.SprintManage, Permissions.SprintScope,
-                Permissions.SprintOrder
+                Permissions.TeamRoleAssign
             }.ToFrozenSet(),
 
-            // Owns the process: runs the sprint lifecycle. No authority over team composition.
-            [RoleType.ScrumMaster] = new[]
-            {
-                Permissions.TeamRead,
-                Permissions.SprintRead, Permissions.SprintManage, Permissions.SprintScope,
-                Permissions.SprintOrder
-            }.ToFrozenSet(),
+            // Owns the process, and owns the backlog. Their sprint authority is not listed here
+            // because a sprint is not a team-scope object any more: it reaches the sprints through
+            // the team → project edge below, which is where both are given sprint:manage and
+            // sprint:scope over every project the team serves. What sits at team scope is the
+            // appointment itself.
+            [RoleType.ScrumMaster] = new[] { Permissions.TeamRead }.ToFrozenSet(),
+            [RoleType.ProductOwner] = new[] { Permissions.TeamRead }.ToFrozenSet(),
 
-            // Owns the backlog: decides what a sprint commits to. Currently indistinguishable from
-            // ScrumMaster in permissions — see the note in the design doc (§4.3.1); the difference
-            // appears when acceptance and prioritisation endpoints exist.
-            [RoleType.ProductOwner] = new[]
-            {
-                Permissions.TeamRead,
-                Permissions.SprintRead, Permissions.SprintManage, Permissions.SprintScope,
-                Permissions.SprintOrder
-            }.ToFrozenSet(),
+            [RoleType.TeamMember] = new[] { Permissions.TeamRead }.ToFrozenSet(),
 
-            // Contributes. Orders the sprint but does not decide what it commits to; adding items
-            // is allowed only as decomposition of work already committed, which is enforced in
-            // SprintService rather than here because it depends on the item, not the role.
-            [RoleType.TeamMember] = new[]
-            {
-                Permissions.TeamRead, Permissions.SprintRead, Permissions.SprintOrder
-            }.ToFrozenSet(),
-
-            [RoleType.Viewer] = new[]
-            {
-                Permissions.TeamRead, Permissions.SprintRead
-            }.ToFrozenSet()
+            [RoleType.Viewer] = new[] { Permissions.TeamRead }.ToFrozenSet()
         }.ToFrozenDictionary();
 
     // ── Project scope ─────────────────────────────────────────────────────────
@@ -140,16 +142,38 @@ public static class RolePermissions
     /// What a role held on a team permits on that team's projects.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Every team role confers contribution and nothing more — deliberately flat. A team can serve
     /// several projects, so letting a position administer them would hand its holder authority over
     /// every sibling project at once. Project administration stays a direct project grant.
+    /// </para>
+    /// <para>
+    /// This edge is also how a team reaches its sprints, since a sprint belongs to a project.
+    /// Contribution carries <c>sprint:read</c> and <c>sprint:order</c>, so anyone on the team can
+    /// see and reorder the sprint of any project the team serves.
+    /// </para>
+    /// <para>
+    /// <b>Scrum Master and Product Owner carry more.</b> They additionally get
+    /// <c>sprint:manage</c> and <c>sprint:scope</c> on those projects, because running the sprint is
+    /// the appointment, and a sprint's project is an implementation detail of where the team's work
+    /// happens rather than a separate thing to be granted. This is the one place the edge is not
+    /// flat, and it stays narrow on purpose: sprint authority, never project administration. A
+    /// Scrum Master still cannot rename the project, reconfigure its board, or grant anyone a role
+    /// on it.
+    /// </para>
     /// </remarks>
     private static readonly FrozenDictionary<RoleType, FrozenSet<string>> TeamToProject =
         new Dictionary<RoleType, FrozenSet<string>>
         {
             [RoleType.TeamLead] = ProjectContributor.ToFrozenSet(),
-            [RoleType.ScrumMaster] = ProjectContributor.ToFrozenSet(),
-            [RoleType.ProductOwner] = ProjectContributor.ToFrozenSet(),
+
+            // The two roles whose job is the sprint carry it onto every project their team serves.
+            // That is the point of the appointment: a Scrum Master runs the sprints of the team's
+            // work, and which project a given sprint sits in is not something they should have to
+            // be granted separately. It stops at the sprint — see ProjectSprintRunner.
+            [RoleType.ScrumMaster] = ProjectSprintRunner.ToFrozenSet(),
+            [RoleType.ProductOwner] = ProjectSprintRunner.ToFrozenSet(),
+
             [RoleType.TeamMember] = ProjectContributor.ToFrozenSet(),
             [RoleType.Viewer] = ProjectViewer.ToFrozenSet()
         }.ToFrozenDictionary();

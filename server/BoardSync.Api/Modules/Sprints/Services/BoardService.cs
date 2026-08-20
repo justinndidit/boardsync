@@ -233,9 +233,9 @@ public class BoardService : IBoardService
 
     private async Task<BoardResponse> BuildBoardResponseAsync(Board board, CancellationToken ct)
     {
-        // A board is scoped to a project, but sprints are scoped to a team, so the board's cards
-        // come from the active sprint of the project's *assigned* team. Resolving that team here is
-        // what makes the project-scoped board and the team-scoped sprint meet.
+        // Board and sprint are both scoped to the project now, so the board's cards come from
+        // that project's own active sprint. The assigned team still comes back with it, because the
+        // board response reports which team is working the project.
         var context = await _repository.GetSprintContextAsync(board.ProjectId, ct);
 
         var teamId = context?.TeamId ?? Guid.Empty;

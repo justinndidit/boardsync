@@ -13,9 +13,9 @@ namespace BoardSync.Api.Modules.Rbac.Services;
 /// <code>
 /// Organization
 /// └── Team                      Team.OrganizationId
-///     ├── Sprint                Sprint.TeamId
 ///     └── Project               Project.AssignedTeamId  (required, exactly one team per project)
 ///         ├── Board
+///         ├── Sprint            Sprint.ProjectId
 ///         └── WorkItem
 /// </code>
 /// <para>

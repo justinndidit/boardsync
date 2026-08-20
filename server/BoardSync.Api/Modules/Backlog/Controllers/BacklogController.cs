@@ -171,10 +171,11 @@ public class BacklogController : ControllerBase
     /// Guards changing what a sprint contains, from the backlog side.
     /// </summary>
     /// <remarks>
-    /// The route names a project, but committing work is a team-level decision, so the sprint is
-    /// resolved first and its team is what the permission is checked against. Without this the
-    /// backlog would be a way around the rule that the sprint's own endpoints enforce — the same
-    /// authority, reachable through a different door.
+    /// The route names a project and the sprint belongs to one too, but they need not be the same
+    /// project: the sprint is resolved first and its own project is what sprint:scope is checked
+    /// against, while the route's project still has to permit the write. Without this the backlog
+    /// would be a way around the rule the sprint's own endpoints enforce — the same authority,
+    /// reachable through a different door.
     /// </remarks>
     private async Task RequireSprintScopeAsync(Guid projectId, Guid sprintId, CancellationToken ct)
     {
@@ -188,17 +189,17 @@ public class BacklogController : ControllerBase
         var sprint = await _sprintService.GetByIdAsync(sprintId, ct);
 
         if (await _rbac.HasPermissionAsync(
-                _currentUser.UserId, Permissions.SprintScope, RoleScope.Team, sprint.ProjectId, ct))
+                _currentUser.UserId, Permissions.SprintScope, RoleScope.Project, sprint.ProjectId, ct))
             return;
 
-        // Same split the endpoint filter applies: a caller who cannot even see this sprint's team
+        // Same split the endpoint filter applies: a caller who cannot even see this sprint's project
         // gets the answer they would get for a sprint that does not exist, so the status code does
         // not confirm one belonging to somebody else is real.
         if (!await _rbac.HasPermissionAsync(
-                _currentUser.UserId, Permissions.SprintRead, RoleScope.Team, sprint.ProjectId, ct))
+                _currentUser.UserId, Permissions.SprintRead, RoleScope.Project, sprint.ProjectId, ct))
             throw new NotFoundException("Sprint", sprintId);
 
         throw new ForbiddenException(
-            "Changing what a sprint commits to requires the Product Owner, Scrum Master or Team Lead.");
+            "Changing what a sprint commits to requires project administration.");
     }
 }
