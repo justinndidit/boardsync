@@ -63,25 +63,26 @@ public class TopicAuthorizer : ITopicAuthorizer
             TopicKind.Team =>
                 await _rbac.HasPermissionAsync(userId, Permissions.TeamRead, RoleScope.Team, id, ct),
 
-            // Sprints carry no scope of their own — they hang off a team — so the sprint's team is
-            // resolved first and the team's role decides. A sprint that no longer exists denies.
+            // Sprints carry no scope of their own — they hang off a project — so the sprint's
+            // project is resolved first and that project's grants decide. A sprint that no longer
+            // exists denies.
             TopicKind.Sprint => await CanSubscribeToSprintAsync(userId, id, ct),
 
             _ => false
         };
     }
 
-  private async Task<bool> CanSubscribeToSprintAsync(Guid userId, Guid sprintId, CancellationToken ct)
-  {
-    var sprint = await _sprints.GetByIdAsync(sprintId, ct);
+    private async Task<bool> CanSubscribeToSprintAsync(Guid userId, Guid sprintId, CancellationToken ct)
+    {
+        var sprint = await _sprints.GetByIdAsync(sprintId, ct);
 
-    if (sprint is null) return false;
+        if (sprint is null) return false;
 
-    return await _rbac.HasPermissionAsync(
-        userId,
-        Permissions.ProjectRead,  // ← matches ProjectId scope
-        RoleScope.Project,        // ← changed from Team to Project
-        sprint.ProjectId,         // ← your original, correct
-        ct);
-   }
+        // sprint:read, not project:read — the same permission the equivalent GET asks for. They are
+        // not the same question: a project Viewer holds both today, but keeping the socket on the
+        // weaker of the two would let a future project role read sprints over the wire that it
+        // could not read over HTTP.
+        return await _rbac.HasPermissionAsync(
+            userId, Permissions.SprintRead, RoleScope.Project, sprint.ProjectId, ct);
+    }
 }

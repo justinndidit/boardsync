@@ -691,10 +691,11 @@
             Guards changing what a sprint contains, from the backlog side.
             </summary>
             <remarks>
-            The route names a project, but committing work is a team-level decision, so the sprint is
-            resolved first and its team is what the permission is checked against. Without this the
-            backlog would be a way around the rule that the sprint's own endpoints enforce — the same
-            authority, reachable through a different door.
+            The route names a project and the sprint belongs to one too, but they need not be the same
+            project: the sprint is resolved first and its own project is what sprint:scope is checked
+            against, while the route's project still has to permit the write. Without this the backlog
+            would be a way around the rule the sprint's own endpoints enforce — the same authority,
+            reachable through a different door.
             </remarks>
         </member>
         <member name="T:BoardSync.Api.Modules.Backlog.DTOs.AddToBacklogRequest">
@@ -1852,13 +1853,13 @@
             <summary>Leads a team: its composition, and who holds its positions.</summary>
         </member>
         <member name="F:BoardSync.Api.Modules.Rbac.Models.RoleType.ScrumMaster">
-            <summary>Owns a team's process: runs the sprint lifecycle.</summary>
+            <summary>Owns a team's process: runs the sprint lifecycle on the team's projects.</summary>
         </member>
         <member name="F:BoardSync.Api.Modules.Rbac.Models.RoleType.ProductOwner">
-            <summary>Owns a team's backlog: decides what a sprint commits to.</summary>
+            <summary>Owns a team's backlog: decides what the sprints of the team's projects commit to.</summary>
         </member>
         <member name="F:BoardSync.Api.Modules.Rbac.Models.RoleType.TeamMember">
-            <summary>Contributes on a team: orders the sprint, and contributes to the team's projects.</summary>
+            <summary>Contributes on a team, and so to the team's projects and their sprints.</summary>
         </member>
         <member name="F:BoardSync.Api.Modules.Rbac.Models.RoleType.ProjectAdmin">
             <summary>Administers one project: its settings, its board, and its direct role grants.</summary>
@@ -1867,7 +1868,7 @@
             <summary>Contributes to one project: creates, edits and comments on its work.</summary>
         </member>
         <member name="F:BoardSync.Api.Modules.Rbac.Models.RoleType.Viewer">
-            <summary>Read-only: may view a team's sprints, or a project's board and work items.</summary>
+            <summary>Read-only: may view a team, or a project's board, sprints and work items.</summary>
         </member>
         <member name="T:BoardSync.Api.Modules.Rbac.Models.TeamPositions">
             <summary>
@@ -1926,7 +1927,22 @@
             </remarks>
         </member>
         <member name="F:BoardSync.Api.Modules.Rbac.Models.RolePermissions.ProjectContributor">
-            <summary>What contributing to a project means — read, write, comment, but not administer.</summary>
+            <summary>
+            What contributing to a project means — read, write, comment, and order the sprint, but
+            neither administer the project nor decide what its sprint commits to.
+            </summary>
+        </member>
+        <member name="F:BoardSync.Api.Modules.Rbac.Models.RolePermissions.ProjectSprintRunner">
+            <summary>
+            Contribution plus authority over the sprint itself — the lifecycle and what it commits to,
+            but nothing else about the project.
+            </summary>
+            <remarks>
+            What a Scrum Master or Product Owner carries onto their team's projects. Deliberately not
+            <see cref="F:BoardSync.Api.Modules.Rbac.Models.RolePermissions.ProjectAdministrator"/>: running a sprint is their job, renaming the project,
+            reconfiguring its board or handing out its roles is not. The distinction is the whole reason
+            sprint authority is separable from project administration.
+            </remarks>
         </member>
         <member name="F:BoardSync.Api.Modules.Rbac.Models.RolePermissions.Everything">
             <summary>
@@ -1939,9 +1955,25 @@
             What a role held on a team permits on that team's projects.
             </summary>
             <remarks>
+            <para>
             Every team role confers contribution and nothing more — deliberately flat. A team can serve
             several projects, so letting a position administer them would hand its holder authority over
             every sibling project at once. Project administration stays a direct project grant.
+            </para>
+            <para>
+            This edge is also how a team reaches its sprints, since a sprint belongs to a project.
+            Contribution carries <c>sprint:read</c> and <c>sprint:order</c>, so anyone on the team can
+            see and reorder the sprint of any project the team serves.
+            </para>
+            <para>
+            <b>Scrum Master and Product Owner carry more.</b> They additionally get
+            <c>sprint:manage</c> and <c>sprint:scope</c> on those projects, because running the sprint is
+            the appointment, and a sprint's project is an implementation detail of where the team's work
+            happens rather than a separate thing to be granted. This is the one place the edge is not
+            flat, and it stays narrow on purpose: sprint authority, never project administration. A
+            Scrum Master still cannot rename the project, reconfigure its board, or grant anyone a role
+            on it.
+            </para>
             </remarks>
         </member>
         <member name="M:BoardSync.Api.Modules.Rbac.Models.RolePermissions.ForOrganization(BoardSync.Api.Modules.Rbac.Models.RoleType)">
@@ -2164,9 +2196,9 @@
             <code>
             Organization
             └── Team                      Team.OrganizationId
-                ├── Sprint                Sprint.TeamId
                 └── Project               Project.AssignedTeamId  (required, exactly one team per project)
                     ├── Board
+                    ├── Sprint            Sprint.ProjectId
                     └── WorkItem
             </code>
             <para>
@@ -2569,11 +2601,15 @@
         </member>
         <member name="T:BoardSync.Api.Modules.Sprints.Controllers.SprintsController">
             <summary>
-            Sprint lifecycle and backlog management scoped to a project.
-            Read operations:      Reader+
-            Sprint management:    ProjectAdmin+
-            Backlog management:   TeamMember+
+            Sprint lifecycle and backlog management. A sprint belongs to a project, so every check here is
+            against that project.
             </summary>
+            <remarks>
+            Read:                 <c>sprint:read</c>
+            Lifecycle:            <c>sprint:manage</c>
+            What the sprint holds: <c>sprint:scope</c>, with the decomposition exception below
+            Ordering:             <c>sprint:order</c>
+            </remarks>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.GetForProject(System.Guid,BoardSync.Api.Shared.Kernel.PaginationQuery,System.Threading.CancellationToken)">
             <summary>List all sprints for a project, newest first.</summary>
@@ -2585,7 +2621,7 @@
             <summary>Get a sprint by ID.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.Create(System.Guid,BoardSync.Api.Modules.Sprints.DTOs.CreateSprintRequest,System.Threading.CancellationToken)">
-            <summary>Create a new sprint for a project. Requires ProjectAdmin.</summary>
+            <summary>Create a new sprint for a project. Requires <c>sprint:manage</c>.</summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.Update(System.Guid,BoardSync.Api.Modules.Sprints.DTOs.UpdateSprintRequest,System.Threading.CancellationToken)">
             <summary>Update a sprint's goal and dates. Only allowed while Planning. Requires <c>sprint:manage</c>.</summary>
@@ -2594,7 +2630,7 @@
             <summary>
             Transition sprint status: Planning → Active → Completed.
             Only one Active sprint per project is allowed at a time.
-            Requires ProjectAdmin.
+            Requires <c>sprint:manage</c>.
             </summary>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.Delete(System.Guid,System.Threading.CancellationToken)">
@@ -2634,6 +2670,26 @@
             Last-writer-wins across every item: it submits an ordering computed before any concurrent
             move existed, so a second caller silently reverts the first. Fine for a single editor;
             prefer the move endpoint above wherever more than one person can drag at once.
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Modules.Sprints.Controllers.SprintsController.RequireSprintScopeAsync(System.Guid,System.Guid,System.Guid,System.Threading.CancellationToken)">
+            <summary>
+            Guards changing what a sprint contains, allowing a contributor to decompose work that is
+            already committed.
+            </summary>
+            <remarks>
+            <para>
+            What is in a sprint is a commitment, so it belongs to <see cref="F:BoardSync.Api.Modules.Rbac.Models.Permissions.SprintScope"/> —
+            a project administrator, or an org admin. Breaking committed work down is not a commitment,
+            though: if the parent is already in the sprint, adding a child changes nothing about what was
+            promised, and gating that would put an administrator in the middle of ordinary task
+            breakdown.
+            </para>
+            <para>
+            A work item with no parent, or whose parent is not in this sprint, is new scope and needs the
+            permission. That includes a bug found mid-sprint — deliberate, if debatable: an unplanned bug
+            genuinely does change the commitment.
+            </para>
             </remarks>
         </member>
         <member name="T:BoardSync.Api.Modules.Sprints.Domain.Ranking">
@@ -2735,7 +2791,7 @@
             <summary>A single column without card data — used by column-management endpoints.</summary>
         </member>
         <member name="T:BoardSync.Api.Modules.Sprints.DTOs.CreateSprintRequest">
-            <summary>Create a new sprint for a team.</summary>
+            <summary>Create a new sprint for a project.</summary>
         </member>
         <member name="T:BoardSync.Api.Modules.Sprints.DTOs.UpdateSprintRequest">
             <summary>Update a sprint's goal or dates. Only allowed while Planning.</summary>
@@ -3044,7 +3100,7 @@
         <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.ProjectExistsAsync(System.Guid,System.Threading.CancellationToken)">
             <summary>Whether an active project with this ID exists.</summary>
         </member>
-        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.GetAssignedTeamForProjectAsync(System.Guid,System.Threading.CancellationToken)">
+        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.HasOverlappingSprintAsync(System.Guid,System.DateTime,System.DateTime,System.Threading.CancellationToken)">
             <summary>
             The project a project is assigned to, or null if the project does not exist.
             </summary>
@@ -3053,8 +3109,6 @@
             A sprint is project-scoped and a project can hold several projects, so items from any of the
             project's projects are legitimate — items from anywhere else are not.
             </remarks>
-        </member>
-        <member name="M:BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository.HasOverlappingSprintAsync(System.Guid,System.DateTime,System.DateTime,System.Threading.CancellationToken)">
             <summary>
             Whether the project already has a non-completed sprint covering any part of the given range.
             Completed sprints are excluded — history is allowed to overlap, only live plans are not.
@@ -3126,7 +3180,7 @@
             </summary>
             <remarks>
             <para>
-            A board is assembled from four tables — board, columns, the assigned team's active sprint, and
+            A board is assembled from four tables — board, columns, the project's active sprint, and
             that sprint's work items with their tags — so almost anything in a project can invalidate it.
             Trying to delete the right cache keys after each write means re-deriving which keys those were,
             which is more work and more ways to be subtly wrong than simply making the old ones unreachable.
@@ -3212,20 +3266,24 @@
         </member>
         <member name="T:BoardSync.Api.Modules.Sprints.SprintScopeResolver">
             <summary>
-            Resolves a sprint to the team that runs it.
+            Resolves a sprint to the project it belongs to.
             </summary>
             <remarks>
-            Sprints are team-scoped — they have no scope of their own — so every sprint permission is really
-            a question about its team.
+            Sprints have no scope of their own, so every sprint permission is a question about the project
+            that owns it. The team reaches the sprint the same way it reaches everything else in the
+            project — through the team → project edge in <c>RolePermissions</c>, not through a scope of its
+            own.
             </remarks>
         </member>
         <member name="M:BoardSync.Api.Modules.Sprints.SprintScopeResolver.#ctor(BoardSync.Api.Modules.Sprints.Repositories.Interfaces.ISprintRepository)">
             <summary>
-            Resolves a sprint to the team that runs it.
+            Resolves a sprint to the project it belongs to.
             </summary>
             <remarks>
-            Sprints are team-scoped — they have no scope of their own — so every sprint permission is really
-            a question about its team.
+            Sprints have no scope of their own, so every sprint permission is a question about the project
+            that owns it. The team reaches the sprint the same way it reaches everything else in the
+            project — through the team → project edge in <c>RolePermissions</c>, not through a scope of its
+            own.
             </remarks>
         </member>
         <member name="T:BoardSync.Api.Modules.Sprints.BoardScopeResolver">
@@ -4220,6 +4278,39 @@
             <inheritdoc />
         </member>
         <member name="M:BoardSync.Api.Shared.Data.Migrations.Stage3_ScopedRoleNames.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="T:BoardSync.Api.Shared.Data.Migrations.Stage4_SprintBelongsToProject">
+            <summary>
+            Makes "a sprint belongs to a project" true of the data, then of the schema.
+            </summary>
+            <remarks>
+            <para>
+            <c>AddSprintProjectId</c> renamed <c>Sprints.TeamId</c> to <c>ProjectId</c> without
+            translating the values, so in any environment that already held sprints the column now
+            contains team ids under a project's name. That is not a cosmetic problem: authorization
+            resolves a sprint through <c>ProjectId</c>, and a team id there resolves to a project nobody
+            holds a grant on, denying every caller including an organization administrator.
+            </para>
+            <para>
+            The remap runs first and the foreign key second, so the key is what proves the remap was
+            complete — a row still holding a team id cannot satisfy it, and the migration fails rather
+            than leaving the sprint module quietly inaccessible.
+            </para>
+            <para>
+            A team serving several projects has no single right answer, and neither does a team serving
+            none. Both raise instead of guessing: picking one would silently move a sprint's work under a
+            project nobody chose, which is worse than a failed deploy that says exactly what it found.
+            </para>
+            </remarks>
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.Stage4_SprintBelongsToProject.Up(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.Stage4_SprintBelongsToProject.Down(Microsoft.EntityFrameworkCore.Migrations.MigrationBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:BoardSync.Api.Shared.Data.Migrations.Stage4_SprintBelongsToProject.BuildTargetModel(Microsoft.EntityFrameworkCore.ModelBuilder)">
             <inheritdoc />
         </member>
         <member name="T:BoardSync.Api.Shared.Kernel.BaseEntity">

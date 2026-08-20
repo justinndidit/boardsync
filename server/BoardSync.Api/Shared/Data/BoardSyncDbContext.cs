@@ -334,6 +334,16 @@ public class BoardSyncDbContext : DbContext
                 .WithOne(sw => sw.Sprint)
                 .HasForeignKey(sw => sw.SprintId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            // A sprint belongs to exactly one project, and SprintScopeResolver reads ProjectId to
+            // decide whose grants apply to it. Without the key that is a convention: a sprint whose
+            // ProjectId named something that was not a project would resolve to a scope nobody holds
+            // and deny everyone, which is exactly the failure the team → project rename produced.
+            // Cascade because a sprint has no meaning once its project is gone.
+            entity.HasOne<Project>()
+                .WithMany()
+                .HasForeignKey(s => s.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<SprintWorkItem>(entity =>

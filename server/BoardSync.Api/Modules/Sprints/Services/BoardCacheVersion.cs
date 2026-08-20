@@ -7,7 +7,7 @@ namespace BoardSync.Api.Modules.Sprints.Services;
 /// </summary>
 /// <remarks>
 /// <para>
-/// A board is assembled from four tables — board, columns, the assigned team's active sprint, and
+/// A board is assembled from four tables — board, columns, the project's active sprint, and
 /// that sprint's work items with their tags — so almost anything in a project can invalidate it.
 /// Trying to delete the right cache keys after each write means re-deriving which keys those were,
 /// which is more work and more ways to be subtly wrong than simply making the old ones unreachable.

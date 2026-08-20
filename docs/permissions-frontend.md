@@ -305,6 +305,34 @@ permissions they had. This is a renaming, not a regrant.
 
 ---
 
+### 7.5 ⚠️ Sprints are now scoped to projects, not teams
+
+A sprint belongs to a project. Three things follow.
+
+**Who may do what changed.** Sprint permissions are now project permissions:
+
+| Action | Was | Now |
+| --- | --- | --- |
+| View sprints, reorder the sprint backlog | any team member | anyone contributing to the project — which includes the team, via team → project |
+| Create, update, start, complete, delete a sprint | Team Lead, Scrum Master, Product Owner | Scrum Master or Product Owner of the project's team, `ProjectAdmin` on the project, or OrgAdmin |
+| Decide what the sprint commits to | Team Lead, Scrum Master, Product Owner | Scrum Master or Product Owner of the project's team, `ProjectAdmin` on the project, or OrgAdmin |
+
+A Scrum Master and a Product Owner keep sprint authority over every project their team serves, so a
+UI gating sprint controls on those positions stays correct. Two things did change: a **Team Lead** no
+longer runs sprints unless they also hold `ProjectAdmin`, and a **project administrator who is on no
+team** now can. Sprint authority stops at the sprint — neither position gains any power to rename the
+project, configure its board, delete work items or grant roles on it.
+
+**Realtime moved.** Sprint events were published to the sprint's **team** topic and are now published
+to its **project** topic (`Topic.Sprint` is unchanged). If you subscribed to a team topic to catch
+sprint changes, subscribe to the project topic instead. Sprint activity-feed rows are likewise filed
+under the project now rather than the team, matching how board rows always were.
+
+**Sprint payloads carry a project.** Sprint domain events exposed `teamId` and now expose
+`projectId`. `GET /api/projects/{projectId}/sprints` and `…/sprints/active` are unchanged in shape.
+
+---
+
 ## 8. Bug fixes you may have coded around
 
 **Cross-organization work items could be pulled into a sprint.** `POST /api/sprints/{id}/workitems`

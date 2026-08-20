@@ -103,6 +103,25 @@ reach instance-side code, because asking a client to give up its own access is n
 This is the part most worth reading, because the permission model has to follow it and currently
 does not.
 
+> **Amended by `Stage4_SprintBelongsToProject`.** Sprints were moved from teams to projects. The
+> tree below and the second consequence under it describe the model as it stood when this document
+> was written; the current shape is:
+>
+> ```
+> Organization
+> ├── OrganizationMembership              org.OrganizationMemberships
+> └── Team                    (N per org) Team.OrganizationId
+>     ├── TeamMembership                  org.TeamMemberships
+>     └── Project             (N per team) Project.AssignedTeamId  ← required, RESTRICT
+>         ├── Board           (1 per project)
+>         ├── Sprint          (N per project) Sprint.ProjectId  ← FK added by Stage 4
+>         └── WorkItem        (N per project)
+> ```
+>
+> `sprint:read` / `sprint:order` are now part of project contribution and `sprint:manage` /
+> `sprint:scope` part of project administration, so a Scrum Master or Product Owner reaches a sprint
+> through the team → project edge but needs `ProjectAdmin` on the project to run it. See §11.
+
 ```
 Organization
 ├── OrganizationMembership              org.OrganizationMemberships
@@ -129,6 +148,9 @@ Two consequences the permission model currently ignores:
   already exists in the schema; RBAC just does not read it.
 - **Sprints are team-scoped and shared across the team's projects.** Anything that lets one
   project's administrator manage sprints is a lateral escalation into that team's *other* projects.
+  *(No longer true — see the amendment above. A sprint now belongs to one project, so a project
+  administrator managing it reaches nothing outside that project, and the escalation this warned
+  about cannot arise.)*
 
 ---
 
@@ -904,3 +926,43 @@ Stage 4            typed principals, when git sync starts
    └─ closes §3.9
 ongoing            §3.8 visibility (items 1–2 now, item 3 when connection counts justify it)
 ```
+
+---
+
+## 11. Amendment: sprints belong to projects (`Stage4_SprintBelongsToProject`)
+
+Sprints moved from team scope to project scope. What changed, and why the authorization layer had to
+change with it:
+
+| | Before | After |
+|---|---|---|
+| Owner | `Sprint.TeamId` | `Sprint.ProjectId`, with a foreign key to `org.Projects` |
+| Scope resolved for `sprintId` | `RoleScope.Team` | `RoleScope.Project` |
+| `sprint:read`, `sprint:order` | team roles | project contribution (and so team roles, via the team → project edge) |
+| `sprint:manage`, `sprint:scope` | `TeamLead`, `ScrumMaster`, `ProductOwner` at team scope | project administration, **and** `ScrumMaster` / `ProductOwner` via the team → project edge |
+| Sprint realtime topics | `Topic.Team` | `Topic.Project` |
+| Sprint activity rows | filed under `teamId` | filed under `projectId`, as board rows already were |
+
+**Where sprint authority lives.** `ScrumMaster` and `ProductOwner` grant only `team:read` at team
+scope — a sprint is not a team-scope object any more, so there is nothing else for them to hold
+there. Their authority travels down the team → project edge instead: both carry `sprint:manage` and
+`sprint:scope` onto *every project their team serves*, so running the sprint follows the appointment
+rather than requiring a separate grant per project.
+
+This is the one place the team → project edge is deliberately not flat, and it stays narrow: sprint
+authority, never project administration. A Scrum Master cannot rename the project, reconfigure its
+board, delete work items, or grant anyone a role on it — `RunningTheSprintIsNotAdministeringTheProject`
+in `AccessEvaluatorTests` pins that boundary, and
+`ScrumMasterOfOneTeamRunsNothingOnAnotherTeamsProject` pins that it reaches only their own team's
+projects.
+
+`TeamLead` was left as a plain contributor on the team's projects. Under the old team-scoped model it
+carried the sprint rights too, on the reasoning that a lead standing in for an absent Scrum Master is
+ordinary rather than an escalation; that reasoning still applies, so if you want it back it is the
+same one-line change applied to `TeamToProject[TeamLead]`.
+
+**The migration is self-checking.** `AddSprintProjectId` renamed the column without translating its
+values, so any environment holding sprints from before it now has team ids in `ProjectId` — which
+resolves to a project nobody has a grant on and denies everyone. Stage 4 remaps those rows, refuses
+to guess when a team serves anything other than exactly one active project, and only then adds the
+foreign key, so an incomplete remap fails the deploy instead of silently disabling the module.

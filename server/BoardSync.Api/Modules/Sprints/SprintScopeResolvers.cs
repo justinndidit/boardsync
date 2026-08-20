@@ -5,11 +5,13 @@ using BoardSync.Api.Shared.Auth.Authorization;
 namespace BoardSync.Api.Modules.Sprints;
 
 /// <summary>
-/// Resolves a sprint to the team that runs it.
+/// Resolves a sprint to the project it belongs to.
 /// </summary>
 /// <remarks>
-/// Sprints are team-scoped — they have no scope of their own — so every sprint permission is really
-/// a question about its team.
+/// Sprints have no scope of their own, so every sprint permission is a question about the project
+/// that owns it. The team reaches the sprint the same way it reaches everything else in the
+/// project — through the team → project edge in <c>RolePermissions</c>, not through a scope of its
+/// own.
 /// </remarks>
 public sealed class SprintScopeResolver(ISprintRepository repository) : IScopeResolver
 {
@@ -19,7 +21,7 @@ public sealed class SprintScopeResolver(ISprintRepository repository) : IScopeRe
     {
         var sprint = await repository.GetByIdAsync(value, ct);
 
-        return sprint is null ? null : new ResolvedScope(RoleScope.Team, sprint.ProjectId);
+        return sprint is null ? null : new ResolvedScope(RoleScope.Project, sprint.ProjectId);
     }
 }
 

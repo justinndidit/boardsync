@@ -3,7 +3,7 @@ using System.ComponentModel.DataAnnotations;
 
 namespace BoardSync.Api.Modules.Sprints.DTOs;
 
-/// <summary>Create a new sprint for a team.</summary>
+/// <summary>Create a new sprint for a project.</summary>
 public class CreateSprintRequest
 {
     [MaxLength(500)]

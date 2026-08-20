@@ -54,13 +54,13 @@ public enum RoleType
     /// <summary>Leads a team: its composition, and who holds its positions.</summary>
     TeamLead = 21,
 
-    /// <summary>Owns a team's process: runs the sprint lifecycle.</summary>
+    /// <summary>Owns a team's process: runs the sprint lifecycle on the team's projects.</summary>
     ScrumMaster = 22,
 
-    /// <summary>Owns a team's backlog: decides what a sprint commits to.</summary>
+    /// <summary>Owns a team's backlog: decides what the sprints of the team's projects commit to.</summary>
     ProductOwner = 23,
 
-    /// <summary>Contributes on a team: orders the sprint, and contributes to the team's projects.</summary>
+    /// <summary>Contributes on a team, and so to the team's projects and their sprints.</summary>
     TeamMember = 30,
 
     // ── Project ───────────────────────────────────────────────────────────────
@@ -73,7 +73,7 @@ public enum RoleType
 
     // ── Team and project ──────────────────────────────────────────────────────
 
-    /// <summary>Read-only: may view a team's sprints, or a project's board and work items.</summary>
+    /// <summary>Read-only: may view a team, or a project's board, sprints and work items.</summary>
     Viewer = 32
 }
 

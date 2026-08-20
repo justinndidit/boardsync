@@ -58,12 +58,6 @@ public class SprintRepository : ISprintRepository
     public Task<bool> ProjectExistsAsync(Guid projectId, CancellationToken ct = default) =>
         _context.Projects.AnyAsync(t => t.Id == projectId && t.IsActive, ct);
 
-    public async Task<Guid?> GetAssignedTeamForProjectAsync(Guid projectId, CancellationToken ct = default) =>
-        await _context.Projects
-            .Where(p => p.Id == projectId)
-            .Select(p => (Guid?)p.AssignedTeamId)
-            .FirstOrDefaultAsync(ct);
-
     public Task<Guid?> GetOrganizationIdForProjectAsync(
     Guid projectId,
     CancellationToken ct = default) =>
