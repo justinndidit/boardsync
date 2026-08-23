@@ -1,4 +1,5 @@
 using BoardSync.Api.Shared.Kernel;
+using BoardSync.Api.Shared.Metadata;
 
 namespace BoardSync.Api.Modules.WorkItems.Models;
 
@@ -7,10 +8,19 @@ namespace BoardSync.Api.Modules.WorkItems.Models;
 /// </summary>
 public enum WorkItemType
 {
+    [DisplayMetadata("Epic", 10, Description = "A large body of work spanning several features.")]
     Epic,
+
+    [DisplayMetadata("Feature", 20, Description = "A shippable capability within an epic.")]
     Feature,
+
+    [DisplayMetadata("User Story", 30, Description = "A unit of user-visible value.")]
     UserStory,
+
+    [DisplayMetadata("Task", 40, Description = "A piece of work needed to deliver a story.")]
     Task,
+
+    [DisplayMetadata("Bug", 50, Description = "Something that does not work as intended.")]
     Bug
 }
 
@@ -19,9 +29,20 @@ public enum WorkItemType
 /// </summary>
 public enum WorkItemState
 {
+    [DisplayMetadata("New", 10, Group = "Pending", Description = "Created, not yet started.")]
     New,
+
+    [DisplayMetadata("Active", 20, Group = "InProgress", Description = "Being worked on.")]
     Active,
+
+    // The label is not the enum name on purpose. "Resolved" says nothing about what happens next;
+    // what this state means is that the work is done and waiting on someone to test it, and the
+    // person looking at the board needs to know that rather than to learn the vocabulary.
+    [DisplayMetadata("Awaiting QA", 30, Group = "Review",
+        Description = "Work is complete and waiting to be verified.")]
     Resolved,
+
+    [DisplayMetadata("Closed", 40, Group = "Done", Description = "Verified and finished.")]
     Closed
 }
 
@@ -30,9 +51,16 @@ public enum WorkItemState
 /// </summary>
 public enum WorkItemPriority
 {
+    [DisplayMetadata("Critical", 10, Description = "Drop everything.")]
     Critical = 1,
+
+    [DisplayMetadata("High", 20, Description = "Ahead of normal work.")]
     High = 2,
+
+    [DisplayMetadata("Medium", 30, Description = "Normal priority.")]
     Medium = 3,
+
+    [DisplayMetadata("Low", 40, Description = "When there is room.")]
     Low = 4
 }
 

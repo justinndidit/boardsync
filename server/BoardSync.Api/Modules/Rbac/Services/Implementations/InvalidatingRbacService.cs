@@ -67,6 +67,12 @@ public sealed class InvalidatingRbacService : IRbacService
         CancellationToken ct = default)
         => _inner.GetVisibleOrganizationIdsAsync(userId, permission, ct);
 
+    public Task<IReadOnlyList<string>> GetPermissionsAtAsync(
+        Guid userId,
+        ScopeRef scope,
+        CancellationToken ct = default)
+        => _inner.GetPermissionsAtAsync(userId, scope, ct);
+
     public Task<IReadOnlyList<RoleAssignment>> GetUserRolesAsync(Guid userId, CancellationToken ct = default)
         => _inner.GetUserRolesAsync(userId, ct);
 

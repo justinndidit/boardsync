@@ -199,6 +199,38 @@ public static class AccessEvaluator
         ScopesWhere(snapshot.OrganizationRoles, permission, RolePermissions.ForOrganization);
 
     /// <summary>
+    /// Everything the user may do at one organization.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The three <c>PermissionsAt…</c> methods are what <c>GET /api/me/capabilities</c> answers with.
+    /// Each is defined as "every permission for which the matching <c>GrantsAt…</c> says yes", so a
+    /// capability report and the guard that enforces it cannot diverge — the report is not a second
+    /// implementation of the rules, it is the same predicate run across
+    /// <see cref="Permissions.All"/>.
+    /// </para>
+    /// <para>
+    /// Pure, like the rest of this class, so the agreement between the two is testable without a
+    /// database.
+    /// </para>
+    /// </remarks>
+    public static IReadOnlyList<string> PermissionsAtOrganization(
+        AccessSnapshot snapshot, Guid organizationId) =>
+        [.. Permissions.All.Where(p => GrantsAtOrganization(snapshot, p, organizationId))];
+
+    /// <summary>Everything the user may do on one team.</summary>
+    /// <inheritdoc cref="PermissionsAtOrganization" path="/remarks"/>
+    public static IReadOnlyList<string> PermissionsAtTeam(
+        AccessSnapshot snapshot, Guid teamId, Guid? organizationId) =>
+        [.. Permissions.All.Where(p => GrantsAtTeam(snapshot, p, teamId, organizationId))];
+
+    /// <summary>Everything the user may do on one project.</summary>
+    /// <inheritdoc cref="PermissionsAtOrganization" path="/remarks"/>
+    public static IReadOnlyList<string> PermissionsAtProject(
+        AccessSnapshot snapshot, Guid projectId, ProjectLocation? location) =>
+        [.. Permissions.All.Where(p => GrantsAtProject(snapshot, p, projectId, location))];
+
+    /// <summary>
     /// The scope ids whose roles carry <paramref name="permission"/> under <paramref name="permits"/>.
     /// </summary>
     private static Guid[] ScopesWhere(

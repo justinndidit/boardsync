@@ -103,6 +103,26 @@ public interface IRbacService
         string permission,
         CancellationToken ct = default);
 
+    /// <summary>
+    /// Everything a user may do at one scope.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="HasPermissionAsync"/> asked once per permission would work and would be wrong to
+    /// build on: twenty-odd questions, each re-resolving the same scope. This resolves the snapshot
+    /// and the scope's position in the tree once, then answers every permission from them in memory.
+    /// </para>
+    /// <para>
+    /// A scope the caller cannot see, and one that does not exist, both come back empty. That is the
+    /// same posture as the 404-on-denial rule in <c>PermissionAuthorizationFilter</c>: an empty
+    /// answer must not distinguish "no such project" from "not yours".
+    /// </para>
+    /// </remarks>
+    Task<IReadOnlyList<string>> GetPermissionsAtAsync(
+        Guid userId,
+        ScopeRef scope,
+        CancellationToken ct = default);
+
     /// <summary>Return all role assignments for a user.</summary>
     Task<IReadOnlyList<RoleAssignment>> GetUserRolesAsync(Guid userId, CancellationToken ct = default);
 

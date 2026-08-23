@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using BoardSync.Api.Shared.Metadata;
 
 namespace BoardSync.Api.Modules.Rbac.Models;
 
@@ -40,6 +41,8 @@ public enum RoleType
     // ── Organization ──────────────────────────────────────────────────────────
 
     /// <summary>Administers the entire organization and everything inside it.</summary>
+    [DisplayMetadata("Organization Admin", 10,
+        Description = "Administers the organization and everything inside it.")]
     OrgAdmin = 10,
 
     /// <summary>
@@ -47,33 +50,48 @@ public enum RoleType
     /// it from the moment they join, and access to anything inside comes from a team or project
     /// grant rather than from this.
     /// </summary>
+    [DisplayMetadata("Member", 20,
+        Description = "Belongs to the organization. Access to anything inside comes from a team or project grant.")]
     Member = 11,
 
     // ── Team ──────────────────────────────────────────────────────────────────
 
     /// <summary>Leads a team: its composition, and who holds its positions.</summary>
+    [DisplayMetadata("Team Lead", 30,
+        Description = "Leads the team: its composition, and who holds its positions.")]
     TeamLead = 21,
 
     /// <summary>Owns a team's process: runs the sprint lifecycle on the team's projects.</summary>
+    [DisplayMetadata("Scrum Master", 40,
+        Description = "Runs the sprint lifecycle on the team's projects.")]
     ScrumMaster = 22,
 
     /// <summary>Owns a team's backlog: decides what the sprints of the team's projects commit to.</summary>
+    [DisplayMetadata("Product Owner", 50,
+        Description = "Decides what the sprints of the team's projects commit to.")]
     ProductOwner = 23,
 
     /// <summary>Contributes on a team, and so to the team's projects and their sprints.</summary>
+    [DisplayMetadata("Team Member", 70,
+        Description = "Contributes on the team, and so to its projects and their sprints.")]
     TeamMember = 30,
 
     // ── Project ───────────────────────────────────────────────────────────────
 
     /// <summary>Administers one project: its settings, its board, and its direct role grants.</summary>
+    [DisplayMetadata("Project Admin", 60,
+        Description = "Administers one project: its settings, its board, and its role grants.")]
     ProjectAdmin = 20,
 
     /// <summary>Contributes to one project: creates, edits and comments on its work.</summary>
+    [DisplayMetadata("Contributor", 80,
+        Description = "Creates, edits and comments on the project's work.")]
     Contributor = 31,
 
     // ── Team and project ──────────────────────────────────────────────────────
 
     /// <summary>Read-only: may view a team, or a project's board, sprints and work items.</summary>
+    [DisplayMetadata("Viewer", 90, Description = "Read-only.")]
     Viewer = 32
 }
 

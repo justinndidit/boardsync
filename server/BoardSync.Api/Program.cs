@@ -688,3 +688,14 @@ static void ValidateSecuritySettings(SecuritySettings securitySettings, IWebHost
         throw new InvalidOperationException(errorMessage);
     }
 }
+
+/// <summary>
+/// Exposes the implicit entry-point class that top-level statements generate.
+/// </summary>
+/// <remarks>
+/// <c>WebApplicationFactory&lt;TEntryPoint&gt;</c> needs a reachable type from this assembly to boot
+/// the real pipeline. Without this declaration the generated <c>Program</c> is internal and the
+/// integration tests cannot name it — the alternative, <c>InternalsVisibleTo</c>, opens the whole
+/// assembly to make one type visible.
+/// </remarks>
+public partial class Program;

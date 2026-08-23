@@ -167,6 +167,32 @@ public class RbacService : IRbacService
         return AccessEvaluator.VisibleOrganizations(snapshot, permission);
     }
 
+    public async Task<IReadOnlyList<string>> GetPermissionsAtAsync(
+        Guid userId,
+        ScopeRef scope,
+        CancellationToken ct = default)
+    {
+        var snapshot = await _resolver.GetSnapshotAsync(userId, ct);
+
+        // One tree lookup for the whole answer, not one per permission. Everything after it is the
+        // pure evaluator, which is where the rules live.
+        return scope.Scope switch
+        {
+            RoleScope.Organization =>
+                AccessEvaluator.PermissionsAtOrganization(snapshot, scope.Id),
+
+            RoleScope.Team =>
+                AccessEvaluator.PermissionsAtTeam(
+                    snapshot, scope.Id, await _resolver.GetTeamOrganizationIdAsync(scope.Id, ct)),
+
+            RoleScope.Project =>
+                AccessEvaluator.PermissionsAtProject(
+                    snapshot, scope.Id, await _resolver.GetProjectLocationAsync(scope.Id, ct)),
+
+            _ => []
+        };
+    }
+
     public async Task<Guid?> TransferTeamPositionAsync(
         Guid teamId,
         RoleType position,

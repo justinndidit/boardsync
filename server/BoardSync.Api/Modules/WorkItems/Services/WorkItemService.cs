@@ -1,4 +1,5 @@
 using BoardSync.Api.Modules.OrgProject.Services.Interfaces;
+using BoardSync.Api.Modules.WorkItems.Domain;
 using BoardSync.Api.Modules.WorkItems.DTOs;
 using BoardSync.Api.Modules.WorkItems.Events;
 using BoardSync.Api.Modules.WorkItems.Models;
@@ -16,6 +17,15 @@ namespace BoardSync.Api.Modules.WorkItems.Services;
 /// hierarchy, audit history and domain events. All persistence goes through
 /// <see cref="IWorkItemRepository"/>; project references go through <see cref="IProjectService"/>.
 /// </summary>
+/// <remarks>
+/// <b>Every <c>_eventBus.Enqueue</c> must come before its <c>SaveChangesAsync</c>.</b>
+/// <see cref="Shared.Kernel.Events.OutboxEventBus"/> does no I/O — it stages an outbox row on the
+/// request's shared <c>DbContext</c>, which is what makes the event and the change it describes
+/// commit together. Enqueueing afterwards leaves that row in the change tracker with nothing left to
+/// persist it, so it is discarded when the scope is disposed: no exception, no log, the event simply
+/// never happened. Every method here had the two the wrong way round, which meant no work item event
+/// was ever delivered — see the note on <see cref="CreateAsync"/>.
+/// </remarks>
 public class WorkItemService : IWorkItemService
 {
     private readonly IWorkItemRepository _repository;
@@ -104,9 +114,9 @@ public class WorkItemService : IWorkItemService
         // Initial history entry
         AddHistory(item, createdBy, "State", null, WorkItemState.New.ToString());
 
-        await _repository.SaveChangesAsync(ct);
-
         _eventBus.Enqueue(new WorkItemCreated(item.Id, projectId, item.Type, item.Title, createdBy));
+
+        await _repository.SaveChangesAsync(ct);
 
         _logger.LogInformation("WorkItem '{Title}' ({Id}) created in project {ProjectId} by {UserId}",
             item.Title, item.Id, projectId, createdBy);
@@ -186,12 +196,12 @@ public class WorkItemService : IWorkItemService
         foreach (var added in newTagNames.Where(n => existingTags.All(t => t.Name != n)))
             _repository.AddTag(new WorkItemTag { WorkItemId = item.Id, Name = added, CreatedBy = updatedBy });
 
-        await _repository.SaveChangesAsync(ct);
-
         if (previousAssignee != request.AssigneeId)
         {
             _eventBus.Enqueue(new WorkItemAssigned(item.Id, item.ProjectId, previousAssignee, request.AssigneeId, updatedBy));
         }
+
+        await _repository.SaveChangesAsync(ct);
 
         return await MapToResponseAsync(workItemId, ct);
     }
@@ -216,9 +226,9 @@ public class WorkItemService : IWorkItemService
         item.State = newState;
         item.UpdatedAt = DateTime.UtcNow;
 
-        await _repository.SaveChangesAsync(ct);
-
         _eventBus.Enqueue(new WorkItemStateChanged(item.Id, item.ProjectId, oldState, newState, updatedBy));
+
+        await _repository.SaveChangesAsync(ct);
 
         return await MapToResponseAsync(workItemId, ct);
     }
@@ -231,9 +241,9 @@ public class WorkItemService : IWorkItemService
         item.IsActive = false;
         item.UpdatedAt = DateTime.UtcNow;
 
-        await _repository.SaveChangesAsync(ct);
-
         _eventBus.Enqueue(new WorkItemDeleted(item.Id, item.ProjectId, deletedBy));
+
+        await _repository.SaveChangesAsync(ct);
 
         _logger.LogInformation("WorkItem {Id} soft-deleted by {UserId}", workItemId, deletedBy);
     }
@@ -258,9 +268,9 @@ public class WorkItemService : IWorkItemService
 
         _repository.AddComment(comment);
         item.UpdatedAt = DateTime.UtcNow;
-        await _repository.SaveChangesAsync(ct);
-
         _eventBus.Enqueue(new WorkItemCommentAdded(comment.Id, workItemId, item.ProjectId, authorId));
+
+        await _repository.SaveChangesAsync(ct);
 
         return MapCommentToResponse(comment);
     }
@@ -358,9 +368,9 @@ public class WorkItemService : IWorkItemService
         };
 
         _repository.AddLink(link);
-        await _repository.SaveChangesAsync(ct);
-
         _eventBus.Enqueue(new WorkItemLinked(workItemId, request.TargetId, request.LinkType, createdBy));
+
+        await _repository.SaveChangesAsync(ct);
 
         return new WorkItemLinkResponse(
             link.Id, link.SourceId, link.TargetId, link.LinkType,
@@ -449,45 +459,34 @@ public class WorkItemService : IWorkItemService
             .Distinct()
             .ToList();
 
+    /// <summary>
+    /// Rejects a state change the workflow does not allow.
+    /// </summary>
+    /// <remarks>
+    /// The table lives in <see cref="WorkItemStateMachine"/> rather than here, so the rule the
+    /// service enforces and the rule <c>GET /api/metadata</c> publishes are the same one. A client
+    /// building its "Move to…" menu from a second copy would offer transitions this method rejects.
+    /// </remarks>
     private static void ValidateStateTransition(WorkItemState current, WorkItemState next)
     {
-        // Nothing reaches Closed except through Resolved.
-        //
-        // Active → Closed used to be allowed, which let whoever was doing the work declare it
-        // finished in one step. Every transition is gated on the same permission — workitem:write,
-        // held by every contributor and every team member — so that edge meant the author of a
-        // change was also its sole reviewer. Removing it makes Resolved the one door into Closed,
-        // which is what the QA gate then guards: see build_context.md §4.
-        var allowed = current switch
-        {
-            WorkItemState.New => new[] { WorkItemState.Active },
-            WorkItemState.Active => new[] { WorkItemState.Resolved },
-            WorkItemState.Resolved => new[] { WorkItemState.Closed, WorkItemState.Active },
-            WorkItemState.Closed => new[] { WorkItemState.Active },
-            _ => Array.Empty<WorkItemState>()
-        };
+        if (WorkItemStateMachine.CanTransition(current, next)) return;
 
-        if (!allowed.Contains(next))
-            throw new BusinessRuleException(
-                $"Transition from '{current}' to '{next}' is not allowed. " +
-                $"Valid next states: {string.Join(", ", allowed)}");
+        throw new BusinessRuleException(
+            $"Transition from '{current}' to '{next}' is not allowed. " +
+            $"Valid next states: {string.Join(", ", WorkItemStateMachine.AllowedFrom(current))}");
     }
 
+    /// <summary>
+    /// Rejects a parent/child pairing the hierarchy does not allow.
+    /// </summary>
+    /// <remarks>See the note on <see cref="ValidateStateTransition"/> — same reason, same table.</remarks>
     private static void ValidateHierarchy(WorkItemType parentType, WorkItemType childType)
     {
-        var valid = (parentType, childType) switch
-        {
-            (WorkItemType.Epic, WorkItemType.Feature) => true,
-            (WorkItemType.Feature, WorkItemType.UserStory) => true,
-            (WorkItemType.UserStory, WorkItemType.Task) => true,
-            (WorkItemType.UserStory, WorkItemType.Bug) => true,
-            _ => false
-        };
+        if (WorkItemHierarchy.CanNest(parentType, childType)) return;
 
-        if (!valid)
-            throw new BusinessRuleException(
-                $"A '{childType}' cannot be a child of '{parentType}'. " +
-                "Valid hierarchy: Epic → Feature → Story → Task/Bug.");
+        throw new BusinessRuleException(
+            $"A '{childType}' cannot be a child of '{parentType}'. " +
+            $"Valid hierarchy: {WorkItemHierarchy.Description}.");
     }
 
     private async Task<WorkItemResponse> MapToResponseAsync(Guid workItemId, CancellationToken ct)
