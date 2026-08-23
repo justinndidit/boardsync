@@ -142,4 +142,87 @@ public static class AccessEvaluator
 
         return GrantsAtOrganization(snapshot, permission, location.OrganizationId);
     }
+
+    // ── Set-shaped questions ──────────────────────────────────────────────────
+    //
+    // The questions above take a scope and answer yes or no. These take no scope and answer "which
+    // ones?", for the reads that span everything a user can see — search, the notification feed, the
+    // workspace dashboard. Those cannot name a scope in an attribute, so before these existed they
+    // each invented their own scoping rule, and all three invented the same wrong one: they treated
+    // organization membership as access to everything inside the organization, which is precisely
+    // what RolePermissions says it is not.
+
+    /// <summary>
+    /// Which projects the user may do <paramref name="permission"/> to, as the grants that reach
+    /// them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The same three routes as <see cref="GrantsAtProject"/>, read in the other direction: instead
+    /// of taking a project and asking which grant covers it, this takes the grants and describes the
+    /// projects they cover. That correspondence is exact and is asserted as a property test — for
+    /// every snapshot, permission and project, <c>VisibleProjects(…).Includes(p)</c> equals
+    /// <c>GrantsAtProject(…, p)</c>.
+    /// </para>
+    /// <para>
+    /// Deliberately returns grant ids rather than project ids; see <see cref="ProjectVisibility"/>
+    /// for why.
+    /// </para>
+    /// </remarks>
+    public static ProjectVisibility VisibleProjects(AccessSnapshot snapshot, string permission)
+    {
+        // OrgAdmin is the only organization role that reaches below itself today, but this asks the
+        // table rather than naming it, so a future organization role that grants downward is picked
+        // up here without anyone remembering to come back.
+        var organizations = ScopesWhere(
+            snapshot.OrganizationRoles, permission, RolePermissions.ForOrganization);
+
+        var teams = ScopesWhere(
+            snapshot.TeamRoles, permission, RolePermissions.ForProjectViaTeam);
+
+        var projects = ScopesWhere(
+            snapshot.ProjectRoles, permission, RolePermissions.ForProject);
+
+        return new ProjectVisibility(organizations, teams, projects);
+    }
+
+    /// <summary>
+    /// Which organizations the user may do <paramref name="permission"/> to directly.
+    /// </summary>
+    /// <remarks>
+    /// Organizations are the root of the tree, so unlike projects there is no inheritance to expand —
+    /// this is just the scopes in the snapshot whose roles carry the permission. It exists so callers
+    /// stop reaching for <c>OrganizationMemberships</c>, which answers a different question: being a
+    /// member is not the same as holding <c>org:read</c>, even though today every member does.
+    /// </remarks>
+    public static Guid[] VisibleOrganizations(AccessSnapshot snapshot, string permission) =>
+        ScopesWhere(snapshot.OrganizationRoles, permission, RolePermissions.ForOrganization);
+
+    /// <summary>
+    /// The scope ids whose roles carry <paramref name="permission"/> under <paramref name="permits"/>.
+    /// </summary>
+    private static Guid[] ScopesWhere(
+        Dictionary<Guid, List<RoleType>> grants,
+        string permission,
+        Func<RoleType, System.Collections.Frozen.FrozenSet<string>> permits)
+    {
+        if (grants.Count == 0) return [];
+
+        List<Guid>? matched = null;
+
+        foreach (var (scopeId, roles) in grants)
+        {
+            foreach (var role in roles)
+            {
+                if (!permits(role).Contains(permission)) continue;
+
+                // Union, as everywhere else: one role carrying it is enough, and the rest of this
+                // scope's roles cannot take it away.
+                (matched ??= []).Add(scopeId);
+                break;
+            }
+        }
+
+        return matched?.ToArray() ?? [];
+    }
 }

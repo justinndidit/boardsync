@@ -55,6 +55,18 @@ public sealed class InvalidatingRbacService : IRbacService
         CancellationToken ct = default)
         => _inner.HasPermissionAnywhereAsync(userId, permission, ct);
 
+    public Task<ProjectVisibility> GetProjectVisibilityAsync(
+        Guid userId,
+        string permission,
+        CancellationToken ct = default)
+        => _inner.GetProjectVisibilityAsync(userId, permission, ct);
+
+    public Task<Guid[]> GetVisibleOrganizationIdsAsync(
+        Guid userId,
+        string permission,
+        CancellationToken ct = default)
+        => _inner.GetVisibleOrganizationIdsAsync(userId, permission, ct);
+
     public Task<IReadOnlyList<RoleAssignment>> GetUserRolesAsync(Guid userId, CancellationToken ct = default)
         => _inner.GetUserRolesAsync(userId, ct);
 

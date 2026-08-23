@@ -102,7 +102,7 @@ public class WorkItemService : IWorkItemService
         }
 
         // Initial history entry
-        AddHistory(item.Id, createdBy, "State", null, WorkItemState.New.ToString());
+        AddHistory(item, createdBy, "State", null, WorkItemState.New.ToString());
 
         await _repository.SaveChangesAsync(ct);
 
@@ -211,7 +211,7 @@ public class WorkItemService : IWorkItemService
         ValidateStateTransition(item.State, newState);
 
         var oldState = item.State;
-        AddHistory(item.Id, updatedBy, "State", oldState.ToString(), newState.ToString());
+        AddHistory(item, updatedBy, "State", oldState.ToString(), newState.ToString());
 
         item.State = newState;
         item.UpdatedAt = DateTime.UtcNow;
@@ -409,14 +409,27 @@ public class WorkItemService : IWorkItemService
     private void TrackChange(WorkItem item, Guid changedBy, string field, string? oldValue, string? newValue)
     {
         if (oldValue == newValue) return;
-        AddHistory(item.Id, changedBy, field, oldValue, newValue);
+        AddHistory(item, changedBy, field, oldValue, newValue);
     }
 
-    private void AddHistory(Guid workItemId, Guid changedBy, string field, string? oldValue, string? newValue)
+    /// <summary>
+    /// Records one field change against a work item.
+    /// </summary>
+    /// <remarks>
+    /// Takes the work item rather than its id so <see cref="WorkItemHistory.ProjectId"/> cannot be
+    /// left unset. It was: every history row ever written carried <c>Guid.Empty</c>, because this
+    /// method only ever received an id and there was nothing to copy the project from. The column
+    /// exists, the migration shipped it, and <c>(ProjectId, CreatedAt)</c> was indexed for it — but
+    /// nothing wrote it, so the notification feed, which filters on exactly that column, returned
+    /// nothing to anybody. Passing the entity makes the omission unrepresentable rather than merely
+    /// fixed.
+    /// </remarks>
+    private void AddHistory(WorkItem item, Guid changedBy, string field, string? oldValue, string? newValue)
     {
         _repository.AddHistory(new WorkItemHistory
         {
-            WorkItemId = workItemId,
+            WorkItemId = item.Id,
+            ProjectId = item.ProjectId,
             ChangedBy = changedBy,
             FieldName = field,
             OldValue = oldValue,
@@ -438,11 +451,17 @@ public class WorkItemService : IWorkItemService
 
     private static void ValidateStateTransition(WorkItemState current, WorkItemState next)
     {
-        // Allowed transitions for MVP state machine
+        // Nothing reaches Closed except through Resolved.
+        //
+        // Active → Closed used to be allowed, which let whoever was doing the work declare it
+        // finished in one step. Every transition is gated on the same permission — workitem:write,
+        // held by every contributor and every team member — so that edge meant the author of a
+        // change was also its sole reviewer. Removing it makes Resolved the one door into Closed,
+        // which is what the QA gate then guards: see build_context.md §4.
         var allowed = current switch
         {
             WorkItemState.New => new[] { WorkItemState.Active },
-            WorkItemState.Active => new[] { WorkItemState.Resolved, WorkItemState.Closed },
+            WorkItemState.Active => new[] { WorkItemState.Resolved },
             WorkItemState.Resolved => new[] { WorkItemState.Closed, WorkItemState.Active },
             WorkItemState.Closed => new[] { WorkItemState.Active },
             _ => Array.Empty<WorkItemState>()

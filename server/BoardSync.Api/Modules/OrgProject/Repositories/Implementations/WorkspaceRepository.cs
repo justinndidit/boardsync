@@ -16,39 +16,41 @@ public class WorkspaceRepository : IWorkspaceRepository
         _context = context;
     }
 
-    public async Task<IReadOnlyList<Guid>> GetOrganizationIdsForUserAsync(
+    public async Task<WorkspaceSummaryResponse> GetSummaryAsync(
         Guid userId,
-        CancellationToken ct = default) =>
-        await _context.OrganizationMemberships
-            .Where(m => m.UserId == userId)
-            .Select(m => m.OrganizationId)
-            .ToListAsync(ct);
-
-    public async Task<WorkspaceSummaryResponse> GetSummaryAsync(Guid userId, CancellationToken ct = default)
+        WorkspaceScope scope,
+        CancellationToken ct = default)
     {
+        if (scope.IsEmpty)
+            return new WorkspaceSummaryResponse(0, 0, 0, 0);
+
+        var organizationIds = scope.Organizations;
+
         // Left unmaterialized on purpose — composing these as IQueryable turns them into
         // subqueries of the projection below, so all four counters come back in one round trip.
-        var orgIds = _context.OrganizationMemberships
-            .Where(m => m.UserId == userId)
-            .Select(m => m.OrganizationId);
+        var readableProjectIds = _context.Projects
+            .Where(scope.Projects.Predicate())
+            .Where(p => p.IsActive)
+            .Select(p => p.Id);
 
-        var projectIds = _context.Projects
-            .Where(p => orgIds.Contains(p.OrganizationId) && p.IsActive)
+        var workItemProjectIds = _context.Projects
+            .Where(scope.WorkItems.Predicate())
+            .Where(p => p.IsActive)
             .Select(p => p.Id);
 
         // Anchored on the caller's own row purely to give the projection a single row to hang off.
         var summary = await _context.Users
             .Where(u => u.Id == userId)
             .Select(u => new WorkspaceSummaryResponse(
-                orgIds.Count(),
-                projectIds.Count(),
+                organizationIds.Length,
+                readableProjectIds.Count(),
                 _context.OrganizationMemberships
-                    .Where(m => orgIds.Contains(m.OrganizationId))
+                    .Where(m => organizationIds.Contains(m.OrganizationId))
                     .Select(m => m.UserId)
                     .Distinct()
                     .Count(),
                 _context.WorkItems.Count(w =>
-                    projectIds.Contains(w.ProjectId)
+                    workItemProjectIds.Contains(w.ProjectId)
                     && w.IsActive
                     && w.State != WorkItemState.Closed
                     && w.State != WorkItemState.Resolved)))

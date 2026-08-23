@@ -47,7 +47,8 @@ public class WorkspaceController : ControllerBase
     /// </summary>
     [HttpGet("summary")]
     [NoPermissionRequired(
-        "Aggregates only over the organizations the caller belongs to; the query is scoped to their id.")]
+        "No scope in the route to name — it spans every organization. Scoped in WorkspaceService by " +
+        "IRbacService.GetVisibleOrganizationIdsAsync and .GetProjectVisibilityAsync.")]
     [ProducesResponseType(typeof(ApiResponse<WorkspaceSummaryResponse>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetSummary(CancellationToken ct)
     {
@@ -67,11 +68,13 @@ public class WorkspaceController : ControllerBase
     /// </remarks>
     [HttpGet("activity")]
     [NoPermissionRequired(
-        "Reads activity only for the organizations the caller belongs to; the query is scoped to their id.")]
+        "No scope in the route to name — it spans every organization. Scoped in WorkspaceService by " +
+        "IRbacService.GetVisibleOrganizationIdsAsync to the organizations the caller holds org:read " +
+        "on, which is the same gate GET /api/orgs/{orgId}/activity applies to one of them.")]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<ActivityResponse>>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetActivity([FromQuery] PaginationQuery pagination, CancellationToken ct)
     {
-        var orgIds = await _workspace.GetOrganizationIdsAsync(_currentUser.UserId, ct);
+        var orgIds = await _workspace.GetReadableOrganizationIdsAsync(_currentUser.UserId, ct);
 
         var result = await _activity.GetForOrganizationsAsync(orgIds, pagination, ct);
 

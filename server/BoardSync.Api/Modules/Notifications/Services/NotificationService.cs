@@ -1,5 +1,7 @@
 using BoardSync.Api.Modules.Notifications.DTOs;
 using BoardSync.Api.Modules.Notifications.Repositories.Interfaces;
+using BoardSync.Api.Modules.Rbac.Models;
+using BoardSync.Api.Modules.Rbac.Services.Interfaces;
 
 namespace BoardSync.Api.Modules.Notifications.Services;
 
@@ -7,10 +9,12 @@ namespace BoardSync.Api.Modules.Notifications.Services;
 public class NotificationService : INotificationService
 {
     private readonly INotificationRepository _repository;
+    private readonly IRbacService _rbac;
 
-    public NotificationService(INotificationRepository repository)
+    public NotificationService(INotificationRepository repository, IRbacService rbac)
     {
         _repository = repository;
+        _rbac = rbac;
     }
 
     public async Task<IReadOnlyList<NotificationResponse>> GetForUserAsync(
@@ -20,11 +24,13 @@ public class NotificationService : INotificationService
     {
         var take = Math.Clamp(limit, 1, NotificationDefaults.MaxLimit);
 
-        var orgIds = await _repository.GetOrganizationIdsForUserAsync(userId, ct);
+        // Every entry describes a work item change, so workitem:read is the gate — the same one that
+        // decides whether the client could open the item the entry points at.
+        var visibility = await _rbac.GetProjectVisibilityAsync(userId, Permissions.WorkItemRead, ct);
 
-        if (orgIds.Count == 0) return [];
+        if (visibility.IsEmpty) return [];
 
-        var sources = await _repository.GetRecentForOrganizationsAsync(orgIds, take, ct);
+        var sources = await _repository.GetRecentForVisibleProjectsAsync(visibility, take, ct);
 
         return sources.Select(Describe).ToList();
     }
