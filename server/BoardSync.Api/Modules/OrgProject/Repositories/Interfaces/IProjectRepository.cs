@@ -14,6 +14,11 @@ public interface IProjectRepository
     /// <summary>Whether an active project exists, without loading it.</summary>
     Task<bool> ExistsActiveAsync(Guid projectId, CancellationToken ct = default);
 
+    /// <summary>
+    /// Whether the project permits self-certification, without loading it. False if it is gone.
+    /// </summary>
+    Task<bool> AllowsSelfCertificationAsync(Guid projectId, CancellationToken ct = default);
+
     /// <summary>Whether the slug is taken within the organization (slugs are unique per org, not globally).</summary>
     Task<bool> SlugExistsInOrganizationAsync(Guid organizationId, string slug, CancellationToken ct = default);
 

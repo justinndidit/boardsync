@@ -58,6 +58,15 @@ public class UpdateProjectRequest
 
     [MaxLength(500)]
     public string? Description { get; init; }
+
+    /// <summary>
+    /// Whether someone may certify a work item assigned to them. Omitted leaves it unchanged.
+    /// </summary>
+    /// <remarks>
+    /// Nullable, unlike the fields above, because this is a switch rather than a value: a client
+    /// editing the project's name must not silently turn the QA separation off by not mentioning it.
+    /// </remarks>
+    public bool? AllowSelfCertification { get; init; }
 }
 
 /// <summary>Reassign a project to a different team in the same organization.</summary>

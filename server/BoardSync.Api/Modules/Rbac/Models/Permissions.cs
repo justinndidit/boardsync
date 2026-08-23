@@ -94,6 +94,25 @@ public static class Permissions
     public const string WorkItemDelete = "workitem:delete";
 
     /// <summary>
+    /// Certify that finished work meets its acceptance criteria, or send it back.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The only permission that reaches <c>Closed</c>, and the only one that moves work back out of
+    /// the QA lane. Deliberately not part of <see cref="WorkItemWrite"/>: writing the code and
+    /// declaring it correct are different authorities, and every contributor holds the first.
+    /// </para>
+    /// <para>
+    /// The whole value of the git integration rests on this separation. The integration principal
+    /// will hold write and never hold this, so no amount of automation — and no bug in the webhook
+    /// handler — can close a work item. The QA gate is a permission the integration lacks, not a rule
+    /// it is trusted to follow.
+    /// </para>
+    /// </remarks>
+    [DisplayMetadata("Certify work as done", 210, Group = "Work items")]
+    public const string WorkItemVerify = "workitem:verify";
+
+    /// <summary>
     /// Every permission above, in declared display order.
     /// </summary>
     /// <remarks>

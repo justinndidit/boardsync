@@ -25,8 +25,23 @@ public enum WorkItemType
 }
 
 /// <summary>
-/// Fixed state machine for MVP: New → Active → Resolved → Closed.
+/// The work item lifecycle: New → Active → InReview → Resolved → Closed.
 /// </summary>
+/// <remarks>
+/// <para>
+/// Each state is one a git signal can identify, which is the point: a branch's first commit makes it
+/// Active, an opened pull request makes it InReview, and a merge into the default branch makes it
+/// Resolved. See build_context.md §4.
+/// </para>
+/// <para>
+/// <b>Resolved means "merged, awaiting test"</b>, not "done" — which is why it is labelled
+/// "Awaiting QA" rather than by its enum name. Only <c>workitem:verify</c> moves anything out of it.
+/// </para>
+/// <para>
+/// Stored by name (<c>HasConversion&lt;string&gt;</c>), so inserting a value in the middle is safe:
+/// nothing depends on the ordinal.
+/// </para>
+/// </remarks>
 public enum WorkItemState
 {
     [DisplayMetadata("New", 10, Group = "Pending", Description = "Created, not yet started.")]
@@ -34,6 +49,11 @@ public enum WorkItemState
 
     [DisplayMetadata("Active", 20, Group = "InProgress", Description = "Being worked on.")]
     Active,
+
+    /// <summary>A pull request is open against this work. Set by the git integration.</summary>
+    [DisplayMetadata("In Review", 25, Group = "Review",
+        Description = "A pull request is open and awaiting review.")]
+    InReview,
 
     // The label is not the enum name on purpose. "Resolved" says nothing about what happens next;
     // what this state means is that the work is done and waiting on someone to test it, and the

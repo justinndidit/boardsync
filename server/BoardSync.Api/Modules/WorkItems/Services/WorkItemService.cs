@@ -1,4 +1,6 @@
 using BoardSync.Api.Modules.OrgProject.Services.Interfaces;
+using BoardSync.Api.Modules.Rbac.Models;
+using BoardSync.Api.Modules.Rbac.Services.Interfaces;
 using BoardSync.Api.Modules.WorkItems.Domain;
 using BoardSync.Api.Modules.WorkItems.DTOs;
 using BoardSync.Api.Modules.WorkItems.Events;
@@ -31,6 +33,7 @@ public class WorkItemService : IWorkItemService
     private readonly IWorkItemRepository _repository;
     private readonly IProjectService _projectService;
     private readonly ITeamService _teamService;
+    private readonly IRbacService _rbac;
     private readonly IEventBus _eventBus;
     private readonly ILogger<WorkItemService> _logger;
 
@@ -38,12 +41,14 @@ public class WorkItemService : IWorkItemService
         IWorkItemRepository repository,
         IProjectService projectService,
         ITeamService teamService,
+        IRbacService rbac,
         IEventBus eventBus,
         ILogger<WorkItemService> logger)
     {
         _repository = repository;
         _projectService = projectService;
         _teamService = teamService;
+        _rbac = rbac;
         _eventBus = eventBus;
         _logger = logger;
     }
@@ -219,6 +224,7 @@ public class WorkItemService : IWorkItemService
             throw new BusinessRuleException($"Work item is already in state '{newState}'.");
 
         ValidateStateTransition(item.State, newState);
+        await AuthorizeTransitionAsync(item, newState, updatedBy, ct);
 
         var oldState = item.State;
         AddHistory(item, updatedBy, "State", oldState.ToString(), newState.ToString());
@@ -458,6 +464,65 @@ public class WorkItemService : IWorkItemService
             .Select(t => t.Trim().ToLowerInvariant())
             .Distinct()
             .ToList();
+
+    /// <summary>
+    /// Rejects a transition the caller is not entitled to make.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why this is not an attribute.</b> Which permission a transition needs depends on the state
+    /// being moved from and to, and the target arrives in the request body — so
+    /// <c>[RequirePermission]</c>, which resolves a scope from a route parameter before model binding,
+    /// cannot express it. The endpoint still declares <c>workitem:write</c> as the floor: touching a
+    /// work item's state at all requires being able to write to it. This adds the rest.
+    /// </para>
+    /// <para>
+    /// It costs a permission check only when the transition needs more than the floor already proved,
+    /// which is the moves out of the QA lane.
+    /// </para>
+    /// <para>
+    /// <b>Self-certification.</b> Signing off your own work defeats the point of a separate
+    /// authority, so by default the assignee cannot certify their own item even when they hold
+    /// <c>workitem:verify</c>. It is a project setting rather than a rule, because a three-person team
+    /// where everybody tests is a real shape, and the alternative — them granting each other
+    /// <c>project:admin</c> to route around it — is worse than letting them turn it off knowingly.
+    /// A project administrator is exempt: they can already grant themselves anything.
+    /// </para>
+    /// </remarks>
+    private async Task AuthorizeTransitionAsync(
+        WorkItem item, WorkItemState newState, Guid actingUserId, CancellationToken ct)
+    {
+        var required = WorkItemStateMachine.RequiredPermission(item.State, newState);
+
+        if (required != Permissions.WorkItemWrite
+            && !await _rbac.HasPermissionAsync(
+                actingUserId, required, RoleScope.Project, item.ProjectId, ct))
+        {
+            // Deliberately a bare ForbiddenException: the middleware answers these with a generic
+            // "Access forbidden", the same as every other denial, so a refusal never doubles as a
+            // description of what the caller lacks. A client that wants to know before trying reads
+            // the transition's requiresPermission from GET /api/metadata and checks it against
+            // GET /api/me/capabilities — which is what those endpoints are for.
+            throw new ForbiddenException(
+                $"Moving a work item from '{item.State}' to '{newState}' requires '{required}'.");
+        }
+
+        if (newState is not WorkItemState.Closed || item.AssigneeId != actingUserId) return;
+
+        if (await _projectService.AllowsSelfCertificationAsync(item.ProjectId, ct)) return;
+
+        if (await _rbac.HasPermissionAsync(
+                actingUserId, Permissions.ProjectAdmin, RoleScope.Project, item.ProjectId, ct))
+            return;
+
+        // BusinessRuleException, not ForbiddenException. The caller is not missing a permission —
+        // they hold workitem:verify — so answering "access forbidden" would send them looking for a
+        // grant that would not help. This is a rule about whose work it is, and the 422 carries the
+        // explanation, matching how every other business rule in the system answers.
+        throw new BusinessRuleException(
+            "You cannot certify work assigned to you. Ask someone else with testing authority to " +
+            "verify it, or enable self-certification on the project.");
+    }
 
     /// <summary>
     /// Rejects a state change the workflow does not allow.

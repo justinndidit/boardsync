@@ -89,10 +89,11 @@ access lives behind a repository per module; no controller or service touches `B
 
 An **Organization** owns **Teams** and **Projects**. A project is backed by one **Board** with
 ordered **BoardColumns**, and holds **WorkItems** (with comments, history, links, and tags).
-**Sprints** belong to a team and pull work items into an ordered sprint backlog. Every meaningful
+**Sprints** belong to a project and pull work items into an ordered sprint backlog. Every meaningful
 mutation emits a domain event that the Activity module turns into an **ActivityLog** entry. Events
 travel through the outbox, so the activity feed is **eventually consistent** — usually milliseconds
-behind the write, at worst one dispatcher poll interval.
+behind the write (a Postgres `NOTIFY` wakes the dispatcher), at worst one poll interval if that
+listener has dropped.
 
 ### Roles
 
@@ -101,14 +102,31 @@ Every role belongs to one scope, and no name means two things at two scopes:
 | `RoleScope` | `RoleType` |
 | --- | --- |
 | `Organization` | `OrgAdmin`, `Member` |
-| `Team` | `TeamLead`, `ScrumMaster`, `ProductOwner`, `TeamMember`, `Viewer` |
-| `Project` | `ProjectAdmin`, `Contributor`, `Viewer` |
+| `Team` | `TeamLead`, `ScrumMaster`, `ProductOwner`, `TeamMember`, `Tester`, `Viewer` |
+| `Project` | `ProjectAdmin`, `Contributor`, `Tester`, `Viewer` |
+
+`Viewer` and `Tester` are the two names deliberately held at more than one scope, because each means
+the same thing at both — read-only, and testing — differing only in what it reaches.
 
 Roles are bundles of named permissions (`org:admin`, `sprint:scope`, `workitem:write`, …) declared
 in `RolePermissions`, and a user holding several roles at one scope gets the **union** of what they
 permit — never a rank comparison, since a Scrum Master and a Product Owner are peers. Controllers
 authorize by declaring the permission an endpoint needs, `[RequirePermission(Permissions.SprintManage,
 From = "sprintId")]`, rather than by checking roles or raw claims.
+
+### The QA gate
+
+Work items run `New → Active → InReview → Resolved → Closed`. `Resolved` means **merged, awaiting
+test** — it is labelled "Awaiting QA" — and it is the only state from which `Closed` is reachable.
+
+Every move out of `Resolved` or `Closed` requires `workitem:verify`, held by `Tester`, `TeamLead`,
+`ProductOwner`, `ProjectAdmin` and `OrgAdmin` — and deliberately **not** by `Contributor`,
+`TeamMember` or `ScrumMaster`. Everything before that needs only `workitem:write`. Nobody may certify
+work assigned to them unless the project sets `AllowSelfCertification`.
+
+That separation is what makes the planned git integration safe to trust: it will hold `workitem:write`
+and never `workitem:verify`, so no amount of automation — and no bug in a webhook handler — can close
+a work item. See `build_context.md` §4.
 
 ## 3) API Surface
 
@@ -120,6 +138,8 @@ the authoritative reference; the table below is the map.
 | Auth (anonymous) | `POST /api/auth/{login,register,refresh-token,forgot-password,reset-password,confirm-email,resend-confirmation}` |
 | Auth (authenticated) | `POST /api/auth/{logout,revoke-token,change-password}`, `GET /api/auth/me`, `GET|PUT /api/auth/profile` |
 | Users | `GET /api/users/me`, `GET /api/users/{userId}`, `GET /api/users/by-email` |
+| Metadata | `GET /api/metadata` — every enum the client renders, with labels and sort order; ETag/304 |
+| Capabilities | `GET /api/me/capabilities?scope=project:{id}`, `POST /api/me/capabilities` (batch, max 50) |
 | Search | `GET /api/search` |
 | Workspace | `GET /api/workspace/{summary,activity}` |
 | Notifications | `GET /api/notifications` (also served at `GET /api/workspace/notifications`) |

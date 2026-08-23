@@ -826,29 +826,47 @@ but revisit it the moment the second deployable appears, not later.
 
 Ordered by dependency and by what unblocks other people. Every phase ends in something demoable.
 
-### Phase A — Stabilize and unblock · *the frontend cannot start without this*
+### Phase A — Stabilize and unblock ✅ **shipped** · *the frontend cannot start without this*
 
-- Audit finding 3: drop `Active → Closed`. One line.
-- Audit finding 1: `GetReadableProjectIdsAsync` on the access resolver; route Search, Notifications,
-  and `WorkspaceController.GetSummary` through it. Tighten `[NoPermissionRequired]` (§6.4).
-- Audit finding 6: make the outbox `NOTIFY` actually wake the dispatcher.
-- **§5.1 `GET /api/metadata`** with the drift test.
-- **§5.2 `GET /api/me/capabilities`**, single and batch.
-- Audit finding 7: decide the frontend question and make the repo tell the truth.
-- Integration test harness — Testcontainers + `WebApplicationFactory`.
+- [x] Audit finding 3: drop `Active → Closed`.
+- [x] Audit finding 1: visibility resolved from the access snapshot as `ProjectVisibility` — grants,
+      not expanded project ids — and pushed into SQL as a predicate. Search, Notifications and the
+      workspace summary all route through it. `[NoPermissionRequired]` justifications now name their
+      resolver.
+- [x] Audit finding 6: the outbox `NOTIFY` wakes the dispatcher.
+- [x] **§5.1 `GET /api/metadata`** with the drift test.
+- [x] **§5.2 `GET /api/me/capabilities`**, single and batch.
+- [x] Integration test harness — Testcontainers + `WebApplicationFactory`.
+- [ ] Audit finding 7: decide the frontend question and make the repo tell the truth. **Still open.**
+
+*Found along the way, all fixed:* `WorkItemHistory.ProjectId` was never written, so the notification
+bell returned nothing to anybody (finding 14); and every work item domain event was enqueued after
+its save, so **not one had ever been delivered** — no work item activity, no live board updates
+(finding 15). Both were invisible to unit tests and to reading the code; the harness found the
+second on its first run.
 
 *Exit: a frontend developer can build every screen's gating and every dropdown without hardcoding a
 single constant. No endpoint returns data the caller cannot read.*
 
-### Phase B — The QA gate
+### Phase B — The QA gate · **core shipped**, typed principals and concurrency outstanding
 
-- `InReview` state; new transition table; `Active → Closed` gone.
-- `workitem:verify`; `Tester` role at team and project scope; `TeamToProject` edge.
-- `Project.AllowSelfCertification` and the self-certification guard.
-- Typed principals (§6.3): `PrincipalType` on `RoleAssignment`, `Integration` role,
-  `WorkItemHistory.ActorType` + `AttributedToUserId`.
-- Audit findings 2 and 8: make optimistic concurrency real; add `PATCH /api/workitems/{id}`.
-- Board seeding gains a Review column.
+- [x] `InReview` state; new transition table; `Active → Closed` gone.
+- [x] `workitem:verify`; `Tester` role at team and project scope; carried onto the team's projects
+      through the `TeamToProject` edge.
+- [x] `Project.AllowSelfCertification` and the self-certification guard.
+- [x] Board seeding gains the Review lane, and existing boards are migrated — a card in a state no
+      column claims simply does not render, so the lane had to be inserted rather than left to
+      whoever noticed work had vanished.
+- [ ] Typed principals (§6.3): `PrincipalType` on `RoleAssignment`, `Integration` role,
+      `WorkItemHistory.ActorType` + `AttributedToUserId`. **Next.** This is the piece git sync
+      depends on.
+- [ ] Audit findings 2 and 8: make optimistic concurrency real; add `PATCH /api/workitems/{id}`.
+
+*Note on enforcement:* which permission a transition needs depends on the states being moved
+between, and the target arrives in the request body — so it cannot live in a `[RequirePermission]`
+attribute and is invisible to the endpoint-coverage test. It is checked in `WorkItemService`, with
+the endpoint still declaring `workitem:write` as the floor, and `QaGateEndpointTests` is what stands
+behind it.
 
 *Exit: work reaches Done only through a human holding `workitem:verify`. The principal model that git
 sync depends on exists and is tested.*
@@ -908,7 +926,7 @@ TypeScript client (§5.3) so the two do not drift.
 
 | # | Question | Recommendation |
 |---|---|---|
-| 1 | Does `ScrumMaster` hold `workitem:verify`? | **No.** In Scrum the Product Owner accepts the increment; the Scrum Master owns the process. Both already hold sprint authority, and stretching the SM into acceptance dilutes what the role means. Easy to add later; awkward to remove. |
+| 1 | ~~Does `ScrumMaster` hold `workitem:verify`?~~ | **Decided: no.** Shipped. In Scrum the Product Owner accepts the increment; the Scrum Master owns the process. `QaGateTests.ScrumMasterRunsTheSprintButDoesNotCertify` asserts both halves, so reversing it is a deliberate act rather than a drift. One line in `RolePermissions` if a team wants it. |
 | 2 | Project key format and collision policy | 2–10 uppercase alphanumerics, unique **per organization**, derived from the project slug and editable at creation only. Renaming a key orphans every branch name in flight. |
 | 3 | Does work item numbering restart per project? | **Yes** — `BS-1`, `PAY-1`. Global numbering makes the key decorative. A per-project sequence needs a counter row, not a database sequence, so it commits in the same transaction. |
 | 4 | Retention for raw webhook payloads | 30 days. Long enough to replay a binding bug, short enough not to accumulate customer source metadata indefinitely. |

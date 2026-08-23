@@ -25,22 +25,33 @@ public static class WorkItemStateMachine
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>Nothing reaches Closed except through Resolved.</b> <c>Active → Closed</c> was allowed and
-    /// is not: every transition is gated on <see cref="Permissions.WorkItemWrite"/>, held by every
-    /// contributor and every team member, so that edge let whoever did the work also declare it
-    /// finished. Resolved is the single door into Closed, which is what the QA gate guards — see
-    /// build_context.md §4.
+    /// <b>Nothing reaches Closed except through Resolved.</b> <c>Active → Closed</c> was once allowed,
+    /// which let whoever did the work also declare it finished — every transition is gated on
+    /// <see cref="Permissions.WorkItemWrite"/>, which every contributor holds. Resolved is the single
+    /// door into Closed, and <see cref="RequiredPermission"/> is what guards it.
     /// </para>
     /// <para>
-    /// Closed → Active is deliberately kept: reopening is a real thing that happens, and forbidding
-    /// it would only push people into creating duplicate items.
+    /// Each state is one a git signal can identify: a branch's first commit makes an item Active, an
+    /// opened pull request makes it InReview, and a merge into the default branch makes it Resolved.
+    /// The automation stops exactly there.
+    /// </para>
+    /// <para>
+    /// <c>Active → Resolved</c> stays, for work that needs no pull request. <c>Closed → Active</c>
+    /// stays too: reopening is a real thing, and forbidding it would only push people into filing
+    /// duplicates.
     /// </para>
     /// </remarks>
     public static IReadOnlyList<WorkItemState> AllowedFrom(WorkItemState current) => current switch
     {
         WorkItemState.New => [WorkItemState.Active],
-        WorkItemState.Active => [WorkItemState.Resolved],
+        WorkItemState.Active => [WorkItemState.InReview, WorkItemState.Resolved],
+
+        // Back to Active when a pull request is closed unmerged or review asks for changes.
+        WorkItemState.InReview => [WorkItemState.Resolved, WorkItemState.Active],
+
+        // QA accepts, or sends it back.
         WorkItemState.Resolved => [WorkItemState.Closed, WorkItemState.Active],
+
         WorkItemState.Closed => [WorkItemState.Active],
         _ => []
     };
@@ -53,14 +64,28 @@ public static class WorkItemStateMachine
     /// The permission a transition requires.
     /// </summary>
     /// <remarks>
-    /// Uniformly <see cref="Permissions.WorkItemWrite"/> today, and expressed as a function anyway
-    /// because it is about to stop being uniform: the QA gate gives the edges into and out of Closed
-    /// their own permission, <c>workitem:verify</c>, so that certifying work is a different authority
-    /// from doing it. Modelling it now means Phase B changes this method and nothing else — the
-    /// endpoint guard, the published metadata and the client's menu all follow from here.
+    /// <para>
+    /// <b><see cref="Permissions.WorkItemVerify"/> guards every move out of the QA lane</b> — out of
+    /// <c>Resolved</c> and out of <c>Closed</c> — rather than only the one into <c>Closed</c>. Once
+    /// work is waiting to be tested, whether it is done is QA's answer to give: letting the author
+    /// pull it back to Active would let them quietly take it out of the queue before a rejection was
+    /// ever recorded, which is the same bypass by a slower route.
+    /// </para>
+    /// <para>
+    /// Everything before that is ordinary work and needs only <see cref="Permissions.WorkItemWrite"/>,
+    /// including <c>Active → Resolved</c>: saying "I think this is done" is not the same as saying
+    /// "this is done".
+    /// </para>
+    /// <para>
+    /// This method is the single definition. The service enforces it, <c>GET /api/metadata</c>
+    /// publishes it per transition, and the client's menu is built from that — so a state machine
+    /// change reaches all three from here.
+    /// </para>
     /// </remarks>
     public static string RequiredPermission(WorkItemState from, WorkItemState to) =>
-        Permissions.WorkItemWrite;
+        from is WorkItemState.Resolved or WorkItemState.Closed
+            ? Permissions.WorkItemVerify
+            : Permissions.WorkItemWrite;
 }
 
 /// <summary>

@@ -33,13 +33,13 @@ public class RoleVocabularyTests
     public void TeamScopeHasItsOwnRoles() =>
         Assert.Equal(
             [RoleType.TeamLead, RoleType.ScrumMaster, RoleType.ProductOwner,
-             RoleType.TeamMember, RoleType.Viewer],
+             RoleType.TeamMember, RoleType.Tester, RoleType.Viewer],
             RolePermissions.AssignableAt(RoleScope.Team));
 
     [Fact]
     public void ProjectScopeHasItsOwnRoles() =>
         Assert.Equal(
-            [RoleType.ProjectAdmin, RoleType.Contributor, RoleType.Viewer],
+            [RoleType.ProjectAdmin, RoleType.Contributor, RoleType.Tester, RoleType.Viewer],
             RolePermissions.AssignableAt(RoleScope.Project));
 
     /// <summary>
@@ -55,17 +55,29 @@ public class RoleVocabularyTests
             $"{role} is valid at no scope, so nothing can ever hold it.");
 
     /// <summary>
-    /// <c>Viewer</c> is the single deliberate exception to one-name-one-scope: read-only on a team
-    /// and read-only on a project are the same idea applied to different things. Any *other* name
-    /// appearing at two scopes is the drift this suite exists to catch.
+    /// Roles held at two scopes, which is allowed only where the name means the same thing at both.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>Viewer</c> was the single exception: read-only on a team and read-only on a project are the
+    /// same idea applied to different things. <c>Tester</c> is the second, on the same reasoning —
+    /// testing a team's work and testing one project's work differ in what they reach, not in what
+    /// they mean.
+    /// </para>
+    /// <para>
+    /// The list is deliberately short and deliberately hand-written. Any *other* name appearing at
+    /// two scopes is the drift this suite exists to catch, and the fix is a scope-specific name — as
+    /// it was for <c>Reader</c>, which meant "organization member" at one scope and "read-only" at
+    /// the other two.
+    /// </para>
+    /// </remarks>
     [Theory]
     [MemberData(nameof(AllRoles))]
-    public void NoRoleButViewerIsValidAtTwoScopes(RoleType role)
+    public void OnlyDeliberatelySharedNamesAreValidAtTwoScopes(RoleType role)
     {
         var scopes = Scopes.Where(scope => RolePermissions.IsValidAt(role, scope)).ToList();
 
-        if (role is RoleType.Viewer)
+        if (role is RoleType.Viewer or RoleType.Tester)
         {
             Assert.Equal([RoleScope.Team, RoleScope.Project], scopes);
             return;
@@ -73,7 +85,8 @@ public class RoleVocabularyTests
 
         Assert.True(scopes.Count == 1,
             $"{role} is valid at {scopes.Count} scopes ({string.Join(", ", scopes)}). Only Viewer " +
-            "may name the same thing at more than one scope; give this role a scope-specific name.");
+            "and Tester may name the same thing at more than one scope; give this role a " +
+            "scope-specific name.");
     }
 
     /// <summary>

@@ -90,6 +90,19 @@ public enum RoleType
 
     // ── Team and project ──────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Tests a team's or a project's work, and certifies it as done.
+    /// </summary>
+    /// <remarks>
+    /// Held at either scope, for the same reason <see cref="Viewer"/> is: testing a team's work and
+    /// testing one project's work are the same idea applied to different things. Deliberately not a
+    /// <see cref="TeamPositions">position</see> — a team can and should have several testers, unlike
+    /// its single Scrum Master.
+    /// </remarks>
+    [DisplayMetadata("Tester", 85,
+        Description = "Tests the work and certifies it as done.")]
+    Tester = 33,
+
     /// <summary>Read-only: may view a team, or a project's board, sprints and work items.</summary>
     [DisplayMetadata("Viewer", 90, Description = "Read-only.")]
     Viewer = 32

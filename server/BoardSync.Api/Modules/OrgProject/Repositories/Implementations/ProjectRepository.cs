@@ -22,6 +22,9 @@ public class ProjectRepository : IProjectRepository
     public Task<bool> ExistsActiveAsync(Guid projectId, CancellationToken ct = default) =>
         _context.Projects.AnyAsync(p => p.Id == projectId && p.IsActive, ct);
 
+    public Task<bool> AllowsSelfCertificationAsync(Guid projectId, CancellationToken ct = default) =>
+        _context.Projects.AnyAsync(p => p.Id == projectId && p.AllowSelfCertification, ct);
+
     public Task<bool> SlugExistsInOrganizationAsync(Guid organizationId, string slug, CancellationToken ct = default) =>
         _context.Projects.AnyAsync(p => p.OrganizationId == organizationId && p.Slug == slug, ct);
 

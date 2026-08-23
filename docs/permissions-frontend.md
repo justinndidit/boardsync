@@ -1,7 +1,27 @@
 # Auth & Permission Changes — What They Mean for the Frontend
 
-Status: §1–§4 shipped and pushed (`edf1133`); §5–§8 implemented, **not yet committed** ·
-Scope: `server/BoardSync.Api` · Companion to `docs/permissions-model.md`
+Status: §1–§11 shipped · **§12–§16 are new (2026-08-23) and are where you should start** ·
+Scope: `server/BoardSync.Api` · Companions: `docs/permissions-model.md`, `build_context.md`
+
+---
+
+> ## 🔴 Read this first — update, 2026-08-23
+>
+> A second wave of changes landed after the August permission rebuild below. **Two of them give you
+> endpoints that remove work you are currently doing by hand**, and three change behaviour you may
+> have coded around.
+>
+> | | Change | Where |
+> |---|---|---|
+> | **A** | **`GET /api/metadata` exists.** Stop hardcoding roles, priorities, states, types, link types and sprint statuses — all eight vocabularies are served, with labels and sort order. | **§12** |
+> | **B** | **`GET /api/me/capabilities` exists.** The "what may I do here" endpoint §10 said was missing. Stop deriving it. | **§13** |
+> | **C** | ⚠️ **A new work item state, `InReview`, and a QA gate.** Five states now, and `Closed` is reachable only from `Resolved` by someone holding `workitem:verify`. | **§14** |
+> | **D** | ⚠️ **A new role, `Tester`**, valid at team *and* project scope. | **§14.3** |
+> | **E** | ⚠️ **Work item activity now appears in the feed, and boards update live.** It never did before — that was a bug, not a design. | **§15** |
+> | **F** | Search, the notification bell and the workspace summary now return **less** for some users, and the bell returns **more** for everyone. | **§16** |
+>
+> If you only change one thing this week, make it **A** — everything you build against hardcoded
+> constants has to be rewritten once you adopt it.
 
 ---
 
@@ -468,3 +488,321 @@ SprintSummaryResponse  { id, number, goal, startDate, endDate, status, workItemC
 
 Sprint **domain events** likewise carry `projectId` where they carried `teamId`, and are published to
 the project topic rather than the team topic (§7.5).
+
+---
+---
+
+# Update — 2026-08-23
+
+Everything above describes the August permission rebuild. What follows is the wave after it.
+
+---
+
+## 12. `GET /api/metadata` — stop hardcoding
+
+**This is the one that removes work.** Eight vocabularies only the server knew are now served, so
+the arrays you are maintaining by hand can go.
+
+Enums cross the wire as bare strings, which is why this was needed: the server knows `Critical`
+sorts above `Low` because the enum is numbered, and `"Critical"` carries none of that. So every
+client ended up with its own copy of the ordering, the valid-roles-per-scope map, the legal
+transitions, and five other lists — copies with no test behind them and no migration to update them.
+
+```
+GET /api/metadata          (authenticated · ETag · Cache-Control: private, max-age=300)
+```
+
+Fetch it once at boot. Send `version` back as `If-None-Match` to revalidate; you get a `304` when
+nothing changed. `version` is a hash of the content, so it changes exactly when the vocabulary does
+— use it as your cache key.
+
+Every entry carries the same three fields:
+
+| Field | Use it for |
+| --- | --- |
+| `value` | What you send and receive on the wire |
+| `label` | What you show a person |
+| `order` | Sort ascending. **This is the field that was impossible to derive.** |
+
+### What's in it
+
+```jsonc
+{
+  "version": "11a4a15524238ccf",
+
+  "roles": [
+    { "value": "ScrumMaster", "label": "Scrum Master", "order": 40, "scope": "Team",
+      "isPosition": true,
+      "permissions": ["team:read"],
+      "inheritedProjectPermissions": ["sprint:manage", "sprint:scope", "workitem:write", "…"],
+      "description": "Runs the sprint lifecycle on the team's projects." }
+  ],
+
+  "permissions":       [ { "value": "workitem:verify", "label": "Certify work as done",
+                           "order": 210, "group": "Work items" } ],
+  "workItemTypes":     [ { "value": "UserStory", "label": "User Story", "order": 30,
+                           "allowedChildren": ["Task", "Bug"] } ],
+  "workItemStates":    [ /* see §14 — includes transitionsTo and requiresPermission */ ],
+  "priorities":        [ { "value": "Critical", "label": "Critical", "order": 10 } ],
+  "sprintStatuses":    [ { "value": "Active", "label": "Active", "order": 20 } ],
+  "workItemLinkTypes": [ { "value": "Blocks", "label": "Blocks", "inverse": "Blocked by",
+                           "order": 10 } ],
+  "teamPositions":     ["TeamLead", "ScrumMaster", "ProductOwner"]
+}
+```
+
+### Three things to notice
+
+**Roles are one entry per (role, scope) pair, not per role.** `value` is *not* unique across the
+list — `Viewer` appears twice, and so does `Tester`, because both are valid at team and project
+scope and permit different things at each. Key your lookups on `(value, scope)`. To populate a role
+picker, filter by the scope you are granting at.
+
+**`inheritedProjectPermissions` is only on team-scope roles**, and it is the part of the model you
+could not work out client-side: it is what a team role additionally permits on every project the
+team is assigned to. It is why a Scrum Master can run sprints on a project they hold no project role
+on. If you gate sprint controls, this is what to gate on.
+
+**`isPosition`** marks the singular team appointments. Those are assigned through
+`PUT /api/teams/{teamId}/positions/{position}` (§6), not the general role endpoints — `Tester` is
+deliberately *not* one, because a team can have several testers.
+
+### Link types
+
+`inverse` is what the relationship is called from the other item's side: a link stored as `Blocks`
+displays as "Blocks" on the source and "Blocked by" on the target. One row, two wordings, and you
+cannot derive the second.
+
+---
+
+## 13. `GET /api/me/capabilities` — the endpoint §10 said was missing
+
+§10 told you to keep deriving capability from role and membership data. **Stop.** Deriving it
+correctly now means reimplementing three inheritance routes, the team → project edge with its Scrum
+Master / Product Owner exception, and OrgAdmin's reach — and that reimplementation drifts
+*permissive*, because a button that 403s gets reported and a button wrongly hidden does not.
+
+```
+GET  /api/me/capabilities?scope=project:{guid}
+POST /api/me/capabilities          { "scopes": ["project:…", "team:…", "org:…"] }   // max 50
+```
+
+Scope references are `org:{guid}`, `team:{guid}` or `project:{guid}` — the same spelling as the
+realtime topics, deliberately.
+
+```jsonc
+// GET
+{ "scope": "project:8f3e…",
+  "permissions": ["project:read", "board:read", "workitem:write", "sprint:order"] }
+
+// POST — keyed on exactly the strings you sent
+{ "project:8f3e…": ["project:read", "…"], "team:2a11…": ["team:read"] }
+```
+
+**An unknown scope and a forbidden one both return an empty list.** That is deliberate: the endpoint
+must not become a way to discover that an id names something real, which is the same reason denials
+are 404 (§5.1). Do not treat empty as "not found".
+
+The permission strings are the `value`s from `metadata.permissions`, so you can render a
+capabilities response with labels without a second lookup.
+
+---
+
+## 14. ⚠️ The QA gate: a new state, a new role, and a new permission
+
+**The product's premise is that the board updates itself from git.** Push, pull request and merge
+will drive work forward on their own. That is only trustworthy if the automation stops somewhere,
+and the place it stops is `Closed`.
+
+### 14.1 Five states, not four
+
+```
+New ──► Active ──► InReview ──► Resolved ──► Closed
+          ▲           │            │  │
+          └───────────┘            │  │        Resolved → Active  (QA rejects)
+                                   │  └──────► Closed   → Active  (reopen)
+          └────────────────────────┘
+```
+
+| State | `label` | Means |
+| --- | --- | --- |
+| `New` | New | Created, not started |
+| `Active` | Active | Being worked on |
+| **`InReview`** | **In Review** | **New.** A pull request is open |
+| `Resolved` | **"Awaiting QA"** | ⚠️ **Merged, waiting to be tested** — *not* "done" |
+| `Closed` | Closed | Verified and finished |
+
+⚠️ **`Resolved` now displays as "Awaiting QA".** The enum value is unchanged, so nothing you send
+breaks — but if you have a hardcoded label map, it is wrong. Read the label from `/api/metadata`.
+
+⚠️ **`Active → Closed` no longer exists.** It was removed because every transition was gated on
+`workitem:write`, which every contributor holds, so that edge let whoever did the work also declare
+it finished. Attempting it returns **422** with the valid next states listed.
+
+### 14.2 Which transitions need what
+
+`metadata.workItemStates[].transitionsTo` gives you this per state, so **build your "Move to…" menu
+from it** rather than from a hardcoded graph:
+
+```jsonc
+{ "value": "Resolved", "label": "Awaiting QA", "order": 40, "category": "Review",
+  "transitionsTo": [
+    { "state": "Closed", "requiresPermission": "workitem:verify" },
+    { "state": "Active", "requiresPermission": "workitem:verify" }
+  ] }
+```
+
+Cross `requiresPermission` against `/api/me/capabilities` for the project and you can disable the
+option before anyone clicks it. **Every move out of `Resolved` and out of `Closed` needs
+`workitem:verify`**; everything before that needs only `workitem:write`.
+
+Both edges out of `Resolved` are guarded, not just the one into `Closed` — otherwise the author
+could pull their own item back to `Active` and quietly take it out of QA's queue with no rejection
+recorded.
+
+`category` (`Pending` / `InProgress` / `Review` / `Done`) lets you colour and group lanes without
+switching on state names.
+
+### 14.3 A new role: `Tester`
+
+| Scope | Roles now |
+| --- | --- |
+| Organization | `OrgAdmin`, `Member` |
+| Team | `TeamLead`, `ScrumMaster`, `ProductOwner`, `TeamMember`, **`Tester`**, `Viewer` |
+| Project | `ProjectAdmin`, `Contributor`, **`Tester`**, `Viewer` |
+
+`Tester` is valid at both team and project scope — the second name after `Viewer` to be so — and it
+is **not** a position: a team can have several. A Tester contributes as well as certifies; they are
+not a read-only role with one extra power.
+
+**Who can certify (`workitem:verify`):**
+
+| Role | Certifies? |
+| --- | --- |
+| `Tester` (team or project) | ✅ |
+| `TeamLead` | ✅ |
+| `ProductOwner` | ✅ — in Scrum the PO accepts the increment |
+| `ProjectAdmin`, `OrgAdmin` | ✅ |
+| **`ScrumMaster`** | ❌ — runs the sprint, does not sign work off |
+| `Contributor`, `TeamMember`, `Viewer` | ❌ — the point of the gate |
+
+Don't hardcode that table either — it is `metadata.roles[].permissions` and
+`inheritedProjectPermissions`.
+
+### 14.4 Two different refusals, and they mean different things
+
+| Situation | Status | Why |
+| --- | --- | --- |
+| Caller lacks `workitem:verify` | **403** `"Access forbidden"` | A permission gap. Generic message by design — refusals never describe what you lack |
+| Caller **is the assignee** of the item | **422** with an explanation | ⚠️ **Not a permission problem.** They hold `workitem:verify`; the rule is about whose work it is |
+| Transition is not in the graph at all | **422** listing valid next states | Not a permission answer either |
+
+**Do not tell the user to ask for access on a 422.** The self-certification message explains itself
+and is safe to surface directly.
+
+Self-certification is off by default and settable per project:
+
+```jsonc
+// GET /api/projects/{id}  →  ProjectResponse now includes:
+"allowSelfCertification": false
+
+// PUT /api/projects/{id}  →  optional; omitting it leaves the setting unchanged
+{ "name": "…", "allowSelfCertification": true }
+```
+
+⚠️ **`allowSelfCertification` is nullable on the request on purpose.** A screen that edits only the
+project name must not silently switch the QA separation off by not mentioning it — send it only when
+the user actually changed it.
+
+Project administrators are exempt from the rule, since they can flip the setting themselves anyway.
+
+### 14.5 Boards gained a column
+
+New projects get **five** default columns:
+
+| Position | Name | `mappedState` |
+| --- | --- | --- |
+| 0 | To Do | `New` |
+| 1 | In Progress | `Active` |
+| 2 | **In Review** | **`InReview`** |
+| 3 | **Awaiting QA** | `Resolved` |
+| 4 | Done | `Closed` |
+
+⚠️ **"In Review" used to map to `Resolved`.** Existing boards were migrated: a new `InReview` column
+is inserted before the `Resolved` one, and a column still named "In Review" that maps to `Resolved`
+is renamed to "Awaiting QA". A board a user renamed themselves keeps its name.
+
+If you render lanes from the board's columns you need no change. If you hardcoded four lanes, you
+now drop cards on the floor.
+
+---
+
+## 15. ⚠️ Work item activity now actually arrives
+
+**Every work item domain event was being dropped before it was written.** Created, Assigned,
+StateChanged, Deleted, CommentAdded and Linked — all six were staged on the request's unit of work
+*after* it had already been committed, so they were discarded silently. No exception, no log.
+
+Three consequences you may have designed around, all now fixed:
+
+- **The activity feed showed no work item activity at all.** Organization, team, project, sprint and
+  board entries appeared; work items never did. If you filtered them out, or built an empty state
+  around "work item activity doesn't show up here", remove it — `WorkItem` entries now arrive with
+  verbs `Created`, `StateChanged`, `Assigned`, `Commented`, `Deleted`, `Linked`.
+- **Boards never updated live.** Real-time subscribers received nothing when a card moved, so any
+  polling you added as a workaround can go. The realtime contract is unchanged (`docs/realtime-frontend.md`);
+  it simply had nothing to deliver.
+- **Cached board reads were never invalidated by a work item change.**
+
+Note on the comment entry: its `entityId` is the **comment's** id so you can deep-link to it, while
+its `title` is the work item's. That was already true; it matters more now that the entries arrive.
+
+**Delivery latency also dropped from 0–5s to milliseconds.** The outbox's `NOTIFY` wake-up was
+firing and waking nothing, so everything fell back to a 5-second poll. The feed is still eventually
+consistent by design — just no longer by seconds.
+
+---
+
+## 16. Search, notifications and the workspace summary changed shape
+
+Three scope-spanning reads were treating **organization membership as access to everything in the
+organization** — which the permission model explicitly says it is not (§9). An org `Member` on no
+team, holding no project role, could read the title of every work item in the organization through
+search while `GET /api/projects/{id}` correctly answered 404 for the same project.
+
+They are now scoped by the permission each result would need to open:
+
+| Endpoint | Scoped by |
+| --- | --- |
+| `GET /api/search` → organizations, members | `org:read` |
+| `GET /api/search` → projects | `project:read` |
+| `GET /api/search` → work items | `workitem:read` |
+| `GET /api/notifications` | `workitem:read` |
+| `GET /api/workspace/summary` | per counter — `org:read`, `project:read`, `workitem:read` |
+| `GET /api/workspace/activity` | `org:read` |
+
+**What to expect.** Results shrink for users who were seeing things they could not open. Nothing
+shrinks for anyone who genuinely had access. A hit in search can now always be opened — which it
+could not before, so if you built error handling for "search result 404s when clicked", it is dead
+code.
+
+⚠️ **The workspace summary's `projects` and `activeWorkItems` counters will drop** for org members
+with no team or project grant — from "everything in the org" to zero. That is the correct number.
+`organizations` is unchanged.
+
+**The notification bell returns entries for the first time.** It was filtering on a column nothing
+ever wrote, so it returned an empty list to *everybody*, including users who could see everything.
+If you hid the bell because it was always empty, unhide it. Shape is unchanged (§4 of
+`docs/repository-refactor-context.md`).
+
+---
+
+## 17. Still missing
+
+- **No `PATCH` for work items.** `PUT /api/workitems/{id}` remains a full replace, so a partial
+  update needs a read-modify-write and races with anyone editing a different field.
+- **Optimistic concurrency is not enforced.** `expectedVersion` is accepted on the request and
+  currently ignored; two people editing the same item still last-write-wins. Keep sending it — it
+  will start being honoured without a contract change.
+
+Both are next up. See `docs/audit-2026-08.md` findings 2 and 8.

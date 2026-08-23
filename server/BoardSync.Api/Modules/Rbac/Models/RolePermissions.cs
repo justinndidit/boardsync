@@ -1,4 +1,6 @@
 using System.Collections.Frozen;
+using System.Reflection;
+using BoardSync.Api.Shared.Metadata;
 
 namespace BoardSync.Api.Modules.Rbac.Models;
 
@@ -35,6 +37,21 @@ public static class RolePermissions
         Permissions.SprintOrder
     ];
 
+    /// <summary>
+    /// Contribution plus the authority to certify. What a Tester carries on a project.
+    /// </summary>
+    /// <remarks>
+    /// A tester contributes as well — they file bugs, comment, and reorder the sprint — so this is
+    /// contribution plus <c>workitem:verify</c> rather than a read-only role with one extra power.
+    /// It stops there: certifying work says nothing about administering the project or deciding what
+    /// its sprint commits to.
+    /// </remarks>
+    private static readonly string[] ProjectTester =
+    [
+        .. ProjectContributor,
+        Permissions.WorkItemVerify
+    ];
+
     private static readonly string[] ProjectViewer =
     [
         Permissions.ProjectRead,
@@ -60,6 +77,26 @@ public static class RolePermissions
         Permissions.SprintScope
     ];
 
+    /// <summary>
+    /// Sprint authority plus certification. What a Product Owner carries onto their team's projects.
+    /// </summary>
+    /// <remarks>
+    /// <b>The Product Owner certifies; the Scrum Master does not.</b> In Scrum the Product Owner
+    /// accepts the increment — deciding whether what was built is what was asked for is the same act
+    /// as certifying it — while the Scrum Master owns the process rather than the acceptance. Both
+    /// run the sprint; only one signs work off.
+    /// <para>
+    /// This is build_context.md §11 decision 1, and it is deliberately the narrow reading. Giving the
+    /// Scrum Master certification too is one line here if a team wants it; taking it back once people
+    /// rely on it is not.
+    /// </para>
+    /// </remarks>
+    private static readonly string[] ProjectSprintOwner =
+    [
+        .. ProjectSprintRunner,
+        Permissions.WorkItemVerify
+    ];
+
     private static readonly string[] ProjectAdministrator =
     [
         .. ProjectContributor,
@@ -67,6 +104,7 @@ public static class RolePermissions
         Permissions.ProjectMemberManage,
         Permissions.BoardConfigure,
         Permissions.WorkItemDelete,
+        Permissions.WorkItemVerify,
         Permissions.SprintManage,
         Permissions.SprintScope
     ];
@@ -119,6 +157,11 @@ public static class RolePermissions
 
             [RoleType.TeamMember] = new[] { Permissions.TeamRead }.ToFrozenSet(),
 
+            // Like the positions above, what sits at team scope is the appointment itself; the
+            // authority to certify reaches the team's projects through the edge below, because a
+            // work item is a project-scope object.
+            [RoleType.Tester] = new[] { Permissions.TeamRead }.ToFrozenSet(),
+
             [RoleType.Viewer] = new[] { Permissions.TeamRead }.ToFrozenSet()
         }.ToFrozenDictionary();
 
@@ -133,6 +176,7 @@ public static class RolePermissions
             // would make IsValidAt disagree with the database about what may be assigned.
             [RoleType.ProjectAdmin] = ProjectAdministrator.ToFrozenSet(),
             [RoleType.Contributor] = ProjectContributor.ToFrozenSet(),
+            [RoleType.Tester] = ProjectTester.ToFrozenSet(),
             [RoleType.Viewer] = ProjectViewer.ToFrozenSet()
         }.ToFrozenDictionary();
 
@@ -165,16 +209,23 @@ public static class RolePermissions
     private static readonly FrozenDictionary<RoleType, FrozenSet<string>> TeamToProject =
         new Dictionary<RoleType, FrozenSet<string>>
         {
-            [RoleType.TeamLead] = ProjectContributor.ToFrozenSet(),
+            // Certification is "higher authority in the team", so a Team Lead carries it onto the
+            // team's projects. Their job is the people and the work being right; the sprint is the
+            // Scrum Master's and the Product Owner's.
+            [RoleType.TeamLead] = ProjectTester.ToFrozenSet(),
 
             // The two roles whose job is the sprint carry it onto every project their team serves.
             // That is the point of the appointment: a Scrum Master runs the sprints of the team's
             // work, and which project a given sprint sits in is not something they should have to
             // be granted separately. It stops at the sprint — see ProjectSprintRunner.
             [RoleType.ScrumMaster] = ProjectSprintRunner.ToFrozenSet(),
-            [RoleType.ProductOwner] = ProjectSprintRunner.ToFrozenSet(),
+            [RoleType.ProductOwner] = ProjectSprintOwner.ToFrozenSet(),
 
             [RoleType.TeamMember] = ProjectContributor.ToFrozenSet(),
+
+            // The role that exists for this: testing every project the team serves.
+            [RoleType.Tester] = ProjectTester.ToFrozenSet(),
+
             [RoleType.Viewer] = ProjectViewer.ToFrozenSet()
         }.ToFrozenDictionary();
 
@@ -225,11 +276,24 @@ public static class RolePermissions
     /// <para>
     /// Sorted rather than taken in the table's order: <see cref="FrozenDictionary{TKey,TValue}"/>
     /// does not promise to enumerate keys in insertion order, and this list reaches users — it is
-    /// what the "valid roles are …" rejection message enumerates.
+    /// what the "valid roles are …" rejection message enumerates, and what
+    /// <c>GET /api/metadata</c> publishes.
+    /// </para>
+    /// <para>
+    /// Sorted by <b>declared display order</b>, not by enum value. The numeric values are
+    /// deliberately meaningless (see <see cref="RoleType"/>), so ordering by them is arbitrary — and
+    /// it visibly diverged the moment a role was added: <c>Tester</c> took the next free number and
+    /// so sorted below <c>Viewer</c>, which would have shown users one order in a role picker and a
+    /// different one in the rejection message listing the same roles.
     /// </para>
     /// </remarks>
     public static IReadOnlyList<RoleType> AssignableAt(RoleScope scope) =>
-        [.. RolesAt(scope).Keys.Order()];
+    [
+        .. RolesAt(scope).Keys
+            .OrderBy(role => typeof(RoleType).GetField(role.ToString())
+                ?.GetCustomAttribute<DisplayMetadataAttribute>()?.Order ?? int.MaxValue)
+            .ThenBy(role => role.ToString(), StringComparer.Ordinal)
+    ];
 
     private static FrozenDictionary<RoleType, FrozenSet<string>> RolesAt(RoleScope scope) => scope switch
     {
