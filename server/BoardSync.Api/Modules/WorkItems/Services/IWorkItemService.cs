@@ -11,6 +11,11 @@ public interface IWorkItemService
     Task<WorkItemResponse> GetByIdAsync(Guid workItemId, CancellationToken ct = default);
     Task<PagedResult<WorkItemSummaryResponse>> GetForProjectAsync(Guid projectId, WorkItemFilterQuery filter, CancellationToken ct = default);
     Task<WorkItemResponse> UpdateAsync(Guid workItemId, UpdateWorkItemRequest request, Guid updatedBy, CancellationToken ct = default);
+
+    /// <summary>
+    /// Applies only the fields the caller supplied. See <see cref="PatchWorkItemRequest"/>.
+    /// </summary>
+    Task<WorkItemResponse> PatchAsync(Guid workItemId, PatchWorkItemRequest request, Guid updatedBy, CancellationToken ct = default);
     Task<WorkItemResponse> UpdateStateAsync(
         Guid workItemId,
         WorkItemState newState,

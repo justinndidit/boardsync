@@ -19,6 +19,7 @@ Scope: `server/BoardSync.Api` · Companions: `docs/permissions-model.md`, `build
 > | **D** | ⚠️ **A new role, `Tester`**, valid at team *and* project scope. | **§14.3** |
 > | **E** | ⚠️ **Work item activity now appears in the feed, and boards update live.** It never did before — that was a bug, not a design. | **§15** |
 > | **F** | Search, the notification bell and the workspace summary now return **less** for some users, and the bell returns **more** for everyone. | **§16** |
+> | **G** | **`PATCH /api/workitems/{id}` exists**, and `expectedVersion` is now honoured — it was accepted and ignored before. | **§17** |
 >
 > If you only change one thing this week, make it **A** — everything you build against hardcoded
 > constants has to be rewritten once you adopt it.
@@ -797,12 +798,67 @@ If you hid the bell because it was always empty, unhide it. Shape is unchanged (
 
 ---
 
-## 17. Still missing
+## 17. `PATCH /api/workitems/{id}`, and `expectedVersion` now works
 
-- **No `PATCH` for work items.** `PUT /api/workitems/{id}` remains a full replace, so a partial
-  update needs a read-modify-write and races with anyone editing a different field.
-- **Optimistic concurrency is not enforced.** `expectedVersion` is accepted on the request and
-  currently ignored; two people editing the same item still last-write-wins. Keep sending it — it
-  will start being honoured without a contract change.
+Both items §17 previously listed as missing have shipped.
 
-Both are next up. See `docs/audit-2026-08.md` findings 2 and 8.
+### 17.1 Partial updates
+
+```
+PATCH /api/workitems/{workItemId}     (requires workitem:write)
+```
+
+Only the fields you send are changed. `PUT` still exists and is still a full replace — use it for a
+full-form save, and use `PATCH` for everything else.
+
+```jsonc
+{ "title": "Renamed" }                       // everything else untouched
+{ "assigneeId": null }                       // unassign
+{ "tags": [] }                               // clear the tags
+{ "expectedVersion": 42, "priority": "High" }
+```
+
+⚠️ **Omitting a field and sending it as `null` are different.** Omitted means "leave it alone";
+explicit `null` clears it. That distinction is why `PATCH` exists — under `PUT` you cannot unassign
+an item without also resending five fields you may have loaded before someone else changed them.
+
+Fields: `title`, `description`, `priority`, `assigneeId`, `teamId`, `storyPoints`, `tags`. Sending
+`{}` is valid and does nothing.
+
+**`state` is not settable here.** It moves through `PATCH /api/workitems/{id}/state`, which enforces
+the workflow and the QA gate (§14). Including `state` in a `PATCH` body is ignored, not rejected —
+the item does not move.
+
+Reassignment still requires the assignee to be a member of the owning team, and a blank `title` is
+refused — both **422** with an explanation.
+
+### 17.2 `expectedVersion` is now honoured
+
+⚠️ **This changes behaviour for anyone already sending it.** It was accepted and ignored; it now
+does what the field always claimed.
+
+Read `version` from any work item response and send it back on `PUT`, `PATCH`, or
+`PATCH .../state`:
+
+```jsonc
+{ "expectedVersion": 42, "title": "…" }   →  409 if someone else wrote first
+```
+
+**On 409:** re-read the item and re-apply your change to the current version. The error carries no
+state deliberately — you need the whole item to merge against, and a `GET` returns it in the shape
+you already parse.
+
+**Omitting it keeps last-write-wins**, so nothing breaks if you are not ready. But start sending it:
+the git integration will be writing to these items concurrently with your users, so lost updates
+stop being a rare race and become a routine event.
+
+> ⚠️ **`version` used to always come back as `0`.** The field was never populated on the response,
+> so if you cached or asserted on it, that value was meaningless. It now carries the real row
+> version. Treat it as opaque — compare only, never compute with it or assume it increments by one.
+
+---
+
+## 18. Still missing
+
+Nothing outstanding from the frontend contract's point of view. The next backend work is the git
+integration (`build_context.md` §7), which adds endpoints rather than changing these.

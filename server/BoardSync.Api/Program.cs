@@ -32,6 +32,7 @@ using BoardSync.Api.Shared.Auth.Handlers;
 using BoardSync.Api.Shared.Auth.Repositories;
 using BoardSync.Api.Shared.Auth.Services;
 using BoardSync.Api.Shared.Auth.Services.Implementations;
+using BoardSync.Api.Shared.Kernel;
 using BoardSync.Api.Shared.Kernel.Configuration;
 using BoardSync.Api.Shared.Kernel.Events;
 using BoardSync.Api.Shared.Kernel.RateLimiting;
@@ -77,6 +78,9 @@ builder.Services.AddControllers(options =>
         // Serialize all enums as their string names (e.g. "OrgAdmin" not 10).
         // This keeps role values consistent across every endpoint.
         options.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+
+        // Lets a PATCH body tell "field omitted" from "field set to null" — see Shared/Kernel/Patch.cs.
+        options.JsonSerializerOptions.Converters.Add(new PatchConverterFactory());
     });
 builder.Services.AddProblemDetails();
 builder.Services.AddHealthChecks();

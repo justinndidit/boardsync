@@ -1,4 +1,5 @@
 using BoardSync.Api.Modules.WorkItems.Models;
+using BoardSync.Api.Shared.Kernel;
 using System.ComponentModel.DataAnnotations;
 
 namespace BoardSync.Api.Modules.WorkItems.DTOs;
@@ -30,6 +31,46 @@ public class CreateWorkItemRequest
     public int? StoryPoints { get; init; }
 
     public List<string> Tags { get; init; } = new();
+}
+
+/// <summary>
+/// A partial update: only the fields present are changed.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <see cref="UpdateWorkItemRequest"/> is a full replace, so changing one field means sending the
+/// whole object back — which forces a read-modify-write and overwrites anything another editor
+/// changed in the meantime with values that were current when you loaded the form. That is the
+/// wrong shape for a person editing one field, and the wrong shape for the coming git integration,
+/// which wants to move state and touch nothing else.
+/// </para>
+/// <para>
+/// Every field is a <see cref="Patch{T}"/>, so <c>{"assigneeId": null}</c> unassigns and omitting
+/// <c>assigneeId</c> leaves it alone. Sending <c>{}</c> is valid and changes nothing.
+/// </para>
+/// <para>
+/// State is deliberately absent. It moves through <c>PATCH /api/workitems/{id}/state</c>, which
+/// enforces the workflow and the QA gate; allowing it here would be a second, unguarded door.
+/// </para>
+/// </remarks>
+public class PatchWorkItemRequest
+{
+    /// <inheritdoc cref="UpdateWorkItemRequest.ExpectedVersion" />
+    public long? ExpectedVersion { get; init; }
+
+    public Patch<string> Title { get; init; }
+
+    public Patch<string> Description { get; init; }
+
+    public Patch<WorkItemPriority> Priority { get; init; }
+
+    public Patch<Guid?> AssigneeId { get; init; }
+
+    public Patch<Guid?> TeamId { get; init; }
+
+    public Patch<int?> StoryPoints { get; init; }
+
+    public Patch<List<string>> Tags { get; init; }
 }
 
 public class UpdateWorkItemRequest

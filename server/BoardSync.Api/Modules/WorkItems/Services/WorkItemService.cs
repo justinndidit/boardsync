@@ -11,6 +11,7 @@ using BoardSync.Api.Shared.Auth.Services.Implementations;
 using BoardSync.Api.Shared.Kernel;
 using BoardSync.Api.Shared.Kernel.Events;
 using BoardSync.Api.Shared.Kernel.Exceptions;
+using Microsoft.EntityFrameworkCore;
 
 namespace BoardSync.Api.Modules.WorkItems.Services;
 
@@ -173,6 +174,8 @@ public class WorkItemService : IWorkItemService
         var item = await _repository.GetActiveWithTagsAsync(workItemId, ct)
             ?? throw new NotFoundException("WorkItem", workItemId);
 
+        ExpectVersion(item, request.ExpectedVersion);
+
         // Track and record field changes
         TrackChange(item, updatedBy, "Title", item.Title, request.Title.Trim());
         TrackChange(item, updatedBy, "Description", item.Description, request.Description?.Trim());
@@ -191,22 +194,84 @@ public class WorkItemService : IWorkItemService
         item.TeamId = request.TeamId;
         item.UpdatedAt = DateTime.UtcNow;
 
-        // Sync tags: remove old, add new
-        var existingTags = item.Tags.ToList();
-        var newTagNames = NormalizeTags(request.Tags);
-
-        foreach (var removed in existingTags.Where(t => !newTagNames.Contains(t.Name)))
-            _repository.RemoveTag(removed);
-
-        foreach (var added in newTagNames.Where(n => existingTags.All(t => t.Name != n)))
-            _repository.AddTag(new WorkItemTag { WorkItemId = item.Id, Name = added, CreatedBy = updatedBy });
+        SyncTags(item, NormalizeTags(request.Tags), updatedBy);
 
         if (previousAssignee != request.AssigneeId)
         {
             _eventBus.Enqueue(new WorkItemAssigned(item.Id, item.ProjectId, previousAssignee, request.AssigneeId, updatedBy));
         }
 
-        await _repository.SaveChangesAsync(ct);
+        await SaveDetectingConflictsAsync(workItemId, ct);
+
+        return await MapToResponseAsync(workItemId, ct);
+    }
+
+    public async Task<WorkItemResponse> PatchAsync(
+        Guid workItemId,
+        PatchWorkItemRequest request,
+        Guid updatedBy,
+        CancellationToken ct = default)
+    {
+        var item = await _repository.GetActiveWithTagsAsync(workItemId, ct)
+            ?? throw new NotFoundException("WorkItem", workItemId);
+
+        ExpectVersion(item, request.ExpectedVersion);
+
+        // Resolved once, so the value written and the value recorded in history are the same thing
+        // and cannot drift apart. Or(current) leaves a field untouched when it was not mentioned.
+        var title = request.Title.IsSet ? Trimmed(request.Title.Value, "title") : item.Title;
+        var description = request.Description.IsSet
+            ? request.Description.Value?.Trim()
+            : item.Description;
+        var priority = request.Priority.Or(item.Priority);
+        var assigneeId = request.AssigneeId.Or(item.AssigneeId);
+        var teamId = request.TeamId.Or(item.TeamId);
+        var storyPoints = request.StoryPoints.Or(item.StoryPoints);
+
+        ValidateLength(title, 255, "title");
+        ValidateLength(description, 10000, "description");
+
+        if (storyPoints is < 0 or > 1000)
+            throw new BusinessRuleException("Story points must be between 0 and 1000.");
+
+        // Only when the caller is actually moving the work, and only against the team it will
+        // belong to afterwards — the same rule CreateAsync applies.
+        if ((request.AssigneeId.IsSet || request.TeamId.IsSet)
+            && assigneeId is { } newAssignee
+            && teamId is { } owningTeam
+            && !await _teamService.IsMemberAsync(owningTeam, newAssignee, ct))
+        {
+            throw new BusinessRuleException(
+                $"User '{newAssignee}' is not a member of team '{owningTeam}' and cannot be " +
+                "assigned this work item.");
+        }
+
+        TrackChange(item, updatedBy, "Title", item.Title, title);
+        TrackChange(item, updatedBy, "Description", item.Description, description);
+        TrackChange(item, updatedBy, "Priority", item.Priority.ToString(), priority.ToString());
+        TrackChange(item, updatedBy, "AssigneeId", item.AssigneeId?.ToString(), assigneeId?.ToString());
+        TrackChange(item, updatedBy, "StoryPoints", item.StoryPoints?.ToString(), storyPoints?.ToString());
+        TrackChange(item, updatedBy, "TeamId", item.TeamId?.ToString(), teamId?.ToString());
+
+        var previousAssignee = item.AssigneeId;
+
+        item.Title = title;
+        item.Description = description;
+        item.Priority = priority;
+        item.AssigneeId = assigneeId;
+        item.TeamId = teamId;
+        item.StoryPoints = storyPoints;
+        item.UpdatedAt = DateTime.UtcNow;
+
+        // Absent tags means "leave the tags alone", not "remove them all" — the difference a full
+        // replace cannot express.
+        if (request.Tags.IsSet)
+            SyncTags(item, NormalizeTags(request.Tags.Value ?? []), updatedBy);
+
+        if (previousAssignee != assigneeId)
+            _eventBus.Enqueue(new WorkItemAssigned(item.Id, item.ProjectId, previousAssignee, assigneeId, updatedBy));
+
+        await SaveDetectingConflictsAsync(workItemId, ct);
 
         return await MapToResponseAsync(workItemId, ct);
     }
@@ -219,6 +284,8 @@ public class WorkItemService : IWorkItemService
         CancellationToken ct = default)
     {
         var item = await GetWorkItemOrThrowAsync(workItemId, ct);
+
+        ExpectVersion(item, expectedVersion);
 
         if (item.State == newState)
             throw new BusinessRuleException($"Work item is already in state '{newState}'.");
@@ -234,7 +301,7 @@ public class WorkItemService : IWorkItemService
 
         _eventBus.Enqueue(new WorkItemStateChanged(item.Id, item.ProjectId, oldState, newState, updatedBy));
 
-        await _repository.SaveChangesAsync(ct);
+        await SaveDetectingConflictsAsync(workItemId, ct);
 
         return await MapToResponseAsync(workItemId, ct);
     }
@@ -422,6 +489,64 @@ public class WorkItemService : IWorkItemService
         => await _repository.GetActiveAsync(id, ct)
            ?? throw new NotFoundException("WorkItem", id);
 
+    /// <summary>
+    /// Tells EF which version of the row the caller was working from, so a concurrent write is
+    /// detected instead of silently overwritten.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="WorkItem.Version"/> maps to Postgres' <c>xmin</c>, which the server bumps on every
+    /// update by itself. EF's own check only spans load-to-save inside one request, which is not
+    /// where the conflict lives: the real race is A reads, B saves, A saves. Closing it needs the
+    /// version the client actually read, which is what this applies.
+    /// </para>
+    /// <para>
+    /// All of this machinery already existed — the mapped column, the repository helper, the DTO
+    /// field, the controller wiring — and nothing ever called it. The version travelled from the
+    /// client to this service and was dropped, so the guarantee the DTO documents was never made.
+    /// </para>
+    /// <para>
+    /// A missing <paramref name="expectedVersion"/> stays last-write-wins, deliberately: making it
+    /// required would break every client that does not send one yet, and the safe default is
+    /// available to anyone who opts in.
+    /// </para>
+    /// </remarks>
+    private void ExpectVersion(WorkItem item, long? expectedVersion)
+    {
+        if (expectedVersion is not { } version) return;
+
+        // xmin is a 32-bit unsigned counter; the DTO carries it as a long because JSON has no
+        // unsigned integers. Anything outside that range cannot be a version this server issued.
+        if (version is < 0 or > uint.MaxValue)
+            throw new BusinessRuleException(
+                $"'{version}' is not a valid work item version. Send back the 'version' field from " +
+                "the item you read.");
+
+        _repository.SetOriginalVersion(item, (uint)version);
+    }
+
+    /// <summary>
+    /// Saves, turning a lost update into a 409 rather than a silent overwrite.
+    /// </summary>
+    /// <remarks>
+    /// The client's move on a 409 is to re-read and reconcile, so the message says so. The current
+    /// state is deliberately not embedded in the error: the caller needs the whole item to merge
+    /// against, and a GET returns it in the shape they already parse.
+    /// </remarks>
+    private async Task SaveDetectingConflictsAsync(Guid workItemId, CancellationToken ct)
+    {
+        try
+        {
+            await _repository.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            throw new ConflictException(
+                "This work item was changed by someone else after you loaded it. Re-read it and " +
+                "apply your change to the current version.");
+        }
+    }
+
     private void TrackChange(WorkItem item, Guid changedBy, string field, string? oldValue, string? newValue)
     {
         if (oldValue == newValue) return;
@@ -452,6 +577,42 @@ public class WorkItemService : IWorkItemService
             NewValue = newValue,
             CreatedBy = changedBy
         });
+    }
+
+    /// <summary>Replaces an item's tags with exactly <paramref name="tagNames"/>.</summary>
+    private void SyncTags(WorkItem item, List<string> tagNames, Guid actingUserId)
+    {
+        var existing = item.Tags.ToList();
+
+        foreach (var removed in existing.Where(t => !tagNames.Contains(t.Name)))
+            _repository.RemoveTag(removed);
+
+        foreach (var added in tagNames.Where(n => existing.All(t => t.Name != n)))
+            _repository.AddTag(new WorkItemTag { WorkItemId = item.Id, Name = added, CreatedBy = actingUserId });
+    }
+
+    /// <summary>
+    /// Rejects a required text field the caller sent as null or blank.
+    /// </summary>
+    /// <remarks>
+    /// <c>[Required]</c> cannot see through <see cref="Patch{T}"/> — it inspects the struct, not the
+    /// string — so fields carried that way are checked here instead. The trade is deliberate: being
+    /// able to tell "absent" from "explicitly null" is worth validating a couple of fields by hand.
+    /// </remarks>
+    private static string Trimmed(string? value, string field)
+    {
+        var trimmed = value?.Trim();
+
+        if (string.IsNullOrEmpty(trimmed))
+            throw new BusinessRuleException($"A work item's {field} cannot be empty.");
+
+        return trimmed;
+    }
+
+    private static void ValidateLength(string? value, int max, string field)
+    {
+        if (value is not null && value.Length > max)
+            throw new BusinessRuleException($"A work item's {field} cannot exceed {max} characters.");
     }
 
     /// <summary>
@@ -579,7 +740,8 @@ public class WorkItemService : IWorkItemService
             childCount,
             item.CreatedAt,
             item.UpdatedAt,
-            item.CreatedBy
+            item.CreatedBy,
+            item.Version
         );
     }
 

@@ -858,9 +858,12 @@ single constant. No endpoint returns data the caller cannot read.*
       column claims simply does not render, so the lane had to be inserted rather than left to
       whoever noticed work had vanished.
 - [ ] Typed principals (§6.3): `PrincipalType` on `RoleAssignment`, `Integration` role,
-      `WorkItemHistory.ActorType` + `AttributedToUserId`. **Next.** This is the piece git sync
-      depends on.
-- [ ] Audit findings 2 and 8: make optimistic concurrency real; add `PATCH /api/workitems/{id}`.
+      `WorkItemHistory.ActorType` + `AttributedToUserId`. **Moved into Phase C.**
+      `docs/permissions-model.md` §10.4 argues this should wait for the integration that needs it,
+      and it is right: with only one kind of principal in existence, the shape would be a guess.
+      It lands alongside `GitProviderInstallation`, which is the second principal.
+- [x] Audit findings 2 and 8: optimistic concurrency is real (it was inert at three separate points);
+      `PATCH /api/workitems/{id}` added, with `Patch<T>` to tell an omitted field from an explicit null.
 
 *Note on enforcement:* which permission a transition needs depends on the states being moved
 between, and the target arrives in the request body — so it cannot live in a `[RequirePermission]`
