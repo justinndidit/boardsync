@@ -34,7 +34,12 @@ using BoardSync.Api.Shared.Auth.Services;
 using BoardSync.Api.Shared.Auth.Services.Implementations;
 using BoardSync.Api.Shared.Kernel;
 using BoardSync.Api.Shared.Kernel.Configuration;
+using BoardSync.Api.Modules.GitSync.Controllers;
+using BoardSync.Api.Modules.GitSync.Ingest;
+using BoardSync.Api.Modules.GitSync.Providers;
+using BoardSync.Api.Modules.GitSync.Repositories;
 using BoardSync.Api.Shared.Kernel.Events;
+using BoardSync.Api.Shared.Kernel.Jobs;
 using BoardSync.Api.Shared.Kernel.RateLimiting;
 using StackExchange.Redis;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -252,6 +257,22 @@ builder.Services.AddScoped<IBoardRepository, BoardRepository>();
 builder.Services.AddScoped<ISprintService, SprintService>();
 builder.Services.AddScoped<IAuthHelpers, AuthHelpers>();
 builder.Services.AddScoped<IBoardService, BoardService>();
+
+// Shared Kernel — Job queue
+// Long-running work: webhook processing, git backfills, and later the AI jobs. Deliberately a
+// second lane rather than more outbox traffic — see Shared/Kernel/Jobs/Job.cs.
+builder.Services.Configure<JobSettings>(builder.Configuration.GetSection("Jobs"));
+builder.Services.AddScoped<IJobQueue, JobQueue>();
+builder.Services.AddHostedService<JobWorker>();
+
+// GitSync Module
+// The webhook endpoint is anonymous by necessity — a delivery carries no user — so authenticity
+// rests entirely on the provider's signature and the installation's endpoint token.
+builder.Services.AddScoped<IGitRepository, GitRepository>();
+builder.Services.AddScoped<IGitProvider, GitHubProvider>();
+builder.Services.AddScoped<IGitProviderRegistry, GitProviderRegistry>();
+builder.Services.AddScoped<IWebhookIngestService, WebhookIngestService>();
+builder.Services.AddScoped<IJobHandler<ProcessGitDelivery>, ProcessGitDeliveryHandler>();
 
 // Activity Module — subscribes to the other modules' domain events
 builder.Services.AddActivityModule();

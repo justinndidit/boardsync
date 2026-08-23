@@ -82,7 +82,8 @@ access lives behind a repository per module; no controller or service touches `B
 | `Modules/Notifications` | The notification bell, derived from work item history |
 | `Modules/Search` | Global search across organizations, projects, members, work items |
 | `Shared/Auth` | Users, JWT issuance/refresh, password and email flows |
-| `Shared/Kernel` | Outbox event bus and dispatcher, rate limiting, typed configuration, domain exceptions |
+| `Modules/GitSync` | Git provider connections, webhook ingest, normalization |
+| `Shared/Kernel` | Outbox event bus and dispatcher, background job queue, rate limiting, typed configuration, domain exceptions |
 | `Shared/Data` | `BoardSyncDbContext` and EF Core migrations |
 
 ### Domain model
@@ -151,6 +152,7 @@ the authoritative reference; the table below is the map.
 | Work items | `GET|POST /api/projects/{projectId}/workitems`, `GET|PUT|DELETE /api/workitems/{workItemId}`, `PATCH /api/workitems/{workItemId}/state`, `GET|POST /api/workitems/{workItemId}/comments`, `PUT|DELETE /api/workitems/comments/{commentId}`, `GET /api/workitems/{workItemId}/history`, `GET|POST /api/workitems/{workItemId}/links`, `DELETE /api/workitems/links/{linkId}` |
 | Sprint backlog move | `PATCH /api/sprints/{sprintId}/workitems/{workItemId}/move` — single-row drag-and-drop |
 | Real-time hub | `WS /hubs/workspace` — see `docs/realtime-frontend.md` |
+| Git webhooks (anonymous) | `POST /api/git/{provider}/webhook/{endpointToken}` — verified by the provider's signature, not by a token |
 | Health (anonymous) | `GET /healthz` |
 
 Enums serialize as strings (`"OrgAdmin"`, not `10`) on every endpoint. Errors are returned as
@@ -185,6 +187,9 @@ RFC 7807 problem details via the global exception handler.
 | `Outbox:BatchSize` | `50` | Messages claimed per pass. |
 | `Outbox:PollIntervalSeconds` | `5` | Fallback poll. Normal latency comes from Postgres `NOTIFY`; this is the safety net for a dropped listener. |
 | `Outbox:MaxAttempts` | `5` | Delivery attempts before a message is left alone — still in the table, visible, not deleted. |
+| `Jobs:Enabled` | `true` | Whether this instance runs queued work — webhook processing, and later backfills and AI jobs. Off everywhere means deliveries are accepted and never processed. |
+| `Jobs:LeaseSeconds` | `300` | How long a claimed job is held before another worker may take it. The ceiling on how long a crashed worker's job stays stuck; raise it above the slowest handler's worst case. |
+| `Jobs:MaxAttempts` | `5` | Attempts before a job is marked dead. It stays in `kernel.Jobs`, queryable and re-drivable. |
 | `Telemetry:OtlpEndpoint` | unset | OTLP collector address, e.g. `http://localhost:4317`. Unset means OpenTelemetry is not registered at all — no spans built, nothing exported. `OTEL_EXPORTER_OTLP_ENDPOINT` works too. |
 | `Realtime:Enabled` | `true` | Whether the hub is mapped. Off means clients cannot connect; the REST API is unaffected. |
 | `Realtime:ReauthorizationIntervalSeconds` | `60` | How often live subscriptions are re-checked against current permissions. Revocations normally take effect immediately via a role-change event; this is the worst case when that path does not fire. |

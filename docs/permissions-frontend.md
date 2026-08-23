@@ -20,6 +20,7 @@ Scope: `server/BoardSync.Api` · Companions: `docs/permissions-model.md`, `build
 > | **E** | ⚠️ **Work item activity now appears in the feed, and boards update live.** It never did before — that was a bug, not a design. | **§15** |
 > | **F** | Search, the notification bell and the workspace summary now return **less** for some users, and the bell returns **more** for everyone. | **§16** |
 > | **G** | **`PATCH /api/workitems/{id}` exists**, and `expectedVersion` is now honoured — it was accepted and ignored before. | **§17** |
+> | **H** | Git webhook ingest has landed. Nothing visible yet, but §18 says what changes when binding does. | **§18** |
 >
 > If you only change one thing this week, make it **A** — everything you build against hardcoded
 > constants has to be rewritten once you adopt it.
@@ -858,7 +859,35 @@ stop being a rare race and become a routine event.
 
 ---
 
-## 18. Still missing
+## 18. Git integration — nothing for you yet, but here is the shape
 
-Nothing outstanding from the frontend contract's point of view. The next backend work is the git
-integration (`build_context.md` §7), which adds endpoints rather than changing these.
+Webhook ingest has landed: `POST /api/git/{provider}/webhook/{endpointToken}` accepts deliveries
+from GitHub, verifies them, and queues them. **It changes nothing you can see.** Deliveries are
+normalized and recorded; binding a commit to a work item is the next increment.
+
+Two things to know so you can plan around them:
+
+**A repository connection is not yet self-service.** Installation and repository-link rows are
+created directly in the database today, so there are no settings screens to build against. Those
+endpoints come with the binding work.
+
+**When binding lands, work items will start moving on their own.** A developer branching
+`bs-142-fix-login`, committing, opening a pull request and merging will walk the item
+`New → Active → InReview → Resolved` with nobody touching the board. Consequences for the client:
+
+- **State changes will arrive over the realtime channel from no user action of yours.** The contract
+  is unchanged (`docs/realtime-frontend.md`), but a board that only re-renders on local interaction
+  will look stale. Handle inbound `WorkItemStateChanged` for items nobody on this client touched.
+- **Activity entries will be attributed to the integration**, not to a person — with the commit
+  author carried alongside as attribution. Rendering an actor name will need to handle "GitHub (Ada
+  Lovelace)" as well as a plain user.
+- **`expectedVersion` stops being optional in practice.** A webhook worker writing while your user
+  edits is routine, not a rare race. §17.2 is the reason to start sending it now.
+
+Nothing in this list requires work today. It is here so none of it is a surprise.
+
+---
+
+## 19. Still missing
+
+Nothing outstanding from the frontend contract's point of view.

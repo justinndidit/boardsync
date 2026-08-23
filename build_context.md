@@ -874,17 +874,27 @@ behind it.
 *Exit: work reaches Done only through a human holding `workitem:verify`. The principal model that git
 sync depends on exists and is tested.*
 
-### Phase C — Git sync, GitHub first
+### Phase C — Git sync, GitHub first · **ingest shipped**, binding next
 
-- `kernel.Jobs` (§9).
-- `Modules/GitSync` skeleton, `IGitProvider`, `NormalizedGitEvent`.
-- GitHub App: registration, installation flow, HMAC verification, repository discovery.
-- Ingest pipeline: verify → dedupe → persist → 202 → job.
-- Project keys and work item numbers (`BS-142`) — a migration and a display change everywhere.
-- Binding resolver: branch primary, commit token fallback, PR references.
-- Transition application as the integration principal, with all three invariants.
-- Unbound-commits view.
-- Backfill on link.
+- [x] `kernel.Jobs` (§9) with `IJobQueue`, `JobWorker`, leases, exponential backoff and a dead-row
+      state that stays queryable.
+- [x] `Modules/GitSync` skeleton, `IGitProvider`, `NormalizedGitEvent`, `git` schema.
+- [x] GitHub App: HMAC-SHA256 verification over the raw body, constant-time compared; push and
+      pull-request normalization.
+- [x] Ingest pipeline: verify → dedupe → persist → 202 → job.
+- [ ] Installation and repository-link management endpoints. Rows are created directly today, so
+      connecting a repository is not yet self-service.
+- [ ] Project keys and work item numbers (`BS-142`) — a migration and a display change everywhere.
+- [ ] Binding resolver: branch primary, commit token fallback, PR references.
+- [ ] Typed principals, alongside `GitProviderInstallation` as the second principal (§6.3).
+- [ ] Transition application as the integration principal, with all three invariants.
+- [ ] Unbound-commits view.
+- [ ] Backfill on link.
+
+*Split deliberately at the ingest/binding boundary.* Verification, idempotency, durability and the
+job pipeline are provably working before any of it is used to change a board — which is the half
+that is hard to retrofit confidence into, since the endpoint is the only anonymous write surface in
+the product.
 
 *Exit: a developer branches `bs-142-fix-login`, commits, opens a PR, merges — and the card moves
 New → Active → InReview → Resolved with nobody touching the board. It stops there, waiting for QA.*
