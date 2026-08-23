@@ -1,4 +1,5 @@
 using BoardSync.Api.Shared.Kernel;
+using BoardSync.Api.Shared.Metadata;
 using System.Text.Json.Serialization;
 
 namespace BoardSync.Api.Modules.Sprints.Models;
@@ -11,8 +12,13 @@ namespace BoardSync.Api.Modules.Sprints.Models;
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum SprintStatus
 {
+    [DisplayMetadata("Planning", 10, Description = "Being filled; not yet started.")]
     Planning,
+
+    [DisplayMetadata("Active", 20, Description = "In flight.")]
     Active,
+
+    [DisplayMetadata("Completed", 30, Description = "Closed out.")]
     Completed
 }
 

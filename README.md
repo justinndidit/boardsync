@@ -82,17 +82,19 @@ access lives behind a repository per module; no controller or service touches `B
 | `Modules/Notifications` | The notification bell, derived from work item history |
 | `Modules/Search` | Global search across organizations, projects, members, work items |
 | `Shared/Auth` | Users, JWT issuance/refresh, password and email flows |
-| `Shared/Kernel` | Outbox event bus and dispatcher, rate limiting, typed configuration, domain exceptions |
+| `Modules/GitSync` | Git provider connections, webhook ingest, normalization |
+| `Shared/Kernel` | Outbox event bus and dispatcher, background job queue, rate limiting, typed configuration, domain exceptions |
 | `Shared/Data` | `BoardSyncDbContext` and EF Core migrations |
 
 ### Domain model
 
 An **Organization** owns **Teams** and **Projects**. A project is backed by one **Board** with
 ordered **BoardColumns**, and holds **WorkItems** (with comments, history, links, and tags).
-**Sprints** belong to a team and pull work items into an ordered sprint backlog. Every meaningful
+**Sprints** belong to a project and pull work items into an ordered sprint backlog. Every meaningful
 mutation emits a domain event that the Activity module turns into an **ActivityLog** entry. Events
 travel through the outbox, so the activity feed is **eventually consistent** — usually milliseconds
-behind the write, at worst one dispatcher poll interval.
+behind the write (a Postgres `NOTIFY` wakes the dispatcher), at worst one poll interval if that
+listener has dropped.
 
 ### Roles
 
@@ -101,14 +103,31 @@ Every role belongs to one scope, and no name means two things at two scopes:
 | `RoleScope` | `RoleType` |
 | --- | --- |
 | `Organization` | `OrgAdmin`, `Member` |
-| `Team` | `TeamLead`, `ScrumMaster`, `ProductOwner`, `TeamMember`, `Viewer` |
-| `Project` | `ProjectAdmin`, `Contributor`, `Viewer` |
+| `Team` | `TeamLead`, `ScrumMaster`, `ProductOwner`, `TeamMember`, `Tester`, `Viewer` |
+| `Project` | `ProjectAdmin`, `Contributor`, `Tester`, `Viewer` |
+
+`Viewer` and `Tester` are the two names deliberately held at more than one scope, because each means
+the same thing at both — read-only, and testing — differing only in what it reaches.
 
 Roles are bundles of named permissions (`org:admin`, `sprint:scope`, `workitem:write`, …) declared
 in `RolePermissions`, and a user holding several roles at one scope gets the **union** of what they
 permit — never a rank comparison, since a Scrum Master and a Product Owner are peers. Controllers
 authorize by declaring the permission an endpoint needs, `[RequirePermission(Permissions.SprintManage,
 From = "sprintId")]`, rather than by checking roles or raw claims.
+
+### The QA gate
+
+Work items run `New → Active → InReview → Resolved → Closed`. `Resolved` means **merged, awaiting
+test** — it is labelled "Awaiting QA" — and it is the only state from which `Closed` is reachable.
+
+Every move out of `Resolved` or `Closed` requires `workitem:verify`, held by `Tester`, `TeamLead`,
+`ProductOwner`, `ProjectAdmin` and `OrgAdmin` — and deliberately **not** by `Contributor`,
+`TeamMember` or `ScrumMaster`. Everything before that needs only `workitem:write`. Nobody may certify
+work assigned to them unless the project sets `AllowSelfCertification`.
+
+That separation is what makes the planned git integration safe to trust: it will hold `workitem:write`
+and never `workitem:verify`, so no amount of automation — and no bug in a webhook handler — can close
+a work item. See `build_context.md` §4.
 
 ## 3) API Surface
 
@@ -120,6 +139,8 @@ the authoritative reference; the table below is the map.
 | Auth (anonymous) | `POST /api/auth/{login,register,refresh-token,forgot-password,reset-password,confirm-email,resend-confirmation}` |
 | Auth (authenticated) | `POST /api/auth/{logout,revoke-token,change-password}`, `GET /api/auth/me`, `GET|PUT /api/auth/profile` |
 | Users | `GET /api/users/me`, `GET /api/users/{userId}`, `GET /api/users/by-email` |
+| Metadata | `GET /api/metadata` — every enum the client renders, with labels and sort order; ETag/304 |
+| Capabilities | `GET /api/me/capabilities?scope=project:{id}`, `POST /api/me/capabilities` (batch, max 50) |
 | Search | `GET /api/search` |
 | Workspace | `GET /api/workspace/{summary,activity}` |
 | Notifications | `GET /api/notifications` (also served at `GET /api/workspace/notifications`) |
@@ -131,6 +152,7 @@ the authoritative reference; the table below is the map.
 | Work items | `GET|POST /api/projects/{projectId}/workitems`, `GET|PUT|DELETE /api/workitems/{workItemId}`, `PATCH /api/workitems/{workItemId}/state`, `GET|POST /api/workitems/{workItemId}/comments`, `PUT|DELETE /api/workitems/comments/{commentId}`, `GET /api/workitems/{workItemId}/history`, `GET|POST /api/workitems/{workItemId}/links`, `DELETE /api/workitems/links/{linkId}` |
 | Sprint backlog move | `PATCH /api/sprints/{sprintId}/workitems/{workItemId}/move` — single-row drag-and-drop |
 | Real-time hub | `WS /hubs/workspace` — see `docs/realtime-frontend.md` |
+| Git webhooks (anonymous) | `POST /api/git/{provider}/webhook/{endpointToken}` — verified by the provider's signature, not by a token |
 | Health (anonymous) | `GET /healthz` |
 
 Enums serialize as strings (`"OrgAdmin"`, not `10`) on every endpoint. Errors are returned as
@@ -165,6 +187,9 @@ RFC 7807 problem details via the global exception handler.
 | `Outbox:BatchSize` | `50` | Messages claimed per pass. |
 | `Outbox:PollIntervalSeconds` | `5` | Fallback poll. Normal latency comes from Postgres `NOTIFY`; this is the safety net for a dropped listener. |
 | `Outbox:MaxAttempts` | `5` | Delivery attempts before a message is left alone — still in the table, visible, not deleted. |
+| `Jobs:Enabled` | `true` | Whether this instance runs queued work — webhook processing, and later backfills and AI jobs. Off everywhere means deliveries are accepted and never processed. |
+| `Jobs:LeaseSeconds` | `300` | How long a claimed job is held before another worker may take it. The ceiling on how long a crashed worker's job stays stuck; raise it above the slowest handler's worst case. |
+| `Jobs:MaxAttempts` | `5` | Attempts before a job is marked dead. It stays in `kernel.Jobs`, queryable and re-drivable. |
 | `Telemetry:OtlpEndpoint` | unset | OTLP collector address, e.g. `http://localhost:4317`. Unset means OpenTelemetry is not registered at all — no spans built, nothing exported. `OTEL_EXPORTER_OTLP_ENDPOINT` works too. |
 | `Realtime:Enabled` | `true` | Whether the hub is mapped. Off means clients cannot connect; the REST API is unaffected. |
 | `Realtime:ReauthorizationIntervalSeconds` | `60` | How often live subscriptions are re-checked against current permissions. Revocations normally take effect immediately via a role-change event; this is the worst case when that path does not fire. |

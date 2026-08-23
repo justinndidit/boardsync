@@ -1,6 +1,7 @@
 using BoardSync.Api.Data;
 using BoardSync.Api.Modules.Notifications.DTOs;
 using BoardSync.Api.Modules.Notifications.Repositories.Interfaces;
+using BoardSync.Api.Modules.Rbac.Models;
 using Microsoft.EntityFrameworkCore;
 
 namespace BoardSync.Api.Modules.Notifications.Repositories.Implementations;
@@ -15,27 +16,18 @@ public class NotificationRepository : INotificationRepository
         _context = context;
     }
 
-    public async Task<IReadOnlyList<Guid>> GetOrganizationIdsForUserAsync(
-        Guid userId,
-        CancellationToken ct = default) =>
-        await _context.OrganizationMemberships
-            .Where(m => m.UserId == userId)
-            .Select(m => m.OrganizationId)
-            .ToListAsync(ct);
-
-    public async Task<IReadOnlyList<NotificationSource>> GetRecentForOrganizationsAsync(
-        IReadOnlyCollection<Guid> organizationIds,
+    public async Task<IReadOnlyList<NotificationSource>> GetRecentForVisibleProjectsAsync(
+        ProjectVisibility visibility,
         int take,
         CancellationToken ct = default)
     {
-        if (organizationIds.Count == 0) return [];
-
-        var orgIds = organizationIds as List<Guid> ?? organizationIds.ToList();
+        if (visibility.IsEmpty) return [];
 
         // Left unmaterialized so it becomes a subquery rather than a round trip whose result is
         // shipped straight back as an IN list.
         var projectIds = _context.Projects
-            .Where(p => orgIds.Contains(p.OrganizationId) && p.IsActive)
+            .Where(visibility.Predicate())
+            .Where(p => p.IsActive)
             .Select(p => p.Id);
 
         // Id breaks ties: entries written in one transaction share a CreatedAt, and without a

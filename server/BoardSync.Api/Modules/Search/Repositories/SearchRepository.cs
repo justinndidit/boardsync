@@ -1,5 +1,6 @@
 using BoardSync.Api.Data;
 using BoardSync.Api.Modules.OrgProject.Domain.DTOs;
+using BoardSync.Api.Modules.Rbac.Models;
 using Microsoft.EntityFrameworkCore;
 
 namespace BoardSync.Api.Modules.Search.Repositories;
@@ -14,26 +15,16 @@ public class SearchRepository : ISearchRepository
         _context = context;
     }
 
-    public async Task<IReadOnlyList<Guid>> GetOrganizationIdsForUserAsync(
-        Guid userId,
-        CancellationToken ct = default) =>
-        await _context.OrganizationMemberships
-            .Where(m => m.UserId == userId)
-            .Select(m => m.OrganizationId)
-            .ToListAsync(ct);
-
     public async Task<IReadOnlyList<SearchHit>> SearchOrganizationsAsync(
-        IReadOnlyCollection<Guid> organizationIds,
+        Guid[] organizationIds,
         string term,
         int take,
         CancellationToken ct = default)
     {
-        if (organizationIds.Count == 0) return [];
-
-        var orgIds = AsList(organizationIds);
+        if (organizationIds.Length == 0) return [];
 
         return await _context.Organizations
-            .Where(o => orgIds.Contains(o.Id) && o.IsActive
+            .Where(o => organizationIds.Contains(o.Id) && o.IsActive
                         && (o.Name.ToLower().Contains(term) || o.Slug.ToLower().Contains(term)))
             .OrderBy(o => o.Name)
             .Take(take)
@@ -41,39 +32,18 @@ public class SearchRepository : ISearchRepository
             .ToListAsync(ct);
     }
 
-    public async Task<IReadOnlyList<SearchHit>> SearchProjectsAsync(
-        IReadOnlyCollection<Guid> organizationIds,
-        string term,
-        int take,
-        CancellationToken ct = default)
-    {
-        if (organizationIds.Count == 0) return [];
-
-        var orgIds = AsList(organizationIds);
-
-        return await _context.Projects
-            .Where(p => orgIds.Contains(p.OrganizationId) && p.IsActive
-                        && (p.Name.ToLower().Contains(term) || p.Slug.ToLower().Contains(term)))
-            .OrderBy(p => p.Name)
-            .Take(take)
-            .Select(p => new SearchHit(p.Id, p.Name, p.Slug))
-            .ToListAsync(ct);
-    }
-
     public async Task<IReadOnlyList<SearchHit>> SearchMembersAsync(
-        IReadOnlyCollection<Guid> organizationIds,
+        Guid[] organizationIds,
         string term,
         int take,
         CancellationToken ct = default)
     {
-        if (organizationIds.Count == 0) return [];
-
-        var orgIds = AsList(organizationIds);
+        if (organizationIds.Length == 0) return [];
 
         // Order on the joined shape, not on a constructed SearchHit: EF cannot translate an
         // OrderBy that reads a property off a projected record and fails the whole request.
         return await _context.OrganizationMemberships
-            .Where(m => orgIds.Contains(m.OrganizationId))
+            .Where(m => organizationIds.Contains(m.OrganizationId))
             .Select(m => m.UserId)
             .Distinct()
             .Join(
@@ -89,24 +59,43 @@ public class SearchRepository : ISearchRepository
             .ToListAsync(ct);
     }
 
-    public async Task<IReadOnlyList<SearchHit>> SearchWorkItemsAsync(
-        IReadOnlyCollection<Guid> organizationIds,
+    public async Task<IReadOnlyList<SearchHit>> SearchProjectsAsync(
+        ProjectVisibility visibility,
         string term,
         int take,
         CancellationToken ct = default)
     {
-        if (organizationIds.Count == 0) return [];
+        if (visibility.IsEmpty) return [];
 
-        var orgIds = AsList(organizationIds);
+        return await _context.Projects
+            .Where(visibility.Predicate())
+            .Where(p => p.IsActive
+                        && (p.Name.ToLower().Contains(term) || p.Slug.ToLower().Contains(term)))
+            .OrderBy(p => p.Name)
+            .Take(take)
+            .Select(p => new SearchHit(p.Id, p.Name, p.Slug))
+            .ToListAsync(ct);
+    }
 
-        // The project set stays a subquery rather than a materialized IN list that grows with the
-        // caller's membership.
-        var projectIds = _context.Projects
-            .Where(p => orgIds.Contains(p.OrganizationId) && p.IsActive)
+    public async Task<IReadOnlyList<SearchHit>> SearchWorkItemsAsync(
+        ProjectVisibility visibility,
+        string term,
+        int take,
+        CancellationToken ct = default)
+    {
+        if (visibility.IsEmpty) return [];
+
+        // Left unmaterialized so the readable-project set becomes a subquery of the work item
+        // query rather than a round trip whose result is shipped straight back as an IN list. The
+        // predicate itself is three `= ANY(@p)` tests against arrays sized by the caller's grants,
+        // so the SQL is the same shape whether they hold one project or administer an organization.
+        var visibleProjectIds = _context.Projects
+            .Where(visibility.Predicate())
+            .Where(p => p.IsActive)
             .Select(p => p.Id);
 
         return await _context.WorkItems
-            .Where(w => projectIds.Contains(w.ProjectId)
+            .Where(w => visibleProjectIds.Contains(w.ProjectId)
                         && w.IsActive
                         && w.Title.ToLower().Contains(term))
             .OrderByDescending(w => w.CreatedAt)
@@ -114,7 +103,4 @@ public class SearchRepository : ISearchRepository
             .Select(w => new SearchHit(w.Id, w.Title, null))
             .ToListAsync(ct);
     }
-
-    private static List<Guid> AsList(IReadOnlyCollection<Guid> ids) =>
-        ids as List<Guid> ?? ids.ToList();
 }

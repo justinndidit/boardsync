@@ -468,3 +468,9 @@ appsettings.Local.json
 appsettings.json
 
 
+
+# Generated XML doc file (read at runtime from the build output, not from source control)
+server/BoardSync.Api/BoardSync.Api.xml
+
+# Stray debug logs
+*.log

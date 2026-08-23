@@ -92,6 +92,9 @@ public class ProjectService : IProjectService
     public Task<bool> ExistsAsync(Guid projectId, CancellationToken ct = default) =>
         _projectRepo.ExistsActiveAsync(projectId, ct);
 
+    public Task<bool> AllowsSelfCertificationAsync(Guid projectId, CancellationToken ct = default) =>
+        _projectRepo.AllowsSelfCertificationAsync(projectId, ct);
+
     public async Task<PagedResult<ProjectSummaryResponse>> GetForOrgAsync(
         Guid orgId,
         PaginationQuery pagination,
@@ -122,13 +125,21 @@ public class ProjectService : IProjectService
         var newName = request.Name.Trim();
         var newDescription = request.Description?.Trim() ?? project.Description;
 
+        // Left alone when the client does not mention it: turning the QA separation off is a
+        // deliberate act, not something a rename should be able to do by omission.
+        var newSelfCertification = request.AllowSelfCertification ?? project.AllowSelfCertification;
+
         if (project.Name != newName)
             changes.Add(("Name", project.Name, newName));
         if (project.Description != newDescription)
             changes.Add(("Description", project.Description, newDescription));
+        if (project.AllowSelfCertification != newSelfCertification)
+            changes.Add(("AllowSelfCertification",
+                project.AllowSelfCertification.ToString(), newSelfCertification.ToString()));
 
         project.Name = newName;
         project.Description = newDescription;
+        project.AllowSelfCertification = newSelfCertification;
         project.UpdatedAt = DateTime.UtcNow;
 
         foreach (var (field, oldValue, newValue) in changes)
@@ -178,6 +189,6 @@ public class ProjectService : IProjectService
         var team = await _teamRepo.GetActiveByIdAsync(p.AssignedTeamId, ct);
 
         return new(p.Id, p.OrganizationId, p.Slug, p.Name, p.Description, p.IsActive,
-            p.AssignedTeamId, team?.Name ?? string.Empty, p.CreatedAt);
+            p.AssignedTeamId, team?.Name ?? string.Empty, p.AllowSelfCertification, p.CreatedAt);
     }
 }

@@ -95,6 +95,33 @@ public class WorkItemsController : ControllerBase
         return Ok(new ApiResponse<WorkItemResponse>(true, "Work item updated.", updated));
     }
 
+    /// <summary>
+    /// Partially update a work item — only the fields you send are changed. Requires
+    /// <c>workitem:write</c>.
+    /// </summary>
+    /// <remarks>
+    /// Prefer this to <c>PUT</c> for anything but a full-form save. Omitting a field leaves it
+    /// alone; sending it as <c>null</c> clears it, which is how an item is unassigned. Send
+    /// <c>expectedVersion</c> to be told about a conflicting edit instead of silently winning it.
+    /// State is not settable here — it moves through <c>PATCH .../state</c>, which enforces the
+    /// workflow.
+    /// </remarks>
+    [HttpPatch("api/workitems/{workItemId:guid}")]
+    [RequirePermission(Permissions.WorkItemWrite, From = "workItemId")]
+    [ProducesResponseType(typeof(ApiResponse<WorkItemResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> Patch(
+        Guid workItemId,
+        [FromBody] PatchWorkItemRequest request,
+        CancellationToken ct)
+    {
+        var updated = await _workItemService.PatchAsync(workItemId, request, _currentUser.UserId, ct);
+        return Ok(new ApiResponse<WorkItemResponse>(true, "Work item updated.", updated));
+    }
+
     /// <summary>Transition work item state (New → Active → Resolved → Closed).</summary>
     [HttpPatch("api/workitems/{workItemId:guid}/state")]
     [RequirePermission(Permissions.WorkItemWrite, From = "workItemId")]
@@ -107,7 +134,6 @@ public class WorkItemsController : ControllerBase
         [FromBody] UpdateWorkItemStateRequest request,
         CancellationToken ct)
     {
-        var item = await _workItemService.GetByIdAsync(workItemId, ct);
         var updated = await _workItemService.UpdateStateAsync(
             workItemId, request.State, _currentUser.UserId, request.ExpectedVersion, ct);
         return Ok(new ApiResponse<WorkItemResponse>(true, "Work item state updated.", updated));

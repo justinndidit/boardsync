@@ -1,4 +1,5 @@
 using BoardSync.Api.Shared.Kernel;
+using BoardSync.Api.Shared.Metadata;
 
 namespace BoardSync.Api.Modules.WorkItems.Models;
 
@@ -8,12 +9,15 @@ namespace BoardSync.Api.Modules.WorkItems.Models;
 public enum WorkItemLinkType
 {
     /// <summary>Source blocks target from progressing.</summary>
+    [DisplayMetadata("Blocks", 10, Inverse = "Blocked by")]
     Blocks,
 
     /// <summary>Items are related without a dependency direction.</summary>
+    [DisplayMetadata("Related to", 20, Inverse = "Related to")]
     RelatedTo,
 
     /// <summary>Source duplicates target.</summary>
+    [DisplayMetadata("Duplicates", 30, Inverse = "Duplicated by")]
     Duplicates
 }
 

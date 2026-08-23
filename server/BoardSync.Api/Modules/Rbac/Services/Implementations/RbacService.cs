@@ -145,6 +145,54 @@ public class RbacService : IRbacService
         return AccessEvaluator.GrantsAnywhere(snapshot, permission);
     }
 
+    public async Task<ProjectVisibility> GetProjectVisibilityAsync(
+        Guid userId,
+        string permission,
+        CancellationToken ct = default)
+    {
+        // Also snapshot-only. The tree lookup that GrantsAtProject needs is not required here
+        // because the projects are never named: the query does the join instead.
+        var snapshot = await _resolver.GetSnapshotAsync(userId, ct);
+
+        return AccessEvaluator.VisibleProjects(snapshot, permission);
+    }
+
+    public async Task<Guid[]> GetVisibleOrganizationIdsAsync(
+        Guid userId,
+        string permission,
+        CancellationToken ct = default)
+    {
+        var snapshot = await _resolver.GetSnapshotAsync(userId, ct);
+
+        return AccessEvaluator.VisibleOrganizations(snapshot, permission);
+    }
+
+    public async Task<IReadOnlyList<string>> GetPermissionsAtAsync(
+        Guid userId,
+        ScopeRef scope,
+        CancellationToken ct = default)
+    {
+        var snapshot = await _resolver.GetSnapshotAsync(userId, ct);
+
+        // One tree lookup for the whole answer, not one per permission. Everything after it is the
+        // pure evaluator, which is where the rules live.
+        return scope.Scope switch
+        {
+            RoleScope.Organization =>
+                AccessEvaluator.PermissionsAtOrganization(snapshot, scope.Id),
+
+            RoleScope.Team =>
+                AccessEvaluator.PermissionsAtTeam(
+                    snapshot, scope.Id, await _resolver.GetTeamOrganizationIdAsync(scope.Id, ct)),
+
+            RoleScope.Project =>
+                AccessEvaluator.PermissionsAtProject(
+                    snapshot, scope.Id, await _resolver.GetProjectLocationAsync(scope.Id, ct)),
+
+            _ => []
+        };
+    }
+
     public async Task<Guid?> TransferTeamPositionAsync(
         Guid teamId,
         RoleType position,

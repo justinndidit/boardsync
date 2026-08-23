@@ -41,6 +41,7 @@ public record ProjectResponse(
     bool IsActive,
     Guid AssignedTeamId,
     string AssignedTeamName,
+    bool AllowSelfCertification,
     DateTime CreatedAt
 );
 

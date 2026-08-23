@@ -34,6 +34,16 @@ public class OutboxDispatcher : BackgroundService
     /// <summary>Postgres NOTIFY channel used to wake the dispatcher the moment a message is queued.</summary>
     public const string NotifyChannel = "boardsync_outbox";
 
+    /// <summary>
+    /// Raised by the NOTIFY listener, awaited by the dispatch loop.
+    /// </summary>
+    /// <remarks>
+    /// Bounded at one, so a burst of notifications collapses into a single wake rather than queueing
+    /// one pass per message. That is the behaviour you want: the loop already drains until a batch
+    /// comes back short, so one wake covers everything the burst enqueued.
+    /// </remarks>
+    private readonly SemaphoreSlim _workAvailable = new(0, 1);
+
     public OutboxDispatcher(
         IServiceScopeFactory scopeFactory,
         NpgsqlDataSource dataSource,
@@ -216,14 +226,55 @@ public class OutboxDispatcher : BackgroundService
             as IDomainEvent;
     }
 
+    public override void Dispose()
+    {
+        _workAvailable.Dispose();
+        base.Dispose();
+        GC.SuppressFinalize(this);
+    }
+
     /// <summary>
-    /// Sleeps until the poll interval elapses or a NOTIFY arrives, whichever is first.
+    /// Wakes the dispatch loop, if it is waiting.
     /// </summary>
+    /// <remarks>
+    /// Releasing a full semaphore throws, and here that simply means "a wake is already pending",
+    /// which is not a problem worth propagating out of an event handler running on the Npgsql
+    /// connection thread.
+    /// </remarks>
+    private void SignalWorkAvailable()
+    {
+        try
+        {
+            _workAvailable.Release();
+        }
+        catch (SemaphoreFullException)
+        {
+            // A wake is already pending; one is enough.
+        }
+    }
+
+    /// <summary>
+    /// Waits until a NOTIFY arrives or the poll interval elapses, whichever is first.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This used to be an unconditional <c>Task.Delay</c>, while the listener below merely wrote a
+    /// trace line. The whole NOTIFY path was therefore decorative: the trigger fired, the listener
+    /// received it, and nothing woke. Delivery latency was a uniform 0–5s rather than the
+    /// milliseconds claimed here, in <c>OutboxSettings</c> and in the README — and every downstream
+    /// feature inherited it, the activity feed, live board updates and the notification bell alike.
+    /// </para>
+    /// <para>
+    /// The timeout stays. It is the safety net the documentation always described: if the listener
+    /// connection drops, or a NOTIFY is lost between the trigger firing and the listener
+    /// reconnecting, the queue still drains within one interval.
+    /// </para>
+    /// </remarks>
     private async Task WaitForWorkAsync(CancellationToken ct)
     {
         try
         {
-            await Task.Delay(TimeSpan.FromSeconds(_settings.PollIntervalSeconds), ct);
+            await _workAvailable.WaitAsync(TimeSpan.FromSeconds(_settings.PollIntervalSeconds), ct);
         }
         catch (OperationCanceledException)
         {
@@ -243,7 +294,7 @@ public class OutboxDispatcher : BackgroundService
             {
                 await using var connection = await _dataSource.OpenConnectionAsync(ct);
 
-                connection.Notification += (_, _) => _logger.LogTrace("Outbox notification received.");
+                connection.Notification += (_, _) => SignalWorkAvailable();
 
                 await using (var cmd = new NpgsqlCommand($"LISTEN {NotifyChannel};", connection))
                     await cmd.ExecuteNonQueryAsync(ct);

@@ -148,6 +148,179 @@ namespace BoardSync.Api.Shared.Data.Migrations
                     b.ToTable("BacklogItems", "plan");
                 });
 
+            modelBuilder.Entity("BoardSync.Api.Modules.GitSync.Models.GitProviderInstallation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AccountName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("EndpointToken")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("ExternalId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Verification")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<string>("WebhookSecret")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Provider", "EndpointToken")
+                        .IsUnique();
+
+                    b.HasIndex("OrganizationId", "Provider", "ExternalId")
+                        .IsUnique();
+
+                    b.ToTable("Installations", "git");
+                });
+
+            modelBuilder.Entity("BoardSync.Api.Modules.GitSync.Models.RepositoryLink", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("DefaultBranch")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<Guid>("InstallationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("RepositoryExternalId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("RepositoryName")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("character varying(400)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId");
+
+                    b.HasIndex("InstallationId", "RepositoryExternalId");
+
+                    b.HasIndex("InstallationId", "RepositoryExternalId", "ProjectId")
+                        .IsUnique();
+
+                    b.ToTable("RepositoryLinks", "git");
+                });
+
+            modelBuilder.Entity("BoardSync.Api.Modules.GitSync.Models.WebhookDelivery", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("EventName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<Guid>("InstallationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Outcome")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<DateTime?>("ProcessedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<string>("ProviderDeliveryId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Verification")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("InstallationId", "CreatedAt");
+
+                    b.HasIndex("Provider", "ProviderDeliveryId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_WebhookDeliveries_Provider_ProviderDeliveryId");
+
+                    b.ToTable("WebhookDeliveries", "git");
+                });
+
             modelBuilder.Entity("BoardSync.Api.Modules.OrgProject.Domain.Models.Organization", b =>
                 {
                     b.Property<Guid>("Id")
@@ -234,6 +407,9 @@ namespace BoardSync.Api.Shared.Data.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
+
+                    b.Property<bool>("AllowSelfCertification")
+                        .HasColumnType("boolean");
 
                     b.Property<Guid>("AssignedTeamId")
                         .HasColumnType("uuid");
@@ -1017,6 +1193,89 @@ namespace BoardSync.Api.Shared.Data.Migrations
                     NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("Topics"), "gin");
 
                     b.ToTable("OutboxMessages", "kernel");
+                });
+
+            modelBuilder.Entity("BoardSync.Api.Shared.Kernel.Jobs.Job", b =>
+                {
+                    b.Property<long>("Sequence")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Sequence"));
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DeadAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("JobId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("JobType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTime?>("LeaseExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LeasedBy")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<int>("Priority")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("VisibleAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Sequence");
+
+                    b.HasIndex("JobId")
+                        .IsUnique();
+
+                    b.HasIndex("Priority", "Sequence")
+                        .HasDatabaseName("IX_Jobs_Runnable")
+                        .HasFilter("\"CompletedAt\" IS NULL AND \"DeadAt\" IS NULL");
+
+                    b.ToTable("Jobs", "kernel");
+                });
+
+            modelBuilder.Entity("BoardSync.Api.Modules.GitSync.Models.RepositoryLink", b =>
+                {
+                    b.HasOne("BoardSync.Api.Modules.GitSync.Models.GitProviderInstallation", "Installation")
+                        .WithMany()
+                        .HasForeignKey("InstallationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Installation");
+                });
+
+            modelBuilder.Entity("BoardSync.Api.Modules.GitSync.Models.WebhookDelivery", b =>
+                {
+                    b.HasOne("BoardSync.Api.Modules.GitSync.Models.GitProviderInstallation", "Installation")
+                        .WithMany()
+                        .HasForeignKey("InstallationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Installation");
                 });
 
             modelBuilder.Entity("BoardSync.Api.Modules.OrgProject.Domain.Models.OrganizationMembership", b =>

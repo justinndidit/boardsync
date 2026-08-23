@@ -41,7 +41,9 @@ public class NotificationsController : ControllerBase
     [HttpGet("api/notifications")]
     [HttpGet("api/workspace/notifications")]
     [NoPermissionRequired(
-        "Returns only the caller\u0027s own notifications.")]
+        "The feed spans every project, so there is no single scope to gate on. Scoped in " +
+        "NotificationService by IRbacService.GetProjectVisibilityAsync to projects the caller holds " +
+        "workitem:read on.")]
     [ProducesResponseType(typeof(ApiResponse<IReadOnlyList<NotificationResponse>>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetMyNotifications(
         [FromQuery] int limit = NotificationDefaults.DefaultLimit,

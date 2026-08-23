@@ -267,7 +267,13 @@ public class BoardService : IBoardService
             activeSprint, columns, board.CreatedAt);
     }
 
-    /// <summary>Creates a board with the four default columns mapped to WorkItemState values.</summary>
+    /// <summary>Creates a board with a default column per WorkItemState.</summary>
+    /// <remarks>
+    /// "In Review" used to map to <c>Resolved</c>, which conflated "a pull request is open" with
+    /// "merged and waiting to be tested". Those are different places for work to sit and different
+    /// people are waiting on them, so they are now separate lanes — and the QA lane is named for what
+    /// it is waiting on rather than for the enum value behind it.
+    /// </remarks>
     private static Board BuildDefaultBoard(Guid projectId, Guid createdBy) => new()
     {
         ProjectId = projectId,
@@ -277,8 +283,9 @@ public class BoardService : IBoardService
         {
             new() { Name = "To Do",       MappedState = "New",      Position = 0, CreatedBy = createdBy },
             new() { Name = "In Progress", MappedState = "Active",   Position = 1, CreatedBy = createdBy },
-            new() { Name = "In Review",   MappedState = "Resolved", Position = 2, CreatedBy = createdBy },
-            new() { Name = "Done",        MappedState = "Closed",   Position = 3, CreatedBy = createdBy }
+            new() { Name = "In Review",   MappedState = "InReview", Position = 2, CreatedBy = createdBy },
+            new() { Name = "Awaiting QA", MappedState = "Resolved", Position = 3, CreatedBy = createdBy },
+            new() { Name = "Done",        MappedState = "Closed",   Position = 4, CreatedBy = createdBy }
         }
     };
 

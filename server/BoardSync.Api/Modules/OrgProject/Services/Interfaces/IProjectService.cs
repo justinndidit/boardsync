@@ -11,6 +11,15 @@ public interface IProjectService
     /// Whether an active project exists. Exposed so other modules can validate a project
     /// reference without querying the OrgProject module's tables directly.
     /// </summary>
+    /// <summary>
+    /// Whether this project lets someone certify work assigned to them.
+    /// </summary>
+    /// <remarks>
+    /// A missing project answers false — the safe reading, and the caller will fail on the item's
+    /// own lookup anyway.
+    /// </remarks>
+    Task<bool> AllowsSelfCertificationAsync(Guid projectId, CancellationToken ct = default);
+
     Task<bool> ExistsAsync(Guid projectId, CancellationToken ct = default);
 
     Task<PagedResult<ProjectSummaryResponse>> GetForOrgAsync(Guid orgId, PaginationQuery pagination, CancellationToken ct = default);

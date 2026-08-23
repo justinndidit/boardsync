@@ -32,8 +32,14 @@ using BoardSync.Api.Shared.Auth.Handlers;
 using BoardSync.Api.Shared.Auth.Repositories;
 using BoardSync.Api.Shared.Auth.Services;
 using BoardSync.Api.Shared.Auth.Services.Implementations;
+using BoardSync.Api.Shared.Kernel;
 using BoardSync.Api.Shared.Kernel.Configuration;
+using BoardSync.Api.Modules.GitSync.Controllers;
+using BoardSync.Api.Modules.GitSync.Ingest;
+using BoardSync.Api.Modules.GitSync.Providers;
+using BoardSync.Api.Modules.GitSync.Repositories;
 using BoardSync.Api.Shared.Kernel.Events;
+using BoardSync.Api.Shared.Kernel.Jobs;
 using BoardSync.Api.Shared.Kernel.RateLimiting;
 using StackExchange.Redis;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -77,6 +83,9 @@ builder.Services.AddControllers(options =>
         // Serialize all enums as their string names (e.g. "OrgAdmin" not 10).
         // This keeps role values consistent across every endpoint.
         options.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+
+        // Lets a PATCH body tell "field omitted" from "field set to null" — see Shared/Kernel/Patch.cs.
+        options.JsonSerializerOptions.Converters.Add(new PatchConverterFactory());
     });
 builder.Services.AddProblemDetails();
 builder.Services.AddHealthChecks();
@@ -248,6 +257,22 @@ builder.Services.AddScoped<IBoardRepository, BoardRepository>();
 builder.Services.AddScoped<ISprintService, SprintService>();
 builder.Services.AddScoped<IAuthHelpers, AuthHelpers>();
 builder.Services.AddScoped<IBoardService, BoardService>();
+
+// Shared Kernel — Job queue
+// Long-running work: webhook processing, git backfills, and later the AI jobs. Deliberately a
+// second lane rather than more outbox traffic — see Shared/Kernel/Jobs/Job.cs.
+builder.Services.Configure<JobSettings>(builder.Configuration.GetSection("Jobs"));
+builder.Services.AddScoped<IJobQueue, JobQueue>();
+builder.Services.AddHostedService<JobWorker>();
+
+// GitSync Module
+// The webhook endpoint is anonymous by necessity — a delivery carries no user — so authenticity
+// rests entirely on the provider's signature and the installation's endpoint token.
+builder.Services.AddScoped<IGitRepository, GitRepository>();
+builder.Services.AddScoped<IGitProvider, GitHubProvider>();
+builder.Services.AddScoped<IGitProviderRegistry, GitProviderRegistry>();
+builder.Services.AddScoped<IWebhookIngestService, WebhookIngestService>();
+builder.Services.AddScoped<IJobHandler<ProcessGitDelivery>, ProcessGitDeliveryHandler>();
 
 // Activity Module — subscribes to the other modules' domain events
 builder.Services.AddActivityModule();
@@ -688,3 +713,14 @@ static void ValidateSecuritySettings(SecuritySettings securitySettings, IWebHost
         throw new InvalidOperationException(errorMessage);
     }
 }
+
+/// <summary>
+/// Exposes the implicit entry-point class that top-level statements generate.
+/// </summary>
+/// <remarks>
+/// <c>WebApplicationFactory&lt;TEntryPoint&gt;</c> needs a reachable type from this assembly to boot
+/// the real pipeline. Without this declaration the generated <c>Program</c> is internal and the
+/// integration tests cannot name it — the alternative, <c>InternalsVisibleTo</c>, opens the whole
+/// assembly to make one type visible.
+/// </remarks>
+public partial class Program;

@@ -37,7 +37,9 @@ public class SearchController : ControllerBase
     /// <returns>Matched hits grouped by resource type, up to 10 results per category.</returns>
     [HttpGet]
     [NoPermissionRequired(
-        "Results are scoped inside the query to the organizations the caller belongs to, so there is no single scope to gate on.")]
+        "Search spans every scope, so there is no single one to gate on. Scoped in SearchService by " +
+        "IRbacService.GetVisibleOrganizationIdsAsync and .GetProjectVisibilityAsync — each category " +
+        "is filtered by the permission that category's own endpoint requires.")]
     [ProducesResponseType(typeof(ApiResponse<GlobalSearchResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> Search([FromQuery] string q, CancellationToken ct)

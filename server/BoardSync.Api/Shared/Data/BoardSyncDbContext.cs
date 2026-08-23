@@ -5,7 +5,10 @@ using BoardSync.Api.Modules.Rbac.Models;
 using BoardSync.Api.Modules.Sprints.Models;
 using BoardSync.Api.Modules.WorkItems.Models;
 using BoardSync.Api.Shared.Auth.Models;
+using BoardSync.Api.Modules.GitSync.Ingest;
+using BoardSync.Api.Modules.GitSync.Models;
 using BoardSync.Api.Shared.Kernel.Events;
+using BoardSync.Api.Shared.Kernel.Jobs;
 using Microsoft.EntityFrameworkCore;
 
 namespace BoardSync.Api.Data;
@@ -49,8 +52,14 @@ public class BoardSyncDbContext : DbContext
     // ---- Activity module ----
     public DbSet<ActivityLog> ActivityLogs { get; set; } = null!;
 
+    // ---- GitSync module ----
+    public DbSet<GitProviderInstallation> GitProviderInstallations { get; set; } = null!;
+    public DbSet<RepositoryLink> RepositoryLinks { get; set; } = null!;
+    public DbSet<WebhookDelivery> WebhookDeliveries { get; set; } = null!;
+
     // ── Shared kernel ─────────────────────────────────────────────────────────
     public DbSet<OutboxMessage> OutboxMessages { get; set; } = null!;
+    public DbSet<Job> Jobs { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -562,5 +571,104 @@ public class BoardSyncDbContext : DbContext
             entity.Property(m => m.LastError).HasMaxLength(2000);
         });
 
+        // ----------------------------------------------------------------
+        // Jobs — long-running work. See Shared/Kernel/Jobs/Job.cs for why this is
+        // separate from the outbox.
+        // ----------------------------------------------------------------
+        modelBuilder.Entity<Job>(entity =>
+        {
+            entity.ToTable("Jobs", "kernel");
+            entity.HasKey(j => j.Sequence);
+            entity.Property(j => j.Sequence).ValueGeneratedOnAdd();
+
+            // The idempotency key. Enqueueing the same work twice is a no-op rather than a
+            // duplicate, which is what lets a webhook redelivery be accepted safely.
+            entity.HasIndex(j => j.JobId).IsUnique();
+
+            entity.Property(j => j.JobType).IsRequired().HasMaxLength(100);
+            entity.Property(j => j.Payload).IsRequired().HasColumnType("jsonb");
+            entity.Property(j => j.LeasedBy).HasMaxLength(200);
+            entity.Property(j => j.LastError).HasMaxLength(2000);
+
+            // Partial, and ordered exactly as the claim query orders: the worker only ever asks for
+            // outstanding rows, so once the table holds months of completed history a full index
+            // would be mostly dead weight.
+            entity.HasIndex(j => new { j.Priority, j.Sequence })
+                .HasFilter("\"CompletedAt\" IS NULL AND \"DeadAt\" IS NULL")
+                .HasDatabaseName("IX_Jobs_Runnable");
+        });
+
+        // ----------------------------------------------------------------
+        // GitSync module
+        // ----------------------------------------------------------------
+        modelBuilder.Entity<GitProviderInstallation>(entity =>
+        {
+            entity.ToTable("Installations", "git");
+            entity.HasKey(i => i.Id);
+
+            entity.Property(i => i.Provider).HasConversion<string>().HasMaxLength(30);
+            entity.Property(i => i.Verification).HasConversion<string>().HasMaxLength(30);
+            entity.Property(i => i.ExternalId).IsRequired().HasMaxLength(200);
+            entity.Property(i => i.AccountName).IsRequired().HasMaxLength(200);
+            entity.Property(i => i.WebhookSecret).IsRequired().HasMaxLength(200);
+            entity.Property(i => i.EndpointToken).IsRequired().HasMaxLength(100);
+
+            // How every inbound webhook finds its installation, so it must be an index lookup
+            // rather than a scan — and unique, because two installations sharing a token would make
+            // the answer ambiguous.
+            entity.HasIndex(i => new { i.Provider, i.EndpointToken }).IsUnique();
+
+            // One connection per account per provider per organization.
+            entity.HasIndex(i => new { i.OrganizationId, i.Provider, i.ExternalId }).IsUnique();
+        });
+
+        modelBuilder.Entity<RepositoryLink>(entity =>
+        {
+            entity.ToTable("RepositoryLinks", "git");
+            entity.HasKey(l => l.Id);
+
+            entity.Property(l => l.RepositoryExternalId).IsRequired().HasMaxLength(200);
+            entity.Property(l => l.RepositoryName).IsRequired().HasMaxLength(400);
+            entity.Property(l => l.DefaultBranch).IsRequired().HasMaxLength(200);
+
+            // The lookup every delivery makes: which projects does this repository feed?
+            entity.HasIndex(l => new { l.InstallationId, l.RepositoryExternalId });
+            entity.HasIndex(l => l.ProjectId);
+
+            // A repository may serve several projects (monorepos), but not the same one twice.
+            entity.HasIndex(l => new { l.InstallationId, l.RepositoryExternalId, l.ProjectId })
+                .IsUnique();
+
+            entity.HasOne(l => l.Installation)
+                .WithMany()
+                .HasForeignKey(l => l.InstallationId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<WebhookDelivery>(entity =>
+        {
+            entity.ToTable("WebhookDeliveries", "git");
+            entity.HasKey(d => d.Id);
+
+            entity.Property(d => d.Provider).HasConversion<string>().HasMaxLength(30);
+            entity.Property(d => d.Verification).HasConversion<string>().HasMaxLength(30);
+            entity.Property(d => d.ProviderDeliveryId).IsRequired().HasMaxLength(200);
+            entity.Property(d => d.EventName).IsRequired().HasMaxLength(100);
+            entity.Property(d => d.Payload).IsRequired().HasColumnType("jsonb");
+            entity.Property(d => d.Outcome).HasMaxLength(2000);
+
+            // The idempotency key for ingest. A provider redelivering reuses its original id, so
+            // this is what makes accepting a redelivery a no-op instead of duplicate work.
+            entity.HasIndex(d => new { d.Provider, d.ProviderDeliveryId })
+                .IsUnique()
+                .HasDatabaseName(GitSchema.DeliveryUniqueIndex);
+
+            entity.HasIndex(d => new { d.InstallationId, d.CreatedAt });
+
+            entity.HasOne(d => d.Installation)
+                .WithMany()
+                .HasForeignKey(d => d.InstallationId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
     }
 }

@@ -1,405 +1,968 @@
-# Task Board Platform: Complete Documentation
+# BoardSync — Build Context
 
-This document consolidates the Product Requirements Document (PRD) and the Phased Delivery Plan for the Task Board Platform, an Azure DevOps Boards clone built using a Modular Monolith architecture.
+**Replaces the previous `build_context.md`**, which described a generic Azure DevOps Boards clone on
+an undecided stack and a seven-phase plan whose first five phases are already shipped in .NET. It
+described a product BoardSync is no longer trying to be.
 
----
-
-## PART 1: Product Requirements Document (PRD)
-
-### 1. Overview
-
-#### 1.1 Problem Statement
-Teams need a self-hosted or lightweight alternative to Azure DevOps Boards for tracking work items, organizing them into sprints, and visualizing progress on a Kanban-style board. This product recreates the core "Boards" experience: work item tracking, backlogs, sprints/iterations, and Kanban boards.
-
-#### 1.2 Goals
-* **Kanban Board:** Provide a Kanban board for visualizing work item state (To Do / In Progress / Done, customizable columns).
-* **Agile Sprint Planning:** Support iterations, sprint backlog, and capacity planning.
-* **Work Item Hierarchy:** Support a complete work item hierarchy (Epic → Feature → User Story/PBI → Task → Bug).
-* **Multi-Tenancy Structure:** Support multiple projects/teams within an organization.
-* **Architecture:** Be built as a modular monolith—one deployable unit, internally separated into well-bounded modules with clear interfaces, so modules could later be extracted into services if needed.
-
-#### 1.3 Non-Goals
-The following features are explicitly out of scope for this PRD:
-* Source control (Repos)
-* CI/CD (Pipelines)
-* Wiki
-* Test case management
-* Third-party marketplace/extensions
-
-#### 1.4 Target Users
-* Software teams practicing Scrum/Kanban
-* Scrum Masters / Project Managers doing sprint planning
-* Engineers updating task status daily
-* Stakeholders viewing progress/reports
+Companion documents:
+[`docs/audit-2026-08.md`](docs/audit-2026-08.md) (defect register) ·
+[`docs/permissions-model.md`](docs/permissions-model.md) (authoritative permission design) ·
+[`docs/scaling-realtime-caching.md`](docs/scaling-realtime-caching.md) (outbox, realtime, caching) ·
+`README.md` (operations)
 
 ---
 
-### 2. Architecture Approach: Modular Monolith
+## 1 · What BoardSync is
 
-The system is designed as a single deployable application (single codebase, single build, single DB optionally schema-per-module) organized into independent modules.
+A task management system for software teams running Agile that **keeps itself up to date from the
+work developers are already doing.**
 
-Each module possesses:
-* Its own domain models/entities
-* Its own service layer (business logic)
-* Its own data access layer (repository pattern), ideally its own schema/tables namespaced by module
-* A public interface (module API) that other modules call (no reaching into another module's internal tables directly)
-* Its own set of REST endpoints/controllers
+Every other board in this category has the same failure mode: the board is a second system of record
+that a human has to remember to update. Standup becomes "let me drag my cards," reports describe what
+people remembered to record rather than what happened, and management's view of the project is a
+lagging, optimistic fiction. Teams do not abandon these tools because the tools are bad — they
+abandon them because keeping them honest is unpaid work.
 
-Cross-module communication happens through in-process module interfaces (function calls / internal event bus), not HTTP, to keep it a true monolith. An internal event bus (in-process, e.g., pub/sub pattern) is recommended so modules like Notifications or Reporting can react to events (e.g., `WorkItemStateChanged`) without tight coupling.
+BoardSync's answer: **git is the source of truth about what is being built, so the board is derived
+from git.** A developer branches, commits, opens a PR, and merges. Each of those is a webhook. Each
+webhook moves the card. Nobody drags anything.
 
-#### 2.1 Suggested Tech Stack
-* **Backend:** Node.js (NestJS, which naturally supports modular architecture via its Module system), Java/Spring Boot (Spring Modulith), or .NET (Clean Architecture + Areas)
-* **Frontend:** React + TypeScript, with drag-and-drop powered by libraries like `@hello-pangea/dnd` (formerly `react-beautiful-dnd`)
-* **Database:** PostgreSQL (schemas per module: `iam.`, `workitem.`, `sprint.`, etc.)
-* **Cache/Queue (in-process friendly):** In-memory event emitter for MVP; Redis pub/sub if scaling later
-* **Auth:** JWT-based session, with RBAC middleware
+Three things follow, and they are the product:
 
----
+1. **Git-driven board state.** Push, PR, and merge events bind to work items and advance them
+   through the workflow. The developer's only obligation is a branch name.
+2. **A QA gate that git cannot cross.** Automation moves work up to *merged and awaiting test*.
+   Only a human with testing authority certifies it Done. This is not a policy check bolted on top —
+   it is enforced by the permission system, because the git integration is a principal that
+   structurally lacks the permission to close anything. See §4.
+3. **Intelligence over a board that is actually true.** A PRD becomes a proposed sprint plan; a
+   sprint becomes a report. Both are only worth building because (1) and (2) make the underlying
+   data trustworthy. A report generator over a board nobody updates is a confident lie generator.
 
-### 3. Module Breakdown
+### Non-goals
 
-Each module below represents a bounded context with its own entities, services, and API surface.
-
-#### 3.1 Identity & Access Management (IAM / Auth)
-* **Purpose:** User authentication, session management, and account lifecycle.
-* **Responsibilities:**
-  * User registration/login (email+password; SSO optional/future)
-  * Session/JWT issuance and refresh
-  * Password reset
-  * User profile (name, avatar, email)
-* **Key Entities:** `User`, `Session`, `PasswordResetToken`
-* **Core APIs:**
-  * `POST /auth/register`
-  * `POST /auth/login`
-  * `POST /auth/refresh`
-  * `POST /auth/logout`
-  * `GET /users/me`
-  * `PATCH /users/me`
-* **Events Emitted:** `UserRegistered`, `UserLoggedIn`
-* **Dependencies:** None (foundational module)
-
-#### 3.2 Organization & Project Management
-* **Purpose:** Multi-tenancy structure where Organizations contain Projects, which contain Teams.
-* **Responsibilities:**
-  * Create/manage Organizations
-  * Create/manage Projects within an Organization
-  * Create/manage Teams within a Project
-  * Add/remove members to Org/Project/Team
-  * Project-level settings (e.g., default area path, working days)
-* **Key Entities:** `Organization`, `Project`, `Team`, `TeamMembership`, `OrganizationMembership`
-* **Core APIs:**
-  * `POST /orgs`, `GET /orgs/:id`
-  * `POST /orgs/:id/projects`, `GET /projects/:id`
-  * `POST /projects/:id/teams`
-  * `POST /teams/:id/members`
-* **Events Emitted:** `ProjectCreated`, `TeamCreated`, `MemberAddedToTeam`
-* **Dependencies:** IAM (for user references)
-
-#### 3.3 Work Item Management
-* **Purpose:** The core CRUD and lifecycle engine for all trackable work (the heart of the system).
-* **Responsibilities:**
-  * Define work item types: Epic, Feature, User Story/PBI, Task, Bug
-  * CRUD operations for work items (title, description, state, assignee, tags, priority, story points/effort)
-  * Parent-child linking (hierarchy: Epic → Feature → Story → Task)
-  * Related-item linking (e.g., "blocks", "related to")
-  * State machine per work item type (e.g., New → Active → Resolved → Closed), configurable per project
-  * Comments/discussion thread on a work item
-  * Attachments on work items
-  * History/audit trail of field changes
-* **Key Entities:** `WorkItem`, `WorkItemType`, `WorkItemState`, `WorkItemLink`, `WorkItemComment`, `WorkItemHistory`, `Tag`
-* **Core APIs:**
-  * `POST /workitems`, `GET /workitems/:id`, `PATCH /workitems/:id`
-  * `POST /workitems/:id/links`
-  * `POST /workitems/:id/comments`
-  * `GET /workitems/:id/history`
-* **Events Emitted:** `WorkItemCreated`, `WorkItemStateChanged`, `WorkItemAssigned`, `WorkItemUpdated`
-* **Dependencies:** Org & Project (work items belong to a project), IAM (assignee reference)
-
-#### 3.4 Backlog Management
-* **Purpose:** Prioritized, ordered lists of work items not yet committed to a sprint.
-* **Responsibilities:**
-  * Product Backlog view (all unscheduled Stories/PBIs, ranked)
-  * Manual drag-to-reorder (backlog priority/rank)
-  * Bulk move items into a sprint (sprint planning action)
-  * Filtering backlog by area path, tag, assigned team
-* **Key Entities:** `BacklogItemOrder` (tracks rank per project/team; uses `WorkItem` from the Work Item module)
-* **Core APIs:**
-  * `GET /projects/:id/backlog`
-  * `PATCH /backlog/reorder`
-  * `POST /backlog/move-to-sprint`
-* **Dependencies:** Work Item Management, Sprint/Iteration Management, Org & Project
-
-#### 3.5 Sprint / Iteration Management
-* **Purpose:** Time-boxed iterations for Agile planning.
-* **Responsibilities:**
-  * Create/manage Iterations (Sprints) with start/end dates, per Team
-  * Assign work items to a specific sprint
-  * Team capacity planning (per-person hours/days available per sprint, accounting for days off)
-  * Sprint burndown data source (remaining work per day)
-  * Close out a sprint (move incomplete items to next sprint/backlog)
-* **Key Entities:** `Iteration`, `IterationCapacity`, `TeamMemberCapacity`, `SprintWorkItemAssignment`
-* **Core APIs:**
-  * `POST /teams/:id/iterations`
-  * `GET /iterations/:id`
-  * `POST /iterations/:id/capacity`
-  * `GET /iterations/:id/burndown`
-  * `POST /iterations/:id/close`
-* **Events Emitted:** `IterationCreated`, `IterationClosed`, `WorkItemMovedToSprint`
-* **Dependencies:** Org & Project, Work Item Management
-
-#### 3.6 Board (Kanban)
-* **Purpose:** Visual drag-and-drop board representing work item state within a sprint or backlog.
-* **Responsibilities:**
-  * Render columns mapped to work item states (customizable columns per team, e.g., To Do / Doing / Review / Done)
-  * Support swimlanes (e.g., by priority, or "Expedite" lane)
-  * Drag-and-drop to change state (triggers `WorkItemStateChanged`)
-  * WIP (Work-In-Progress) limits per column
-  * Card customization (show assignee avatar, tags, story points)
-  * Board filters (by assignee, tag, work item type)
-  * Separate board views: Sprint Board (current iteration) and Backlog Board
-* **Key Entities:** `BoardColumn`, `BoardColumnStateMapping`, `Swimlane`, `BoardSettings` (per team)
-* **Core APIs:**
-  * `GET /teams/:id/board?iteration=iterationId`
-  * `PATCH /teams/:id/board/columns` (column/state transition configuration)
-  * `POST /workitems/:id/move`
-* **Dependencies:** Work Item Management, Sprint/Iteration Management, Org & Project
-
-#### 3.7 Search & Filter
-* **Purpose:** Cross-cutting search/query capability over work items.
-* **Responsibilities:**
-  * Full-text search on title/description
-  * Structured query (WIQL-like: filter by state, assignee, type, tag, iteration, date range)
-  * Saved queries/filters per user or shared per team
-* **Key Entities:** `SavedQuery`
-* **Core APIs:**
-  * `GET /search?q=...`
-  * `POST /queries` (save a filter)
-  * `GET /queries/:id/run`
-* **Dependencies:** Work Item Management (read-only queries into its data)
-
-#### 3.8 Notifications
-* **Purpose:** Keep users informed of relevant activity.
-* **Responsibilities:**
-  * In-app notifications (assigned to you, mentioned in comment, state changed on watched item)
-  * Notification preferences per user
-  * (Optional/Future) Email digest
-* **Key Entities:** `Notification`, `NotificationPreference`, `Watcher` (user watching a work item)
-* **Core APIs:**
-  * `GET /notifications`
-  * `PATCH /notifications/:id/read`
-  * `POST /workitems/:id/watch`
-* **Dependencies:** Listens to events from Work Item Management and Sprint modules via the event bus (no direct database writes or cross-module tight coupling).
-
-#### 3.9 Reporting & Analytics
-* **Purpose:** Dashboards and charts summarizing team progress.
-* **Responsibilities:**
-  * Sprint burndown chart
-  * Velocity chart (story points completed per sprint, historical)
-  * Cumulative flow diagram (CFD)
-  * Basic project dashboard (item counts by state/type)
-* **Key Entities:** Read-model/aggregation tables, e.g., `SprintSnapshot` (daily snapshot of remaining work, built by a scheduled job listening to events)
-* **Core APIs:**
-  * `GET /projects/:id/dashboard`
-  * `GET /teams/:id/velocity`
-  * `GET /iterations/:id/burndown-chart`
-  * `GET /teams/:id/cfd`
-* **Dependencies:** Consumes events from Work Item Management and Sprint modules (event-sourced read models); does not write to their tables.
-
-#### 3.10 RBAC / Permissions
-* **Purpose:** Cross-cutting authorization determining who can do what and where.
-* **Responsibilities:**
-  * Define Roles: Org Admin, Project Admin, Team Member, Reader (Stakeholder read-only)
-  * Permission checks: e.g., only Project Admin can change board column config; only assignee/admin can close a work item
-  * Middleware/guard used by every module's controllers
-* **Key Entities:** `Role`, `Permission`, `RoleAssignment` (scoped to Org, Project, or Team)
-* **Core APIs:**
-  * `POST /projects/:id/roles`
-  * `GET /users/:id/permissions?scope=project:123`
-* **Dependencies:** IAM, Org & Project. Used as a shared library/guard by every other module. It is effectively part of the Shared Kernel from an implementation standpoint, even though it has its own data model.
+Source control hosting, CI/CD, wiki, test case management, a marketplace. BoardSync **integrates
+with** git hosts; it does not become one. The moment it stores code it inherits their problems and
+loses its only advantage, which is that it is cheap to adopt alongside what a team already uses.
 
 ---
 
-### 4. Shared Kernel (Cross-Module Common Code)
+## 2 · Where the system actually stands
 
-The Shared Kernel is not a "module" with unique business logic, but rather shared utility code that every module depends on:
-* Base entity classes (including common fields like `id`, `createdAt`, `updatedAt`, `createdBy`)
-* Standard API response/error envelopes
-* Validation utilities (DTO validation)
-* The in-process event bus abstraction (`publish(event)`, `subscribe(eventType, handler)`)
-* Pagination helpers
-* Logging/audit utilities
+The backend is substantially further along than the old build plan claimed, and the plan below starts
+from what exists rather than from a phase number.
 
----
+**Shipped and solid:**
 
-### 5. Data Model Relationships (High-Level)
+| Area | State |
+|---|---|
+| Modular monolith, .NET 10 + Postgres + EF Core | 212 files, 18.3k lines, clean build |
+| Auth | JWT + refresh, BCrypt, email confirmation, lockout, rate limiting with Redis-shared counters |
+| RBAC | Named permissions, scope tree, snapshot caching with generation-counter invalidation. The best-designed part of the system — see §6 |
+| Org / Team / Project | Full CRUD, memberships, team positions, slug uniqueness |
+| Work items | CRUD, hierarchy, comments, history, links, tags |
+| Sprints & boards | Project-scoped sprints, fractional-rank ordering, board columns, WIP limits |
+| Backlog | Ranked product backlog, move-to-sprint |
+| Kernel | Transactional outbox with `FOR UPDATE SKIP LOCKED`, multi-instance safe |
+| Realtime | SignalR + Redis backplane, per-subscription authorization, resume protocol, presence |
+| Observability | OpenTelemetry traces and metrics, no-op until an OTLP endpoint is set |
 
-* Organization `1 — *` Project `1 — *` Team `1 — *` TeamMembership `* — 1` User
-* Project `1 — *` WorkItemType (configuration)
-* Project `1 — *` WorkItem `* — 1` WorkItemType
-* WorkItem `* — *` WorkItem (via WorkItemLink: parent/child, related)
-* Team `1 — *` Iteration
-* Iteration `1 — *` WorkItem (assigned sprint)
-* Team `1 — *` BoardColumn
-* WorkItem `1 — *` WorkItemComment
-* WorkItem `1 — *` WorkItemHistory
-* User `1 — *` Notification
+**Missing entirely:**
 
----
+- **Git integration.** Not one line. `grep -i git` across the module tree returns only the word
+  "commit" in prose about sprint commitments.
+- **The frontend.** `boardsync-ui` is referenced by the Makefile, the production compose file, and
+  the README, and does not exist. `make prod-build` cannot succeed.
+- **AI.** No provider dependency, no module, no schema.
+- **Notifications, in the sense the name implies.** See audit finding 10.
 
-### 6. Non-Functional Requirements
+**Thirteen defects**, three of them S1, are catalogued in
+[`docs/audit-2026-08.md`](docs/audit-2026-08.md). Three matter enough to restate here because they
+gate everything below:
 
-| Category | Requirement |
-| :--- | :--- |
-| **Performance** | Board should load in `< 1s` for up to 500 work items per team view. Drag-and-drop state changes reflect in `< 500ms`. |
-| **Scalability** | Modular design should allow extraction of any module into a microservice later without rewriting business logic. |
-| **Availability** | Single monolith deploy; target 99.5% uptime for MVP. |
-| **Security** | RBAC enforced at the API layer on every mutating endpoint; passwords hashed using strong algorithms (bcrypt/argon2); JWT short-lived + refresh tokens. |
-| **Auditability** | All work item field changes must be logged in `WorkItemHistory`. |
-| **Data Integrity** | Foreign keys enforced at the DB level even across module schemas (since they share one physical DB instance). |
-| **Extensibility** | New work item types/states configurable per project without code changes (via a data-driven state machine). |
-| **Real-time** | Board updates reflect other users' changes without a full page reload (WebSocket or polling for MVP). |
-
----
-
-### 7. Success Metrics
-* A team can go from backlog prioritization to sprint planning, active board tracking, and sprint close entirely within the product.
-* Board drag-and-drop state changes reflect in `< 500ms`.
-* Burndown chart accurately reflects daily remaining work.
+- **Search and notifications leak work items across the permission boundary** — org membership is
+  treated as project access, which the permission model explicitly says it is not.
+- **Optimistic concurrency is fully plumbed and completely inert** — `SetOriginalVersion` exists and
+  is never called. Git sync makes concurrent writes routine rather than rare.
+- **Every internal constant is hardcoded on the frontend** because no endpoint publishes it. This is
+  §5, and it is the single highest-leverage fix in the document.
 
 ---
 
-### 8. Glossary
-* **PBI:** Product Backlog Item (also known as a User Story).
-* **Iteration/Sprint:** A fixed time-box (commonly 2 weeks) during which a team commits to completing a set of work items.
-* **WIP Limit:** Maximum number of items allowed in a board column at once.
-* **CFD:** Cumulative Flow Diagram, a chart showing work item counts per state over time.
+## 3 · Architecture: what to keep
+
+**Keep the modular monolith.** It is the right shape and the reasons are specific, not stylistic:
+
+- One deployable, one transaction boundary. The board update, the history row, and the outbox event
+  commit together or not at all. Split this across services and that atomicity becomes a saga.
+- The module seams are real. Each module owns its controllers, services, repositories, DTOs, and
+  models; nothing reaches into another module's tables; cross-module traffic goes through domain
+  events on the outbox. `IBacklogSprintLink` exists precisely so Backlog can talk to Sprints without
+  taking a dependency on it. That discipline is what makes extraction possible later — and what makes
+  it unnecessary now.
+- The scaling ceiling is nowhere near. Postgres with correct indexes, Redis for cache and backplane,
+  and N stateless API instances will carry this product well past the point where its business model
+  is proven.
+
+**Two new modules**, following the same rules as the existing ones:
+
+```
+Modules/
+  GitSync/          §7 — provider port, webhook ingest, binding, transitions
+  Intelligence/     §8 — PRD decomposition, report generation
+```
+
+**One new shared concern:**
+
+```
+Shared/Metadata/    §5 — the vocabulary endpoint that ends clientside hardcoding
+```
+
+**Schema-per-module continues:** `org`, `work`, `plan`, `iam`, `activity`, `kernel` → add `git` and
+`ai`.
 
 ---
 
-## PART 2: Phased Delivery Plan (Build Phases)
+## 4 · The QA gate
 
-### Phasing Philosophy
-This phased approach focuses on **incremental delivery**. Each phase produces a usable, demoable slice. Modules are built in strict dependency order (foundational modules first).
+*Decision: git may drive work as far as "merged, awaiting test." Only a human with testing authority
+certifies Done.*
 
-Because Work Item Management, Sprints, and Boards form the absolute core of "a task board with sprint planning," the phases are ordered to get a **Walking Skeleton** (`Auth` → `Project` → `Work Item` → `Board`) working as early as possible. Afterward, the plan layers in Sprints, Backlog planning tools, usability enhancements (Search, Notifications), and finally reporting capabilities.
+This reshapes both the state machine and the permission model, and it is the constraint that makes
+the automation trustworthy. Full autonomy is what makes these systems unusable — a board that closes
+tickets on merge is lying about anything that merged broken.
+
+### 4.1 The state machine
+
+Current (`WorkItemService.ValidateStateTransition`), with the hole from audit finding 3:
+
+```
+New → Active → Resolved → Closed
+       └──────────────────┘         Active → Closed skips review entirely
+```
+
+Replacement — five states, each one a state a git signal can identify:
+
+```
+                 ┌──────────────── reopened (verify) ─────────────────┐
+                 ↓                                                     │
+   New ──────► Active ──────► InReview ──────► Resolved ──────► Closed
+    ▲            ▲   ▲            │                │  │
+    │            │   └────────────┘                │  │
+    │            │      PR closed unmerged         │  │
+    │            └───────────────────────────────── ┘  │
+    │                   QA failed (verify)             │
+    └──────────────────────────────────────────────────┘
+                     reopened (verify)
+```
+
+| Transition | Trigger | Required permission |
+|---|---|---|
+| `New → Active` | first commit on a bound branch, or manual pickup | `workitem:write` |
+| `Active → InReview` | pull request opened | `workitem:write` |
+| `InReview → Active` | PR closed without merging, or changes requested | `workitem:write` |
+| `InReview → Resolved` | PR merged into the project's default branch | `workitem:write` |
+| `Active → Resolved` | manual — work needing no PR | `workitem:write` |
+| **`Resolved → Closed`** | **QA certifies** | **`workitem:verify`** |
+| **`Resolved → Active`** | **QA rejects** | **`workitem:verify`** |
+| **`Closed → Active`** | **reopen** | **`workitem:verify`** |
+
+`Active → Closed` is gone. Nothing reaches `Closed` except through `Resolved`, and nothing crosses
+that edge without `workitem:verify`.
+
+`Resolved` now means one specific thing — *merged, awaiting test* — rather than the vague "done-ish"
+it means today. Say so in the UI. The label matters more than the enum name.
+
+### 4.2 The `workitem:verify` permission
+
+```csharp
+/// <summary>
+/// Certify that finished work meets its acceptance criteria, or send it back.
+/// The only permission that reaches Closed.
+/// </summary>
+/// <remarks>
+/// Deliberately not part of workitem:write. Writing the code and declaring it correct are different
+/// authorities, and the whole value of the git integration rests on that separation: the integration
+/// principal holds write and never holds this, so no amount of automation can close anything.
+/// </remarks>
+public const string WorkItemVerify = "workitem:verify";
+```
+
+### 4.3 Who holds it
+
+A new role, `Tester`, valid at **team and project scope** — the second name held at two scopes, with
+the same justification `Viewer` already has: testing a team's work and testing one project's work are
+the same idea applied to different things.
+
+`Tester` is a plain grant, **not** a `TeamPosition`. Positions are singular appointments (one Scrum
+Master per team); a team can and should have several testers.
+
+| Role | Scope | `workitem:verify`? | Reasoning |
+|---|---|---|---|
+| `Tester` | Team, Project | **yes** | The role exists for this |
+| `TeamLead` | Team | **yes** | Higher authority in the team, as specified |
+| `ProductOwner` | Team | **yes** | In Scrum the PO accepts the increment. Acceptance *is* this permission |
+| `ProjectAdmin` | Project | **yes** | Administers the project; already holds `workitem:delete` |
+| `OrgAdmin` | Org | **yes** | Holds `Everything` by definition |
+| `ScrumMaster` | Team | **open — see §11** | Owns the process, not acceptance. Recommend **no** |
+| `Contributor`, `TeamMember` | | **no** | The point. A developer cannot certify their own work |
+| `Viewer` | | **no** | Read-only |
+
+`Tester` at team scope carries `ProjectContributor + workitem:verify` onto the team's projects
+through the existing `TeamToProject` edge — the same mechanism that gives Scrum Master and Product
+Owner sprint authority over their team's projects. No new inheritance machinery.
+
+### 4.4 Self-certification
+
+A `Tester` who is also the assignee can currently certify their own work, because the permission
+check does not know who wrote it.
+
+**Recommendation:** block it by default. Add `Project.AllowSelfCertification` (default `false`), and
+reject `Resolved → Closed` when `certifierId == item.AssigneeId` unless the caller holds
+`project:admin`. Record the certifier in `WorkItemHistory` either way — "who signed this off" must be
+answerable six months later, and it is the single most valuable field the audit trail can carry.
+
+The escape hatch matters for small teams. A three-person startup where everyone is a Tester should be
+able to switch it off knowingly, rather than route around it by granting everyone `ProjectAdmin`.
+
+### 4.5 What this costs
+
+- A migration adding `InReview` to `WorkItemState` and `Tester` to `RoleType` (both stored as names,
+  so additive), plus `Project.AllowSelfCertification`.
+- Board column seeding gains a Review column.
+- `RolePermissions` gains one permission and one role in three tables.
+- The frontend gains a state — which it will read from the metadata endpoint (§5) rather than
+  hardcode, which is the whole point of building §5 first.
 
 ---
 
-### Detailed Build Phases
+## 5 · Metadata and capability endpoints
 
-#### Phase 0: Foundation & Project Setup
-* **Goal:** Repo, architecture skeleton, and infrastructure readiness; no user-facing features yet.
-* **Scope:**
-  * Set up monorepo/single-repo structure with separate module folders (`/modules/iam`, `/modules/workitem`, etc.).
-  * Set up the Shared Kernel: base entity, error envelope, event bus abstraction, and logging.
-  * Database setup (PostgreSQL) incorporating a schema-per-module convention and migration tooling.
-  * CI basics: linter, test runner, and build pipeline.
-  * Base API scaffolding (NestJS modules or equivalent) featuring a `/health` check endpoint.
-  * Frontend scaffold (React + TS + routing) and the design system/component library baseline.
-* **Modules Touched:** Shared Kernel only.
-* **Exit Criteria:**
-  * `GET /health` returns 200.
-  * Empty frontend shell successfully deploys and loads.
-  * A "hello module" round-trip (frontend → API → DB → response) works end-to-end.
+*The flagged frontend problem, and the fix.*
 
-#### Phase 1: Identity, Organizations & Projects (Walking Skeleton)
-* **Goal:** Users can sign up, log in, and establish an Organization → Project → Team hierarchy.
-* **Scope:**
-  * **IAM Module:** User registration, login, JWT issuance, token refresh, and profile management.
-  * **Org & Project Module:** Operations to create Organizations, Projects, and Teams, alongside adding members.
-  * **RBAC Module (Basic):** Basic support for Org Admin / Project Admin / Member roles to gate "who can create a project."
-  * **Frontend:** Implementation of login/register pages, along with Organization/Project/Team creation and switcher UI elements.
-* **Modules Touched:** IAM, Org & Project, RBAC (basic).
-* **Exit Criteria:**
-  * A user can successfully register, log in, create an organization, create a project, create a team, and invite another user.
-  * Role-based access effectively blocks non-admin users from creating a project.
+Audit finding 4 catalogues eight vocabularies the client currently hardcodes. The priority case shows
+why it is structural rather than sloppy: `WorkItemPriority` is `Critical=1 … Low=4`, and the numbering
+is the ordering. Enums serialize as strings, so the client receives four unordered strings and has no
+choice but to hardcode the sort. That array is a second source of truth with no test and no migration
+behind it.
 
-#### Phase 2: Work Item Core
-* **Goal:** Work items exist and can be created, edited, and viewed via simple forms and lists (no visual board yet).
-* **Scope:**
-  * **Work Item Management Module:** Support for work item types (Epic/Feature/Story/Task/Bug), full CRUD operations, and a state field.
-  * **Fixed State Machine for MVP:** New → Active → Resolved → Closed.
-  * **Work Item Fields:** Assignee, tags, description, priority, and story points.
-  * **Hierarchy & Interaction:** Parent-child linking (Epic → Feature → Story → Task), comments on work items, and a history/audit trail.
-  * **Frontend:** Work item list view, item detail/edit panel, and a create-work-item form.
-* **Modules Touched:** Work Item Management.
-* **Exit Criteria:**
-  * A user can create a Story with a child Task, assign it, comment on it, and see the change properly reflected in the history.
-  * The work item list can be filtered by type and state (basic filter; not utilizing a full Search module yet).
+`RolePermissions.AssignableAt` already fixed exactly this problem *inside* the server, and its remarks
+say why: "two copies of which roles belong at project scope is one copy too many… a hand-maintained
+third list is the one that silently falls behind — as the organization list did." The frontend is
+currently that third list, eight times over.
 
-#### Phase 3: Kanban Board
-* **Goal:** Establish the core visual experience through a working drag-and-drop Kanban board.
-* **Scope:**
-  * **Board Module:** Default board columns mapped directly to work item states, interactive drag-and-drop mechanics to change state, per-team board configuration (adding, renaming, or removing columns), WIP limits, and basic swimlanes (Default + Expedite).
-  * **Card UI:** Visual layout displaying assignee avatar, tags, and story points badge.
-  * **Interactivity:** Board filtering (by assignee, tag, type) and real-time synchronization (polling or WebSockets) so changes instantly reflect in separate tabs.
-* **Modules Touched:** Board, Work Item Management (state transition triggers).
-* **Exit Criteria:**
-  * Dragging a card between columns seamlessly updates the underlying work item state.
-  * Exceeding a column's WIP limit visually flags the column.
-  * Two users viewing the same board see each other's live updates without a manual refresh.
+### 5.1 `GET /api/metadata`
 
-#### Phase 4: Sprints & Backlog (Sprint Planning Core)
-* **Goal:** Implement the defining "sprint planning" feature set that turns the platform into a true Agile management tool rather than just a basic Kanban board.
-* **Scope:**
-  * **Sprint/Iteration Module:** Create iterations with explicit start/end dates, assign work items to iterations, input per-person capacity, and close out sprints (moving incomplete items forward).
-  * **Backlog Module:** Product Backlog view displaying ranked, unscheduled items, drag-to-reorder ranking functionality, and a bulk "move to sprint" workflow.
-  * **Board Module Extensions:** Scoping the board view to a selected Iteration ("Sprint Board" view vs. general backlog board).
-  * **Frontend:** Dedicated Backlog and Sprint Planning pages, featuring drag-and-drop tools to pull items into a sprint and an active capacity visualization bar per person.
-* **Modules Touched:** Sprint/Iteration, Backlog, Board (extended), Work Item Management.
-* **Exit Criteria:**
-  * A Scrum Master can successfully plan a 2-week sprint (create iteration, set capacity, drag backlog items into the sprint).
-  * The Sprint Board displays only the work items belonging to the active iteration.
-  * Closing a sprint effectively shifts unfinished items back to the backlog or forward to the next sprint.
+Anonymous. `ETag` + `Cache-Control: public, max-age=300`. One round trip at app boot.
 
-#### Phase 5: Usability Layer (Search, Filtering & Notifications)
-* **Goal:** Enhance overall usability, enabling users to easily find specific information and stay informed.
-* **Scope:**
-  * **Search & Filter Module:** Full-text search engine, structured query builder, and saved queries capability.
-  * **Notifications Module:** In-app notifications triggering on assignments, mentions, or changes to watched items, combined with watch/unwatch configurations and notification preferences.
-* **Modules Touched:** Search & Filter, Notifications.
-* **Exit Criteria:**
-  * A user can save a structured query (e.g., "My Active Bugs") and re-run it accurately.
-  * A user receives an instantaneous in-app notification when assigned a work item.
+```jsonc
+{
+  "version": "2026-08-22.1",
 
-#### Phase 6: Reporting & Analytics
-* **Goal:** Provide detailed, aggregate visibility into a team's progress over time.
-* **Scope:**
-  * **Reporting Module:** Render sprint burndown charts, velocity charts tracking historical sprints, cumulative flow diagrams (CFD), and a main project dashboard summarizing counts by state/type.
-  * **Data Pipeline:** Daily background snapshot job listening to `WorkItemStateChanged` events to incrementally build reporting data.
-* **Modules Touched:** Reporting (consumes events from Work Item and Sprint modules).
-* **Exit Criteria:**
-  * The burndown chart accurately displays remaining work per day for an active sprint.
-  * The velocity chart displays completed story points across the last *N* sprints.
+  "roles": [
+    { "value": "OrgAdmin", "label": "Organization Admin", "scope": "Organization",
+      "order": 10, "assignable": true, "isPosition": false,
+      "description": "Administers the entire organization and everything inside it.",
+      "permissions": ["org:read", "org:admin", "..."] }
+  ],
 
-#### Phase 7: Hardening & Polish
-* **Goal:** Maximize quality, performance, and overall production readiness.
-* **Scope:**
-  * Full RBAC audit pass (introducing Reader/Stakeholder roles, team-scoped permissions, and field-level restrictions if necessary).
-  * Performance tuning to ensure board load times remain under target thresholds with large data volumes (500+ items).
-  * Accessibility (a11y) review on the board interface, ensuring robust keyboard alternatives to drag-and-drop actions.
-  * Robust error handling for edge cases such as concurrent edits, offline drag actions, and empty states.
-  * Basic attachment support on work items (if omitted from Phase 2).
-  * Formal load/performance testing and security reviews targeting authorization flows and RBAC bypass attempts.
-* **Modules Touched:** Cross-cutting across all modules (RBAC full, performance, security).
-* **Exit Criteria:**
-  * All modules successfully pass the complete integrated test suite.
-  * Performance targets from the PRD Non-Functional Requirements are met.
-  * Formal security review sign-off is achieved.
+  "permissions": [
+    { "value": "workitem:verify", "label": "Certify work", "group": "Work items",
+      "description": "Certify that finished work meets its acceptance criteria." }
+  ],
+
+  "workItemTypes": [
+    { "value": "UserStory", "label": "User Story", "order": 3,
+      "allowedChildren": ["Task", "Bug"] }
+  ],
+
+  "workItemStates": [
+    { "value": "Resolved", "label": "Awaiting QA", "order": 4, "category": "Review",
+      "transitionsTo": [
+        { "state": "Closed", "requiresPermission": "workitem:verify" },
+        { "state": "Active", "requiresPermission": "workitem:verify" }
+      ] }
+  ],
+
+  "priorities": [
+    { "value": "Critical", "label": "Critical", "order": 1, "colorToken": "danger" }
+  ],
+
+  "sprintStatuses":  [ { "value": "Active", "label": "Active", "order": 2 } ],
+  "workItemLinkTypes": [ { "value": "Blocks", "label": "Blocks", "inverse": "BlockedBy" } ],
+  "teamPositions":   [ { "value": "ScrumMaster", "label": "Scrum Master", "order": 2 } ]
+}
+```
+
+**The three fields that end the hardcoding:** `value` (the wire string), `label` (what a human reads),
+`order` (the sort key that the enum numbering carries and the string does not). Every vocabulary gets
+all three.
+
+**How it stays honest.** Project it from the same declarations the evaluator reads — `RolePermissions`
+for roles and their permission sets, `Enum.GetValues<T>()` plus the underlying numeric value for
+`order`, `ValidateStateTransition` for the transition graph, `ValidateHierarchy` for
+`allowedChildren`. Then a test in the style of `EndpointAuthorizationCoverageTests`: **every member of
+every published enum must appear in the document.** Adding an enum value without a label fails the
+build, which is the only mechanism that reliably prevents drift.
+
+Labels and descriptions are the one part that cannot be derived. Put them in a
+`[DisplayMetadata("User Story", Order = 3)]` attribute on the enum member, so the label lives beside
+the value it names and the test can assert its presence.
+
+### 5.2 `GET /api/me/capabilities?scope=project:{id}`
+
+Closes the gap `docs/permissions-frontend.md` §10 records.
+
+```jsonc
+{ "scope": "project:8f3e…", "permissions": ["project:read", "board:read", "workitem:write", "sprint:order"] }
+```
+
+Batch form for dashboards, so a project list is one call not N:
+
+```jsonc
+// POST /api/me/capabilities   { "scopes": ["project:8f3e…", "team:2a11…", "org:c4d…"] }
+{ "project:8f3e…": ["project:read", "..."], "team:2a11…": ["team:read"], "org:c4d…": ["org:read"] }
+```
+
+Thin — the access snapshot is already resolved and memoized per request; this enumerates
+`Permissions`' constants against `AccessEvaluator` for the named scopes. Cap the batch at ~50 scopes.
+
+Without it the client must reimplement `AccessEvaluator` in TypeScript: three inheritance routes, the
+team→project edge with its Scrum Master / Product Owner exception, and OrgAdmin's reach. That
+reimplementation drifts, and it drifts *permissive*, because a button that 403s gets reported and a
+button wrongly hidden does not.
+
+### 5.3 Generate the client, do not write it
+
+Swagger is already configured with XML comments. Add [NSwag](https://github.com/RicoSuter/NSwag) or
+`openapi-typescript` to CI, emit a typed TypeScript client into the frontend, and fail the build when
+the checked-in client differs from the generated one. Then a renamed field is a compile error rather
+than a runtime `undefined`.
+
+This is the structural fix. §5.1 and §5.2 remove the *need* to hardcode; generation removes the
+*ability* to.
 
 ---
 
-### Phase Summary Table
+## 6 · Role and permission design
 
-| Phase | Focus | Key Modules Touched |
-| :---: | :--- | :--- |
-| **0** | Foundation | Shared Kernel |
-| **1** | Identity & Structure | IAM, Org & Project, RBAC (basic) |
-| **2** | Work Items | Work Item Management |
-| **3** | Kanban Board | Board, Work Item Management |
-| **4** | Sprint Planning | Sprint/Iteration, Backlog, Board, Work Item Management |
-| **5** | Usability | Search & Filter, Notifications |
-| **6** | Insights | Reporting & Analytics |
-| **7** | Hardening | Cross-cutting (RBAC full, performance, security) |
+*Requested: a deep look. The verdict is that the model is right, and the work is extending it to
+principals that are not people.*
 
-> **Note:** Phases 0-4 represent the **true MVP**—a fully functioning task board featuring sprint planning workflow support. Phases 5-7 focus on enhancement and polish; these can be reprioritized or parallelized as needed once the core delivery loop (Backlog → Sprint Board → Done) is fully operational end-to-end.
+### 6.1 What is already correct
+
+The permission rebuild (`docs/permissions-model.md`, shipped across Stages 0–4) landed on a design
+worth defending:
+
+- **Named permissions, not a rank ladder.** The ladder could express "at least a TeamMember" and could
+  not express "may start a sprint" when the people who may — Scrum Master, Product Owner — are peers.
+  The numeric enum values are explicitly meaningless now, and `Role.cs` says so.
+- **Union, never comparison.** Holding several roles at one scope grants the union. Correct, because
+  the roles are genuinely unordered.
+- **Scope-specific vocabulary.** A role name tells you which scope it grants on. `Reader` used to mean
+  "org member" at one scope and "read-only" at two others; splitting it into `Member` / `Viewer` was
+  right.
+- **Grants, not consequences.** `AccessSnapshot` stores what the user was granted and expands
+  inheritance at question time. The snapshot grows with the size of the user's access, not the size of
+  the organization, so a new project does not invalidate every admin's cache.
+- **A pure evaluator.** `AccessEvaluator` is static, does no I/O, and is exhaustively unit-tested. The
+  cached and uncached paths share one definition of the rules.
+- **Enforcement by attribute, with a reflection test.** `[RequirePermission(Permissions.SprintManage,
+  From = "sprintId")]`, with a test that fails for any action carrying neither it nor an explicit
+  `[NoPermissionRequired]` justification. That test catches endpoints nobody thought to write a case
+  for, which is the only kind of authorization test that scales.
+- **Downward-only inheritance.** A project role never reaches the project's team, because a team serves
+  several projects.
+
+Do not redesign this. Extend it.
+
+### 6.2 Extension one — `workitem:verify` and `Tester`
+
+§4. One permission, one role, three table entries, no new machinery.
+
+### 6.3 Extension two — typed principals
+
+This is the important one, and `docs/permissions-model.md` §10.4 already staked out the position:
+*"The full typed-principal model should wait for the git integration that needs it… The §4.4 split —
+authority belongs to the integration, attribution is metadata — is the part worth holding onto."*
+
+Git sync is that integration. Build it now.
+
+A `RoleAssignment.UserId` is a bare `Guid` today, and every actor is assumed to be a person. A webhook
+worker acting on a merge is not a person. Two wrong ways to model it:
+
+- **Act as the commit author.** Requires resolving a git email to a BoardSync user, which fails for
+  external contributors and bots — and worse, it means the integration inherits whatever that person
+  can do. A merge authored by a Tester could then close the item, defeating §4 entirely.
+- **Act as a superuser and skip the checks.** Every automated transition becomes unauditable, and the
+  QA gate degrades to an `if` statement someone will eventually delete.
+
+The right model:
+
+```csharp
+public enum PrincipalType { User, Integration }
+
+public sealed record Principal(PrincipalType Type, Guid Id)
+{
+    public static Principal User(Guid userId) => new(PrincipalType.User, userId);
+    public static Principal Integration(Guid installationId) => new(PrincipalType.Integration, installationId);
+}
+```
+
+- `RoleAssignment` gains `PrincipalType` (default `User`, so existing rows migrate untouched) and
+  `UserId` widens in meaning to `PrincipalId`.
+- A `GitProviderInstallation` **is** a principal. When a repository is linked to a project, the
+  installation gets a project-scope `RoleAssignment` with a new role, `Integration`, permitting
+  exactly: `project:read`, `workitem:read`, `workitem:write`, `workitem:comment`, `board:read`,
+  `sprint:read`.
+- **`Integration` does not carry `workitem:verify`, `workitem:delete`, or anything administrative.**
+
+The consequence is the design's best property: **the QA gate is not a rule the git worker follows, it
+is a permission the git worker does not have.** A bug in the webhook handler, a malicious payload, or
+a future contributor "simplifying" the transition logic cannot close a work item, because the same
+`PermissionAuthorizationFilter` that guards every HTTP endpoint denies it. Security that survives
+being forgotten about.
+
+**Attribution stays separate.** `WorkItemHistory` gains `ActorType` and an optional
+`AttributedToUserId`, so the feed reads *"moved to In Review by GitHub (Ada Lovelace)"* — authority
+from the integration, attribution from the commit author, resolved by email when it maps to a known
+user and left as a display string when it does not.
+
+### 6.4 Extension three — an honest `[NoPermissionRequired]`
+
+Audit finding 1 is a permission bug that passed the permission test, because the justification string
+—"scoped to the organizations the caller belongs to" — described the bug as the defence.
+
+Tighten the contract: `[NoPermissionRequired]` must name the resolver it delegates scoping to, and
+the coverage test asserts that the named resolver is a real, registered type. "Scoped to the caller"
+stops being an acceptable answer.
+
+### 6.5 Deliberately not doing
+
+- **Custom roles per organization.** Enterprise checkbox, large migration, no demand. The named
+  permissions make it *possible* later; that is enough.
+- **Field-level permissions.** No use case.
+- **Deny rules.** Union-of-grants is comprehensible; grant/deny precedence is not, and the day someone
+  cannot explain why a user lacks access is the day the model has failed.
+- **Ordering roles again.** It was wrong the first time.
+
+---
+
+## 7 · The GitSync module
+
+*Decision: multiple providers, including Azure DevOps.*
+
+### 7.1 Shape
+
+```
+Modules/GitSync/
+  Controllers/     GitWebhookController, GitInstallationsController, RepositoryLinksController
+  Providers/       IGitProvider, GitHubProvider, GitLabProvider, AzureDevOpsProvider, BitbucketProvider
+  Ingest/          WebhookVerifier, DeliveryLedger, RawDeliveryStore
+  Domain/          NormalizedGitEvent, WorkItemReference, BindingResolver
+  Services/        GitEventProcessor, InstallationService, RepositoryLinkService
+  Repositories/    IGitRepository + implementation
+  Models/          GitProviderInstallation, RepositoryLink, WebhookDelivery, CommitLink, PullRequestLink
+  Events/          CommitLinked, PullRequestOpened, PullRequestMerged, BranchBound
+```
+
+Schema `git`.
+
+### 7.2 The provider port
+
+Since Azure DevOps is in scope from the start, the port is load-bearing rather than defensive.
+
+```csharp
+public interface IGitProvider
+{
+    string Key { get; }                                   // "github" | "gitlab" | "azuredevops" | "bitbucket"
+
+    Task<VerificationResult> VerifyAsync(HttpRequest request, GitProviderInstallation installation, CancellationToken ct);
+    bool TryNormalize(RawDelivery delivery, out NormalizedGitEvent evt);
+
+    Task<IReadOnlyList<RemoteRepository>> ListRepositoriesAsync(GitProviderInstallation i, CancellationToken ct);
+    Task<string> GetDefaultBranchAsync(GitProviderInstallation i, string repoExternalId, CancellationToken ct);
+    Task<IReadOnlyList<RemoteCommit>> ListCommitsAsync(GitProviderInstallation i, string repoExternalId, string branch, DateTime since, CancellationToken ct);
+}
+```
+
+Everything downstream of `TryNormalize` is provider-agnostic. `NormalizedGitEvent` is the module's
+domain type and the only shape the rest of BoardSync sees:
+
+```csharp
+public sealed record NormalizedGitEvent(
+    GitEventKind Kind,                 // Push | PullRequestOpened | PullRequestMerged | PullRequestClosed | BranchCreated
+    string RepositoryExternalId,
+    string? BranchName,
+    string? TargetBranch,              // PR base — compared to default branch for merge semantics
+    IReadOnlyList<CommitInfo> Commits,
+    PullRequestInfo? PullRequest,
+    ActorInfo Actor,                   // login + email; resolved to a BoardSync user when it maps
+    DateTimeOffset OccurredAt,
+    string ProviderDeliveryId);
+```
+
+### 7.3 Webhook verification varies by provider — model that, do not paper over it
+
+This is the sharpest constraint and it must be explicit in the schema, because Azure DevOps is
+materially weaker than the others.
+
+| Provider | Mechanism | Integrity? |
+|---|---|---|
+| **GitHub App** | `X-Hub-Signature-256`, HMAC-SHA256 over the raw body | ✅ payload integrity |
+| **GitLab** | signing token (HMAC-SHA256) preferred; legacy `X-Gitlab-Token` is a plaintext bearer | ✅ / ⚠️ bearer only |
+| **Bitbucket** | `X-Hub-Signature`, HMAC-SHA256 | ✅ payload integrity |
+| **Azure DevOps** | **no HMAC of any kind.** Service Hooks offer Basic auth and custom headers over HTTPS | ⚠️ bearer only |
+
+Azure DevOps Service Hooks cannot sign a payload. Anyone who obtains the endpoint URL and the Basic
+credential can post an arbitrary body, and nothing about the request proves it came from Azure.
+
+Consequences, all of which belong in the design rather than in a comment:
+
+1. `WebhookDelivery` records `VerificationMethod` (`HmacSha256` | `SharedSecret` | `BasicAuth`) on
+   every row. What a delivery was trusted on is auditable forever.
+2. Bearer-only providers get compensating controls: a **high-entropy per-installation path segment**
+   (`/api/git/azuredevops/webhook/{installationSecret}`), a distinct Basic credential per
+   installation, HTTPS enforced, and IP allowlisting where the customer's egress is stable.
+3. **A bearer-only provider may never be the sole authority for a transition into `Resolved`.**
+   Recommend requiring that an ADO merge event be corroborated by a commit reachable on the default
+   branch — one API read-back against the ADO REST API, which is cheap and turns a spoofable POST
+   into a claim the provider itself confirms.
+4. Surface it in the product. The installation settings page says what verification a connection uses.
+   "We verify GitHub payloads cryptographically; Azure DevOps does not offer that, so we verify by
+   shared secret and confirm merges by reading back" is a sentence that builds trust rather than
+   spending it.
+
+Constant-time comparison everywhere, no exceptions, including the bearer paths.
+
+**Auth model per provider.** GitHub: a **GitHub App**, not an OAuth App — installation-level webhooks
+covering every repo the app can access, fine-grained permissions, short-lived installation tokens
+(JWT → 1-hour token), rate limits that scale with the installation, and — the one that matters for a
+product — the integration keeps working when the person who installed it leaves the org. GitLab:
+group or project access tokens. Azure DevOps: a PAT initially, Entra ID app registration when
+enterprise customers ask.
+
+### 7.4 Ingest: accept fast, process durably
+
+```
+POST /api/git/{provider}/webhook          [AllowAnonymous — verified by the provider verifier]
+  │
+  ├─ 1. Read raw body once, buffered. Signatures are over exact bytes; re-serializing invalidates them
+  ├─ 2. Resolve installation from route/headers → provider.VerifyAsync  → 401 on failure, no detail
+  ├─ 3. INSERT INTO git."WebhookDeliveries" (ProviderDeliveryId, …)
+  │       UNIQUE (Provider, ProviderDeliveryId) → conflict means already seen → 200, done
+  ├─ 4. Persist the raw payload
+  ├─ 5. Enqueue a ProcessGitDelivery job (§9)
+  └─ 6. 202 Accepted  ← target < 100ms, always
+```
+
+The rules that make this survive production:
+
+- **Idempotency on the provider's delivery id.** GitHub's `X-GitHub-Delivery` GUID is stable across
+  manual redeliveries, which is exactly the dedupe you want. A unique index does the work; a duplicate
+  is a 200, never an error.
+- **Return 2xx for anything you have durably accepted or deliberately ignored.** A non-2xx for an
+  event type you do not handle teaches the provider to retry it forever and, on some providers, to
+  disable the hook.
+- **Never process inline.** Verification and one insert, then 202. Ingest latency must not depend on
+  how many work items a 300-commit force-push touches.
+- **Keep raw payloads** for a bounded window (30 days). Replay is how you fix a binding bug without
+  asking customers to re-push, and it is the only way to debug a provider's actual wire format.
+
+### 7.5 Binding a commit to a work item
+
+*Decision: branch name primary, commit token fallback.*
+
+Each project gets a short human key (`BS`, `PAY`) and work items get a per-project sequential number,
+so `BS-142` is what people type. **Never expose GUIDs for this** — nobody types a GUID into a branch
+name, and a system that asks them to will not be used.
+
+Resolution order, first match wins:
+
+1. **Branch name** — `bs-142-fix-login`, `feature/BS-142`, `BS-142`. Case-insensitive, matched by
+   `(?i)\b([a-z][a-z0-9]{1,9})-(\d+)\b`. On the *first* commit of a branch this creates a
+   `BranchBinding`, and **every subsequent commit on that branch inherits it.** The developer types
+   the id once, at branch creation, which is the only moment they are already thinking about which
+   ticket they are on.
+2. **Commit message token** — `BS-142` anywhere in the subject or body. Overrides the branch binding
+   for that commit, which is how you attribute a drive-by fix on a feature branch to its own ticket.
+3. **PR title or description** — same pattern. A PR may reference several items; all of them bind.
+4. **No match** → record the commit as unbound. **Do not guess.** Surface unbound commits in a
+   project view so the team can see the gap and bind them manually; that view is also the honest
+   measure of how well the convention is landing.
+
+Multiple references in one commit bind to all of them. A commit's transition applies to every bound
+item.
+
+**Guardrails, learned from how these integrations fail:**
+
+- The referenced item must belong to the **project the repository is linked to.** A repo cannot move
+  another project's work, whatever the message says.
+- Force-push and rebase rewrite history. Bind on **commit SHA with the branch as context**, keep both
+  the pre- and post-rewrite SHA, and never regress a state because a SHA disappeared.
+- Cap per delivery. A 500-commit push binds the first N and records the rest as a summary; nobody
+  needs 500 history rows.
+- Merge commits are not authorship. Skip them for binding unless they carry an explicit token.
+
+### 7.6 Applying the transition
+
+The processor resolves the target state from the event and calls the existing
+`IWorkItemService.UpdateStateAsync` **as the integration principal** — the same service, the same
+validation, the same history and events as a human transition. No back door.
+
+| Event | Target | Notes |
+|---|---|---|
+| First commit on a bound branch | `Active` | Only from `New`. Never regresses |
+| PR opened targeting default branch | `InReview` | From `Active` |
+| PR closed unmerged | `Active` | From `InReview` |
+| **PR merged into default branch** | **`Resolved`** | **The ceiling. QA takes it from here** |
+| Any event, item already ahead | *no-op* | Never move backwards |
+
+Three invariants:
+
+1. **Monotonic.** A git event never moves an item backwards. Late webhooks arrive out of order
+   routinely, and reordering must be a no-op rather than a regression.
+2. **Human wins.** If a human transitioned the item after the git event's `OccurredAt`, the git event
+   is recorded in history and does not transition. The board is derived from git, but a person who
+   deliberately overrode it knew something git did not.
+3. **`Resolved` is the ceiling** — enforced by the integration principal lacking `workitem:verify`
+   (§6.3), not by a check in this method.
+
+Every transition emits `WorkItemStateChanged` through the outbox as usual, so the board updates live,
+the activity feed records it, and notifications fire. **The realtime layer needs no changes at all**
+— which is the payoff for the outbox architecture already being right.
+
+### 7.7 Backfill
+
+Linking a repo to an existing project should not start from zero. On link, walk the last 90 days of
+commits on the default branch, bind what matches, and record links without transitioning anything —
+history, not state changes. This is what makes the first report meaningful on day one instead of in a
+quarter, and it is a bounded, resumable job (§9).
+
+---
+
+## 8 · The Intelligence module
+
+*Decision: after git sync, as its own module.*
+
+Two capabilities, one hard boundary.
+
+### 8.1 The boundary
+
+**The AI proposes; a human accepts; only the acceptance writes to the board.**
+
+Every generated artifact lands as a `Proposal` — a draft sprint plan, a decomposed epic, a report — that
+a human reviews and accepts, wholly or item by item. Acceptance is what calls the existing services
+and creates real work items, through the same permission checks as any other write.
+
+The reasons are the same ones behind §4, and they are not squeamishness:
+
+- Model output is probabilistic. A board that silently gains eleven hallucinated tasks is worse than
+  no AI at all, and the trust never comes back.
+- The permission model has no way to reason about an actor with unbounded scope. A proposal has no
+  authority, so it needs no permission; the accepting human already has one.
+- Every proposal-and-acceptance is a labelled training signal about what this team considers a good
+  breakdown. Autonomous writes throw that away.
+
+### 8.2 PRD decomposition
+
+```
+POST /api/projects/{projectId}/intelligence/decompose
+  body: { source: "text" | "fileId", content | fileId, targetSprintLength: 14, teamSize: 5 }
+  → 202 { proposalId }        [requires workitem:write]
+
+GET  /api/intelligence/proposals/{id}          → status + the draft
+POST /api/intelligence/proposals/{id}/accept   → { include: [nodeIds] } → creates real work items
+```
+
+The output is a typed object, not prose to parse. Use **structured outputs** so the model is
+constrained to the schema:
+
+```csharp
+using Anthropic;
+using Anthropic.Models.Messages;
+
+AnthropicClient client = new();
+
+var response = await client.Messages.Create(new MessageCreateParams
+{
+    Model = "claude-opus-5",
+    MaxTokens = 16000,
+    Thinking = new() { Type = ThinkingType.Adaptive },
+    OutputConfig = new OutputConfig
+    {
+        Format = new JsonOutputFormat { Schema = DecompositionSchema }   // epics → features → stories → tasks
+    },
+    Messages = [ new() { Role = Role.User, Content = prompt } ],
+});
+```
+
+Notes that matter for this specific job:
+
+- **`claude-opus-5`**, adaptive thinking. Decomposing a PRD into a coherent hierarchy with dependency
+  ordering and estimates is a reasoning task; the cheap model produces a flat list of restated
+  requirements.
+- **Stream** it (`client.Messages.Stream(...)` + `.FinalMessage()`) — a large PRD with a large
+  structured response will otherwise sit near the HTTP timeout.
+- **Prompt-cache the stable prefix.** The system prompt, the schema, and the project's existing
+  conventions are identical across every decomposition; put the PRD itself after the last cache
+  breakpoint. Verify with `usage.cache_read_input_tokens` — if it is zero across repeated calls,
+  something volatile leaked into the prefix.
+- The schema mirrors the real hierarchy (`Epic → Feature → UserStory → Task/Bug`) and the real
+  `WorkItemPriority`, so acceptance is a direct map with no interpretation layer.
+- Do **not** truncate a long PRD. Chunk by section with the outline held in the prefix, and say so in
+  the UI.
+
+### 8.3 Report generation
+
+The genuinely differentiated one, because BoardSync knows things a board fed by hand does not: real
+commit activity, real cycle time from first commit to QA certification, and where work actually sat
+versus where the board said it was.
+
+```
+GET /api/sprints/{sprintId}/report          [requires sprint:read]
+GET /api/projects/{projectId}/reports/status
+```
+
+Build it in two layers, and keep them separate:
+
+1. **A deterministic metrics layer** — burndown, velocity, CFD, cycle time, commit volume per item,
+   the gap between merge and certification, items with no git activity at all. Plain SQL over
+   `ActivityLogs`, `WorkItemHistory`, and `CommitLink`. **These numbers must never come from a
+   model.** They are facts, they must be identical every time they are computed, and they are what
+   management will make decisions on.
+2. **A narrative layer** — Claude summarizing the metrics into prose, flagging risk, comparing against
+   previous sprints. It receives the computed metrics as input and is explicitly instructed to cite
+   only those numbers.
+
+That split is the entire trick. A model asked to both compute and narrate will produce plausible
+numbers, and nobody downstream can tell which numbers were computed.
+
+Cache reports by `(sprintId, sprintUpdatedAt)`. A completed sprint's report never changes, so it is
+generated once and served forever.
+
+### 8.4 Operational
+
+- `ANTHROPIC_API_KEY` from the environment; never in `appsettings`.
+- Per-organization monthly token budget with a hard stop. This is the one dependency that can generate
+  an unbounded bill.
+- Log token usage per call against org, project, and feature. You will be asked what this costs.
+- The whole module is behind a feature flag, and a disabled or unconfigured Intelligence module must
+  degrade to hidden UI, never to a 500.
+- Decomposition and report generation are long-running, retryable, and expensive: they run as jobs
+  (§9), never in a request thread.
+
+---
+
+## 9 · Message broker: not yet, and here is the trigger
+
+*Requested: a verdict on RabbitMQ.*
+
+### The verdict: no RabbitMQ. Add a jobs table instead.
+
+**What the outbox already gives you**, and it is most of what a broker is for: atomicity with the
+business write (the event and the state change commit together, so the dual-write problem does not
+exist), at-least-once delivery, ordering by `Sequence`, concurrent multi-instance draining via
+`FOR UPDATE SKIP LOCKED`, retry with attempt counting, and a dead-letter equivalent — messages that
+exhaust `MaxAttempts` stay in the table, visible and queryable, rather than vanishing into a DLQ
+nobody has a dashboard for.
+
+**A broker does not replace that.** The standard pattern is outbox → broker: RabbitMQ sits
+*downstream* of the outbox, which stays. So adopting it adds a second delivery guarantee to reason
+about and a second failure mode (broker up, database down, and back to dual-write) without removing
+the first.
+
+**What RabbitMQ would actually buy:** competing consumers on separate hardware, per-queue
+backpressure, and fan-out to systems that are not this application. There is one deployable and no
+external consumer. None of those are load-bearing today.
+
+**What it would cost:** a stateful service to run in HA, a new operational skill on the team, another
+thing that can be down at 3am — and the outbox stays anyway.
+
+### What to build instead: `kernel.Jobs`
+
+Git backfill, PRD decomposition, and report generation are a genuinely different kind of work from
+domain events. They are minutes-long rather than milliseconds, expensive to redo, and want per-type
+concurrency limits. Running them through the outbox would let one 90-day backfill starve the activity
+feed behind it.
+
+So split the lanes:
+
+| Lane | Table | Carries | Latency target |
+|---|---|---|---|
+| **Events** | `kernel.OutboxMessages` | Domain events → activity, notifications, realtime | < 100ms (once audit finding 6 is fixed) |
+| **Jobs** | `kernel.Jobs` | Webhook processing, git backfill, AI decomposition, reports | seconds to minutes |
+
+`kernel.Jobs` reuses the pattern that already works — `FOR UPDATE SKIP LOCKED` claiming, attempt
+counting, `LISTEN/NOTIFY` wake — and adds what long work needs: a `VisibleAt` for exponential backoff,
+a lease with a timeout so a crashed worker's job is reclaimed, per-`JobType` concurrency caps, and a
+priority column so an interactive decomposition outranks a backfill.
+
+That is one table and roughly 200 lines against infrastructure already running in every environment.
+It gets ~90% of what a broker would give this system, today.
+
+### Revisit RabbitMQ when — concretely
+
+1. **A second deployable exists.** A git-sync worker scaled independently of the API is the honest
+   trigger, and it is the one most likely to arrive.
+2. **Sustained webhook ingest above ~200 events/s**, or a burst profile (monorepo force-push,
+   org-wide backfill) that makes `kernel.Jobs` the hottest table in the database.
+3. **A consumer outside BoardSync** wants the event stream — a customer's data warehouse, a
+   third-party integration.
+
+Until one of those is a number on a dashboard rather than a hypothetical, RabbitMQ is complexity
+bought on credit. The module boundaries and the `IEventBus` abstraction mean introducing it later is
+an infrastructure change behind an interface that already exists, not a rewrite — which is exactly why
+it is safe to defer.
+
+**One caveat, held honestly:** if the deployment target is already a Kubernetes cluster where a
+managed RabbitMQ or a cloud queue is a checkbox rather than a service to operate, the cost side of
+this analysis shrinks a lot. The recommendation stands on the *benefit* side being near zero today —
+but revisit it the moment the second deployable appears, not later.
+
+---
+
+## 10 · Build phases
+
+Ordered by dependency and by what unblocks other people. Every phase ends in something demoable.
+
+### Phase A — Stabilize and unblock ✅ **shipped** · *the frontend cannot start without this*
+
+- [x] Audit finding 3: drop `Active → Closed`.
+- [x] Audit finding 1: visibility resolved from the access snapshot as `ProjectVisibility` — grants,
+      not expanded project ids — and pushed into SQL as a predicate. Search, Notifications and the
+      workspace summary all route through it. `[NoPermissionRequired]` justifications now name their
+      resolver.
+- [x] Audit finding 6: the outbox `NOTIFY` wakes the dispatcher.
+- [x] **§5.1 `GET /api/metadata`** with the drift test.
+- [x] **§5.2 `GET /api/me/capabilities`**, single and batch.
+- [x] Integration test harness — Testcontainers + `WebApplicationFactory`.
+- [ ] Audit finding 7: decide the frontend question and make the repo tell the truth. **Still open.**
+
+*Found along the way, all fixed:* `WorkItemHistory.ProjectId` was never written, so the notification
+bell returned nothing to anybody (finding 14); and every work item domain event was enqueued after
+its save, so **not one had ever been delivered** — no work item activity, no live board updates
+(finding 15). Both were invisible to unit tests and to reading the code; the harness found the
+second on its first run.
+
+*Exit: a frontend developer can build every screen's gating and every dropdown without hardcoding a
+single constant. No endpoint returns data the caller cannot read.*
+
+### Phase B — The QA gate · **core shipped**, typed principals and concurrency outstanding
+
+- [x] `InReview` state; new transition table; `Active → Closed` gone.
+- [x] `workitem:verify`; `Tester` role at team and project scope; carried onto the team's projects
+      through the `TeamToProject` edge.
+- [x] `Project.AllowSelfCertification` and the self-certification guard.
+- [x] Board seeding gains the Review lane, and existing boards are migrated — a card in a state no
+      column claims simply does not render, so the lane had to be inserted rather than left to
+      whoever noticed work had vanished.
+- [ ] Typed principals (§6.3): `PrincipalType` on `RoleAssignment`, `Integration` role,
+      `WorkItemHistory.ActorType` + `AttributedToUserId`. **Moved into Phase C.**
+      `docs/permissions-model.md` §10.4 argues this should wait for the integration that needs it,
+      and it is right: with only one kind of principal in existence, the shape would be a guess.
+      It lands alongside `GitProviderInstallation`, which is the second principal.
+- [x] Audit findings 2 and 8: optimistic concurrency is real (it was inert at three separate points);
+      `PATCH /api/workitems/{id}` added, with `Patch<T>` to tell an omitted field from an explicit null.
+
+*Note on enforcement:* which permission a transition needs depends on the states being moved
+between, and the target arrives in the request body — so it cannot live in a `[RequirePermission]`
+attribute and is invisible to the endpoint-coverage test. It is checked in `WorkItemService`, with
+the endpoint still declaring `workitem:write` as the floor, and `QaGateEndpointTests` is what stands
+behind it.
+
+*Exit: work reaches Done only through a human holding `workitem:verify`. The principal model that git
+sync depends on exists and is tested.*
+
+### Phase C — Git sync, GitHub first · **ingest shipped**, binding next
+
+- [x] `kernel.Jobs` (§9) with `IJobQueue`, `JobWorker`, leases, exponential backoff and a dead-row
+      state that stays queryable.
+- [x] `Modules/GitSync` skeleton, `IGitProvider`, `NormalizedGitEvent`, `git` schema.
+- [x] GitHub App: HMAC-SHA256 verification over the raw body, constant-time compared; push and
+      pull-request normalization.
+- [x] Ingest pipeline: verify → dedupe → persist → 202 → job.
+- [ ] Installation and repository-link management endpoints. Rows are created directly today, so
+      connecting a repository is not yet self-service.
+- [ ] Project keys and work item numbers (`BS-142`) — a migration and a display change everywhere.
+- [ ] Binding resolver: branch primary, commit token fallback, PR references.
+- [ ] Typed principals, alongside `GitProviderInstallation` as the second principal (§6.3).
+- [ ] Transition application as the integration principal, with all three invariants.
+- [ ] Unbound-commits view.
+- [ ] Backfill on link.
+
+*Split deliberately at the ingest/binding boundary.* Verification, idempotency, durability and the
+job pipeline are provably working before any of it is used to change a board — which is the half
+that is hard to retrofit confidence into, since the endpoint is the only anonymous write surface in
+the product.
+
+*Exit: a developer branches `bs-142-fix-login`, commits, opens a PR, merges — and the card moves
+New → Active → InReview → Resolved with nobody touching the board. It stops there, waiting for QA.*
+
+### Phase D — Providers 2–4, and notifications that notify
+
+- GitLab (signing token), Azure DevOps (Service Hooks + §7.3 compensating controls + merge read-back),
+  Bitbucket.
+- Provider conformance test suite: one set of scenarios, run against every adapter.
+- Audit finding 10: a real `Notification` entity, recipient resolution off the outbox, read state,
+  preferences, watching. Git events are the highest-value notification source — *"your PR merged, BS-142
+  is awaiting QA"* — so this belongs here rather than earlier.
+- Audit finding 9: Postgres FTS for search.
+
+*Exit: an Azure DevOps shop can adopt BoardSync. QA gets told when something needs testing.*
+
+### Phase E — Intelligence
+
+- `Modules/Intelligence`, proposal model, acceptance flow, budget enforcement.
+- PRD decomposition with structured outputs.
+- Deterministic metrics layer — burndown, velocity, CFD, cycle time, merge-to-certification gap.
+- Narrative report layer over those metrics.
+
+*Exit: a PRD becomes a reviewable sprint plan. A completed sprint produces a report whose numbers are
+computed and whose prose cites them.*
+
+### Phase F — Scale and harden
+
+- The rest of the audit register.
+- Instance count > 1: pgbouncer, `ActivityLogs` partitioning and retention.
+- Load testing against realistic webhook bursts.
+- Security review focused on webhook ingest and the integration principal.
+
+### Parallel track — the frontend
+
+Not a phase; it runs alongside from Phase A. Depends on §5 landing first, and on the generated
+TypeScript client (§5.3) so the two do not drift.
+
+---
+
+## 11 · Open decisions
+
+| # | Question | Recommendation |
+|---|---|---|
+| 1 | ~~Does `ScrumMaster` hold `workitem:verify`?~~ | **Decided: no.** Shipped. In Scrum the Product Owner accepts the increment; the Scrum Master owns the process. `QaGateTests.ScrumMasterRunsTheSprintButDoesNotCertify` asserts both halves, so reversing it is a deliberate act rather than a drift. One line in `RolePermissions` if a team wants it. |
+| 2 | Project key format and collision policy | 2–10 uppercase alphanumerics, unique **per organization**, derived from the project slug and editable at creation only. Renaming a key orphans every branch name in flight. |
+| 3 | Does work item numbering restart per project? | **Yes** — `BS-1`, `PAY-1`. Global numbering makes the key decorative. A per-project sequence needs a counter row, not a database sequence, so it commits in the same transaction. |
+| 4 | Retention for raw webhook payloads | 30 days. Long enough to replay a binding bug, short enough not to accumulate customer source metadata indefinitely. |
+| 5 | What happens when a repo is unlinked? | Keep `CommitLink` rows (history stays true), stop processing, revoke the integration principal's role assignment. Do not reverse any transition. |
+| 6 | Can one repository link to several projects? | **Not in v1.** Monorepos will want it. Model `RepositoryLink` as many-to-many from the start so it is a validation change later, not a migration. |
+| 7 | Do AI-generated reports inherit `project:read`? | Inherit initially (this was already open as §7.4 of `permissions-model.md`). Revisit when reports aggregate across projects, where the union of readers is not the union of the inputs' readers. |
+| 8 | Deployment target | Genuinely open and it changes §9's cost side. pgbouncer, Redis HA, and hub scale-out look very different on managed Kubernetes versus two VMs. Worth settling before Phase F. |
+| 9 | Self-hosted git (GitHub Enterprise Server, self-managed GitLab) | Defer. The provider port supports it via a configurable base URL; the work is egress and network policy, not protocol. |
+
+---
+
+## 12 · Sources
+
+Research grounding the git-integration and provider decisions:
+
+- [Validating webhook deliveries — GitHub Docs](https://docs.github.com/en/webhooks/using-webhooks/validating-webhook-deliveries)
+- [Deciding when to build a GitHub App — GitHub Docs](https://docs.github.com/en/apps/creating-github-apps/about-creating-github-apps/deciding-when-to-build-a-github-app)
+- [Differences between GitHub Apps and OAuth apps — GitHub Docs](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/differences-between-github-apps-and-oauth-apps)
+- [Webhooks with Azure DevOps — Microsoft Learn](https://learn.microsoft.com/en-us/azure/devops/service-hooks/services/webhooks?view=azure-devops)
+- [How to add an HMAC signature in a webhook via the Azure DevOps REST API — Microsoft Q&A](https://learn.microsoft.com/en-us/answers/questions/5864996/how-to-add-a-hmac-signature-in-webhook-via-devops)
+- [Webhooks — GitLab Docs](https://docs.gitlab.com/user/project/integrations/webhooks/)
+- [Webhook authentication learnings for GitHub, GitLab, and Bitbucket — Release](https://release.com/blog/webhook-authentication-learnings)
+- [Linking your GitHub commits with Azure Boards — Microsoft Azure Blog](https://azure.microsoft.com/en-us/blog/linking-your-github-commits-with-azure-boards/)
+- [Process work items with smart commits — Atlassian Support](https://support.atlassian.com/jira-software-cloud/docs/process-issues-with-smart-commits/)
+- [Webhook idempotency and deduplication — Hooklistener](https://www.hooklistener.com/learn/webhook-idempotency-and-deduplication)
+- [Implementing the outbox pattern for reliable messaging in .NET modular monoliths — Mehmet Ozkaya](https://mehmetozkaya.medium.com/implementing-the-outbox-pattern-for-reliable-messaging-in-net-modular-monoliths-architecture-8fa1a68835b0)
