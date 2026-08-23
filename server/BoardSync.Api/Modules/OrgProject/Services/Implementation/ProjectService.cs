@@ -118,6 +118,9 @@ public class ProjectService : IProjectService
     public Task<string> GetKeyAsync(Guid projectId, CancellationToken ct = default) =>
         _projectRepo.GetKeyAsync(projectId, ct);
 
+    public Task<Guid?> GetOrganizationIdAsync(Guid projectId, CancellationToken ct = default) =>
+        _projectRepo.GetOrganizationIdAsync(projectId, ct);
+
     public Task<bool> AllowsSelfCertificationAsync(Guid projectId, CancellationToken ct = default) =>
         _projectRepo.AllowsSelfCertificationAsync(projectId, ct);
 

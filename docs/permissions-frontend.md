@@ -902,10 +902,33 @@ There is a new role value, `Integration`, which will appear on `GET /api/metadat
 with **`grantable: false`**. Filter role pickers on that field rather than on the role name — it is
 there so you can render an existing grant, not so you can offer it.
 
-### 18.4 Still not self-service
+### 18.4 Settings screens you can now build
 
-Installation and repository-link rows are created directly in the database, so there are no settings
-screens to build against yet. Those endpoints are the next thing.
+| Endpoint | Permission |
+| --- | --- |
+| `GET\|POST /api/orgs/{orgId}/git/installations` | `org:admin` |
+| `POST /api/git/installations/{id}/rotate-secret` | `org:admin` |
+| `DELETE /api/git/installations/{id}` | `org:admin` |
+| `GET /api/git/installations/{id}/deliveries` | `org:admin` |
+| `GET /api/projects/{projectId}/git/repositories` | **`project:read`** |
+| `POST\|DELETE /api/projects/{projectId}/git/repositories[/{linkId}]` | `project:admin` |
+
+⚠️ **The webhook secret is returned exactly once**, in the response to connecting or rotating. It is
+never retrievable again, on any endpoint. Your connect screen must make the user copy it before they
+navigate away — there is no "show secret" to fall back on, by design. The response also carries a
+`guidance` string saying what that provider's verification actually proves; show it, because it
+differs between providers and the difference is the customer's to weigh.
+
+**Rotating invalidates the old secret immediately**, so warn that the provider's configuration has to
+be updated before the next push. The URL does not change.
+
+**Linking is `project:admin` but listing is `project:read`** — knowing which repository moves your
+board is part of understanding the board, not an administrative detail. Show the list to anyone who
+can see the project.
+
+**The deliveries endpoint is the "is it working?" screen.** Each row carries an `outcome` in plain
+prose, including for deliveries that deliberately did nothing. Without it a quiet integration and a
+broken one look identical.
 
 ---
 

@@ -32,6 +32,16 @@ public interface IProjectService
     /// <summary>The project's short key, or an empty string if it no longer exists.</summary>
     Task<string> GetKeyAsync(Guid projectId, CancellationToken ct = default);
 
+    /// <summary>
+    /// The organization owning a project, or null if it does not exist.
+    /// </summary>
+    /// <remarks>
+    /// Used to check that a resource from another module belongs in the same organization before it
+    /// is wired to a project — a cross-organization link would otherwise be a data leak wearing a
+    /// configuration screen.
+    /// </remarks>
+    Task<Guid?> GetOrganizationIdAsync(Guid projectId, CancellationToken ct = default);
+
     Task<bool> ExistsAsync(Guid projectId, CancellationToken ct = default);
 
     Task<PagedResult<ProjectSummaryResponse>> GetForOrgAsync(Guid orgId, PaginationQuery pagination, CancellationToken ct = default);

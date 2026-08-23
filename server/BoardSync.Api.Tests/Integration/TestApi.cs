@@ -102,6 +102,8 @@ public sealed class TestApi
 
     public Task<HttpResponseMessage> GetRaw(string url) => _http.GetAsync(url);
 
+    public Task<HttpResponseMessage> DeleteRaw(string url) => _http.DeleteAsync(url);
+
     public Task<HttpResponseMessage> PostRaw(string url, object body) =>
         _http.PostAsJsonAsync(url, body);
 

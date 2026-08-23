@@ -53,6 +53,12 @@ public class ProjectRepository : IProjectRepository
             : throw new InvalidOperationException($"Project '{projectId}' does not exist.");
     }
 
+    public async Task<Guid?> GetOrganizationIdAsync(Guid projectId, CancellationToken ct = default) =>
+        await _context.Projects
+            .Where(p => p.Id == projectId)
+            .Select(p => (Guid?)p.OrganizationId)
+            .FirstOrDefaultAsync(ct);
+
     public async Task<string> GetKeyAsync(Guid projectId, CancellationToken ct = default) =>
         await _context.Projects
             .Where(p => p.Id == projectId)

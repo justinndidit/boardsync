@@ -133,6 +133,20 @@ changed the state after the event happened wins**; and `Resolved` is the ceiling
 the installation is a principal holding `RoleType.Integration`, which carries `workitem:write` and
 deliberately not `workitem:verify`.
 
+### Connecting a repository
+
+1. An **organization admin** connects the git host: `POST /api/orgs/{orgId}/git/installations`. The
+   response carries the webhook URL and secret — **once**. Neither is retrievable afterwards; a lost
+   secret is rotated, not recovered.
+2. They paste both into the provider's webhook configuration.
+3. A **project admin** wires a repository to their project:
+   `POST /api/projects/{projectId}/git/repositories`. That grant is what lets git move that board,
+   and the installation must belong to the project's own organization.
+
+`GET /api/git/installations/{id}/deliveries` shows what each delivery did, including when it
+deliberately did nothing — an unhandled event, an unlinked repository, a branch naming no work item.
+That is the difference between an integration that is quiet and one that is broken.
+
 ### The QA gate
 
 Work items run `New → Active → InReview → Resolved → Closed`. `Resolved` means **merged, awaiting
@@ -170,6 +184,8 @@ the authoritative reference; the table below is the map.
 | Work items | `GET|POST /api/projects/{projectId}/workitems`, `GET|PUT|DELETE /api/workitems/{workItemId}`, `PATCH /api/workitems/{workItemId}/state`, `GET|POST /api/workitems/{workItemId}/comments`, `PUT|DELETE /api/workitems/comments/{commentId}`, `GET /api/workitems/{workItemId}/history`, `GET|POST /api/workitems/{workItemId}/links`, `DELETE /api/workitems/links/{linkId}` |
 | Sprint backlog move | `PATCH /api/sprints/{sprintId}/workitems/{workItemId}/move` — single-row drag-and-drop |
 | Real-time hub | `WS /hubs/workspace` — see `docs/realtime-frontend.md` |
+| Git connections | `GET\|POST /api/orgs/{orgId}/git/installations`, `POST /api/git/installations/{installationId}/rotate-secret`, `DELETE /api/git/installations/{installationId}`, `GET /api/git/installations/{installationId}/deliveries` |
+| Git repositories | `GET\|POST /api/projects/{projectId}/git/repositories`, `DELETE /api/projects/{projectId}/git/repositories/{linkId}` |
 | Git webhooks (anonymous) | `POST /api/git/{provider}/webhook/{endpointToken}` — verified by the provider's signature, not by a token |
 | Health (anonymous) | `GET /healthz` |
 

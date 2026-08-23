@@ -874,7 +874,7 @@ behind it.
 *Exit: work reaches Done only through a human holding `workitem:verify`. The principal model that git
 sync depends on exists and is tested.*
 
-### Phase C — Git sync, GitHub first · **the loop works**; management endpoints and backfill outstanding
+### Phase C — Git sync, GitHub first · **usable end to end**; backfill outstanding
 
 - [x] `kernel.Jobs` (§9) with `IJobQueue`, `JobWorker`, leases, exponential backoff and a dead-row
       state that stays queryable.
@@ -887,12 +887,17 @@ sync depends on exists and is tested.*
 - [x] Typed principals — `PrincipalType`, the `Integration` role, and `WorkItemHistory.ActorType` +
       `AttributedToUserId`.
 - [x] Transition application as the integration principal, with all three invariants.
-- [ ] Installation and repository-link management endpoints. Rows are created directly today, so
-      connecting a repository is not yet self-service — this is the gap before anyone outside the
-      team can use it.
-- [ ] Unbound-commits view. The data is there (deliveries record when they bound nothing); it needs
-      an endpoint and a screen.
-- [ ] Backfill on link — walk the last 90 days so the first report is meaningful on day one.
+- [x] Installation and repository-link management endpoints — connect, rotate, disconnect, link,
+      unlink, and a delivery history. Connecting is `org:admin`; linking a repository to a project is
+      `project:admin`, and cross-organization links are refused.
+- [x] Delivery history endpoint, which is the "is the integration working?" view — a quiet
+      integration and a broken one are otherwise identical from the board.
+- [ ] Backfill on link — walk the last 90 days so the first report is meaningful on day one. Needs
+      the provider REST clients (installation-token exchange for GitHub), which is the first piece of
+      this module that talks *out* rather than only receiving.
+- [ ] A per-project view of unbound commits. The delivery history answers it at organization scope;
+      a team wants it filtered to their own project, which needs deliveries to carry the projects
+      they touched rather than only a prose outcome.
 
 *Split deliberately at the ingest/binding boundary.* Verification, idempotency, durability and the
 job pipeline are provably working before any of it is used to change a board — which is the half

@@ -36,6 +36,9 @@ public interface IProjectRepository
     /// <summary>The project's short key, or an empty string if it no longer exists.</summary>
     Task<string> GetKeyAsync(Guid projectId, CancellationToken ct = default);
 
+    /// <summary>The organization owning a project, or null if it does not exist.</summary>
+    Task<Guid?> GetOrganizationIdAsync(Guid projectId, CancellationToken ct = default);
+
     /// <summary>Whether the slug is taken within the organization (slugs are unique per org, not globally).</summary>
     Task<bool> SlugExistsInOrganizationAsync(Guid organizationId, string slug, CancellationToken ct = default);
 

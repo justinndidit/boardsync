@@ -219,6 +219,9 @@ builder.Services.AddScoped<IScopeResolver, WorkItemLinkScopeResolver>();
 builder.Services.AddScoped<IScopeResolver, SprintScopeResolver>();
 builder.Services.AddScoped<IScopeResolver, BoardScopeResolver>();
 builder.Services.AddScoped<IScopeResolver, BoardColumnScopeResolver>();
+
+// A git installation is administered by the organization it belongs to.
+builder.Services.AddScoped<IScopeResolver, InstallationScopeResolver>();
 builder.Services.AddScoped<ScopeResolverRegistry>();
 builder.Services.AddScoped<PermissionAuthorizationFilter>();
 
@@ -274,6 +277,7 @@ builder.Services.AddScoped<IGitProvider, GitHubProvider>();
 builder.Services.AddScoped<IGitProviderRegistry, GitProviderRegistry>();
 builder.Services.AddScoped<IWebhookIngestService, WebhookIngestService>();
 builder.Services.AddScoped<IRepositoryLinkService, RepositoryLinkService>();
+builder.Services.AddScoped<IGitConnectionService, GitConnectionService>();
 builder.Services.AddScoped<IGitBindingService, GitBindingService>();
 builder.Services.AddScoped<IGitTransitionService, GitTransitionService>();
 builder.Services.AddScoped<IJobHandler<ProcessGitDelivery>, ProcessGitDeliveryHandler>();
