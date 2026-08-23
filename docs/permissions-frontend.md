@@ -20,7 +20,7 @@ Scope: `server/BoardSync.Api` · Companions: `docs/permissions-model.md`, `build
 > | **E** | ⚠️ **Work item activity now appears in the feed, and boards update live.** It never did before — that was a bug, not a design. | **§15** |
 > | **F** | Search, the notification bell and the workspace summary now return **less** for some users, and the bell returns **more** for everyone. | **§16** |
 > | **G** | **`PATCH /api/workitems/{id}` exists**, and `expectedVersion` is now honoured — it was accepted and ignored before. | **§17** |
-> | **H** | Git webhook ingest has landed. Nothing visible yet, but §18 says what changes when binding does. | **§18** |
+> | **H** | ⚠️ **The board now updates itself from git.** Work items gained a `reference` (`BS-142`), state changes arrive with no user behind them, and some history rows have no person as the actor. | **§18** |
 >
 > If you only change one thing this week, make it **A** — everything you build against hardcoded
 > constants has to be rewritten once you adopt it.
@@ -859,32 +859,53 @@ stop being a rare race and become a routine event.
 
 ---
 
-## 18. Git integration — nothing for you yet, but here is the shape
+## 18. Git integration — the board now moves on its own
 
-Webhook ingest has landed: `POST /api/git/{provider}/webhook/{endpointToken}` accepts deliveries
-from GitHub, verifies them, and queues them. **It changes nothing you can see.** Deliveries are
-normalized and recorded; binding a commit to a work item is the next increment.
+⚠️ **This is live.** A developer branching `bs-142-fix-login`, committing, opening a pull request and
+merging now walks the work item `New → Active → InReview → Resolved` with nobody touching the board.
 
-Two things to know so you can plan around them:
+### 18.1 Work items have a reference now
 
-**A repository connection is not yet self-service.** Installation and repository-link rows are
-created directly in the database today, so there are no settings screens to build against. Those
-endpoints come with the binding work.
+`WorkItemResponse` gains two fields:
 
-**When binding lands, work items will start moving on their own.** A developer branching
-`bs-142-fix-login`, committing, opening a pull request and merging will walk the item
-`New → Active → InReview → Resolved` with nobody touching the board. Consequences for the client:
+```jsonc
+{ "number": 142, "reference": "BS-142", … }
+```
 
-- **State changes will arrive over the realtime channel from no user action of yours.** The contract
-  is unchanged (`docs/realtime-frontend.md`), but a board that only re-renders on local interaction
-  will look stale. Handle inbound `WorkItemStateChanged` for items nobody on this client touched.
-- **Activity entries will be attributed to the integration**, not to a person — with the commit
-  author carried alongside as attribution. Rendering an actor name will need to handle "GitHub (Ada
-  Lovelace)" as well as a plain user.
-- **`expectedVersion` stops being optional in practice.** A webhook worker writing while your user
-  edits is routine, not a rare race. §17.2 is the reason to start sending it now.
+**Show `reference` wherever an item is identified.** It is the only form a developer can put in a
+branch name, and the entire integration keys on it. `ProjectResponse` gains `key` (the `BS`), and
+`POST /api/orgs/{orgId}/projects` accepts an optional `key` — derived from the name when omitted,
+and **not changeable afterwards**, because renaming it orphans every branch already pushed.
 
-Nothing in this list requires work today. It is here so none of it is a surprise.
+Existing projects and work items were backfilled: keys from the slug, numbers in creation order.
+
+### 18.2 Three things change for the client
+
+- ⚠️ **State changes arrive from no action of yours.** The realtime contract is unchanged
+  (`docs/realtime-frontend.md`), but a board that only re-renders on local interaction will now look
+  stale. Handle inbound `WorkItemStateChanged` for items nobody on this client touched.
+- ⚠️ **Some history and activity entries have no user behind them.** `WorkItemHistory` rows now carry
+  `actorType` (`User` or `Integration`) and an optional `attributedToUserId` — the commit author,
+  when their git email matches a BoardSync account. Render "GitHub" or "GitHub (Ada Lovelace)"; do
+  not assume `changedBy` resolves to a person.
+- ⚠️ **`expectedVersion` matters now.** A webhook worker writing while your user edits is routine,
+  not a rare race. See §17.2.
+
+### 18.3 What the automation will not do
+
+It never closes a work item. `Resolved` — "Awaiting QA" — is the ceiling, and it holds structurally:
+the integration is a principal holding a role that carries `workitem:write` and deliberately not
+`workitem:verify`. It also never moves an item backwards, and never overrides a state a person set
+after the git event happened.
+
+There is a new role value, `Integration`, which will appear on `GET /api/metadata` at project scope
+with **`grantable: false`**. Filter role pickers on that field rather than on the role name — it is
+there so you can render an existing grant, not so you can offer it.
+
+### 18.4 Still not self-service
+
+Installation and repository-link rows are created directly in the database, so there are no settings
+screens to build against yet. Those endpoints are the next thing.
 
 ---
 

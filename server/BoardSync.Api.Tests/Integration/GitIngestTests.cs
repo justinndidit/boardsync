@@ -266,8 +266,12 @@ public class GitIngestTests(BoardSyncApiFactory factory)
         }, TimeSpan.FromSeconds(20));
 
         Assert.NotNull(processed);
-        Assert.Contains("Normalized Push", processed);
-        Assert.Contains("acme/payments", processed);
+        Assert.Contains("Push on acme/payments", processed);
+
+        // This payload's branch references a key no project in this test owns, so it binds nothing —
+        // which is the honest outcome and is recorded rather than left silent. GitDrivenBoardTests
+        // covers the case where it does bind.
+        Assert.Contains("no work item referenced", processed);
     }
 
     /// <summary>

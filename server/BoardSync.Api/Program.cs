@@ -38,6 +38,7 @@ using BoardSync.Api.Modules.GitSync.Controllers;
 using BoardSync.Api.Modules.GitSync.Ingest;
 using BoardSync.Api.Modules.GitSync.Providers;
 using BoardSync.Api.Modules.GitSync.Repositories;
+using BoardSync.Api.Modules.GitSync.Services;
 using BoardSync.Api.Shared.Kernel.Events;
 using BoardSync.Api.Shared.Kernel.Jobs;
 using BoardSync.Api.Shared.Kernel.RateLimiting;
@@ -272,6 +273,9 @@ builder.Services.AddScoped<IGitRepository, GitRepository>();
 builder.Services.AddScoped<IGitProvider, GitHubProvider>();
 builder.Services.AddScoped<IGitProviderRegistry, GitProviderRegistry>();
 builder.Services.AddScoped<IWebhookIngestService, WebhookIngestService>();
+builder.Services.AddScoped<IRepositoryLinkService, RepositoryLinkService>();
+builder.Services.AddScoped<IGitBindingService, GitBindingService>();
+builder.Services.AddScoped<IGitTransitionService, GitTransitionService>();
 builder.Services.AddScoped<IJobHandler<ProcessGitDelivery>, ProcessGitDeliveryHandler>();
 
 // Activity Module — subscribes to the other modules' domain events

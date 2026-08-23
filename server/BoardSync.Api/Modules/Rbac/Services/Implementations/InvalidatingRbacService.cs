@@ -90,9 +90,11 @@ public sealed class InvalidatingRbacService : IRbacService
         RoleScope scope,
         Guid scopeId,
         Guid? assignedBy = null,
+        PrincipalType principalType = PrincipalType.User,
         CancellationToken ct = default)
     {
-        var assignment = await _inner.AssignRoleAsync(userId, role, scope, scopeId, assignedBy, ct);
+        var assignment = await _inner.AssignRoleAsync(
+            userId, role, scope, scopeId, assignedBy, principalType, ct);
         await InvalidateAsync(userId);
         return assignment;
     }

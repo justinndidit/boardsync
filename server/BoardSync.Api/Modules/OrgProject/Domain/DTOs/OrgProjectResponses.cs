@@ -36,6 +36,7 @@ public record ProjectResponse(
     Guid Id,
     Guid OrganizationId,
     string Slug,
+    string Key,
     string Name,
     string Description,
     bool IsActive,

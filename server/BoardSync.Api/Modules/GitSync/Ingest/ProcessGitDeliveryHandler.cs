@@ -1,5 +1,6 @@
 using BoardSync.Api.Modules.GitSync.Providers;
 using BoardSync.Api.Modules.GitSync.Repositories;
+using BoardSync.Api.Modules.GitSync.Services;
 using BoardSync.Api.Shared.Kernel.Jobs;
 
 namespace BoardSync.Api.Modules.GitSync.Ingest;
@@ -22,31 +23,36 @@ public sealed record ProcessGitDelivery(Guid DeliveryId) : IJobPayload
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>This is where binding will go.</b> Today it takes the raw payload as far as a
-/// <see cref="NormalizedGitEvent"/> and stops: resolving a branch name to a work item, and moving
-/// that item, is the next increment. Stopping here on purpose means the ingest half — verification,
-/// idempotency, durability, the job pipeline — is provably working before any of it is used to
-/// change a board.
+/// The whole chain: normalize the payload, find the projects the repository feeds, resolve the work
+/// items its branch and commits refer to, and move them. This is the mechanism that means nobody
+/// drags cards.
 /// </para>
 /// <para>
 /// <b>Idempotent</b>, as every job handler must be: a worker that dies mid-job leaves a lease that
-/// expires and the job runs again. Marking the delivery processed is the last thing it does, and
-/// re-normalizing a payload has no side effects.
+/// expires and the job runs again. Re-running is safe because the transition rules are — a second
+/// pass finds the items already in their target state and reports "already there" rather than
+/// writing a duplicate history row.
 /// </para>
 /// </remarks>
 public class ProcessGitDeliveryHandler : IJobHandler<ProcessGitDelivery>
 {
     private readonly IGitRepository _repository;
     private readonly IGitProviderRegistry _providers;
+    private readonly IGitBindingService _binding;
+    private readonly IGitTransitionService _transitions;
     private readonly ILogger<ProcessGitDeliveryHandler> _logger;
 
     public ProcessGitDeliveryHandler(
         IGitRepository repository,
         IGitProviderRegistry providers,
+        IGitBindingService binding,
+        IGitTransitionService transitions,
         ILogger<ProcessGitDeliveryHandler> logger)
     {
         _repository = repository;
         _providers = providers;
+        _binding = binding;
+        _transitions = transitions;
         _logger = logger;
     }
 
@@ -93,19 +99,62 @@ public class ProcessGitDeliveryHandler : IJobHandler<ProcessGitDelivery>
             return;
         }
 
-        // Binding lands here next: resolve BS-142 from the branch name or commit messages, check the
-        // work item belongs to a linked project, and move it as the integration principal.
-        var summary =
-            $"Normalized {normalized.Kind} on {normalized.RepositoryName}" +
-            $"{(normalized.BranchName is { } branch ? $" ({branch})" : "")}" +
-            $", {normalized.Commits.Count} commit(s), {links.Count} linked project(s). " +
-            "Binding not yet implemented.";
+        var bound = await _binding.ResolveAsync(
+            normalized, [.. links.Select(l => l.ProjectId)], ct);
 
-        _logger.LogInformation("Delivery {DeliveryId}: {Summary}", delivery.Id, summary);
+        if (bound.Count == 0)
+        {
+            // The commonest outcome by far, and not a fault: a branch named without a reference, a
+            // reference to another tool's ticket, a typo. Recorded so an unbound-commits view can
+            // show a team how well the convention is actually landing.
+            await CompleteAsync(delivery.Id, $"{Describe(normalized)}: no work item referenced.", ct);
+            return;
+        }
 
-        await CompleteAsync(delivery.Id, summary, ct);
+        // Every link is for the same repository, so they share a default branch; taking the first is
+        // exact rather than a simplification.
+        var results = await _transitions.ApplyAsync(
+            normalized, bound, delivery.InstallationId, links[0].DefaultBranch, ct);
+
+        await CompleteAsync(delivery.Id, Summarize(normalized, bound, results), ct);
     }
 
-    private async Task CompleteAsync(Guid deliveryId, string outcome, CancellationToken ct) =>
+    private async Task CompleteAsync(Guid deliveryId, string outcome, CancellationToken ct)
+    {
+        _logger.LogInformation("Delivery {DeliveryId}: {Outcome}", deliveryId, outcome);
         await _repository.MarkDeliveryProcessedAsync(deliveryId, outcome, ct);
+    }
+
+    private static string Describe(NormalizedGitEvent e) =>
+        $"{e.Kind} on {e.RepositoryName}{(e.BranchName is { } b ? $" ({b})" : "")}";
+
+    /// <summary>
+    /// Says what the delivery amounted to, including what it declined to do.
+    /// </summary>
+    /// <remarks>
+    /// The skipped reasons matter as much as the moves. "A person changed it after this event" and
+    /// "would move backwards" are the invariants doing their job, and without them recorded an item
+    /// that did not move looks identical to an integration that is broken.
+    /// </remarks>
+    private static string Summarize(
+        NormalizedGitEvent gitEvent,
+        IReadOnlyList<BoundWorkItem> bound,
+        IReadOnlyList<TransitionResult> results)
+    {
+        var moved = results.Where(r => r.Moved)
+            .Select(r => $"{r.Reference} {r.From}→{r.To}")
+            .ToList();
+
+        var skipped = results.Where(r => !r.Moved)
+            .Select(r => $"{r.Reference} unchanged ({r.Skipped})")
+            .ToList();
+
+        var parts = new List<string> { $"{Describe(gitEvent)}: bound {bound.Count}" };
+
+        if (moved.Count > 0) parts.Add($"moved {string.Join(", ", moved)}");
+        if (skipped.Count > 0) parts.Add(string.Join(", ", skipped));
+        if (results.Count == 0) parts.Add("no transition for this event kind");
+
+        return string.Join("; ", parts) + ".";
+    }
 }

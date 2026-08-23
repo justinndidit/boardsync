@@ -26,6 +26,7 @@ public class RbacService : IRbacService
         RoleScope scope,
         Guid scopeId,
         Guid? assignedBy = null,
+        PrincipalType principalType = PrincipalType.User,
         CancellationToken ct = default)
     {
         var existing = await _repository.GetAsync(userId, role, scope, scopeId, ct);
@@ -34,6 +35,7 @@ public class RbacService : IRbacService
             return existing;
 
         var assignment = CreateAssignment(userId, role, scope, scopeId, assignedBy);
+        assignment.PrincipalType = principalType;
 
         _repository.Add(assignment);
         await _repository.SaveChangesAsync(ct);

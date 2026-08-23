@@ -73,7 +73,7 @@ public class OrganizationService : IOrganizationService
 
             // Creator becomes OrgAdmin automatically. Saves through the RBAC module's own service,
             // which enlists in the transaction opened above.
-            await _rbac.AssignRoleAsync(createdBy, RoleType.OrgAdmin, RoleScope.Organization, org.Id, createdBy, token);
+            await _rbac.AssignRoleAsync(createdBy, RoleType.OrgAdmin, RoleScope.Organization, org.Id, createdBy, ct: token);
         }, ct);
 
         _logger.LogInformation("Organization '{Name}' ({Id}) created by {UserId}", org.Name, org.Id, createdBy);
@@ -188,7 +188,7 @@ public class OrganizationService : IOrganizationService
             }
 
             if (!await _rbac.HasPermissionAsync(userId, Permissions.OrgRead, RoleScope.Organization, orgId, token))
-                await _rbac.AssignRoleAsync(userId, RoleType.Member, RoleScope.Organization, orgId, addedBy, token);
+                await _rbac.AssignRoleAsync(userId, RoleType.Member, RoleScope.Organization, orgId, addedBy, ct: token);
 
             _eventBus.Enqueue(new MemberAddedToOrg(orgId, userId, addedBy));
             await _organizationRepo.SaveChangesAsync(token);
@@ -274,7 +274,7 @@ public class OrganizationService : IOrganizationService
             // nothing in the schema limits a user to a single role per organization, and leaving a
             // stale one behind would keep granting the privileges we were asked to take away.
             await _rbac.RemoveAllRolesAsync(userId, RoleScope.Organization, orgId, token);
-            await _rbac.AssignRoleAsync(userId, role, RoleScope.Organization, orgId, actingUserId, token);
+            await _rbac.AssignRoleAsync(userId, role, RoleScope.Organization, orgId, actingUserId, ct: token);
 
             _eventBus.Enqueue(new OrgMemberRoleChanged(orgId, userId, previousRole, role, actingUserId));
             await _organizationRepo.SaveChangesAsync(token);

@@ -86,6 +86,11 @@ public class BoardSyncDbContext : DbContext
             // active-work-item count straight from the index.
             entity.HasIndex(w => new { w.ProjectId, w.IsActive, w.State });
 
+            // What BS-142 resolves to. Unique because a reference that matched two items would make
+            // the binding ambiguous, and the allocator guarantees it anyway — the index is what
+            // turns "guaranteed" into "enforced".
+            entity.HasIndex(w => new { w.ProjectId, w.Number }).IsUnique();
+
             // Postgres maintains xmin itself; mapping it costs no column and no migration, and
             // gives every work item a version EF can check on update.
             entity.Property(w => w.Version).IsRowVersion().HasColumnName("xmin").HasColumnType("xid");
@@ -147,6 +152,12 @@ public class BoardSyncDbContext : DbContext
             // Serves the workspace notification feed, which filters by a set of projects and sorts
             // by recency. Descending on CreatedAt so the feed's ORDER BY reads straight out of the
             // index instead of sorting the matched rows.
+            entity.Property(h => h.ActorType).HasConversion<string>().HasMaxLength(20);
+
+            // The git transition rules ask "has a person changed this item's state since?", which
+            // this serves directly — it is on the hot path of every webhook delivery.
+            entity.HasIndex(h => new { h.WorkItemId, h.FieldName, h.CreatedAt });
+
             entity.HasIndex(h => new { h.ProjectId, h.CreatedAt })
                 .IsDescending(false, true);
 
@@ -204,6 +215,8 @@ public class BoardSyncDbContext : DbContext
             //   IX_RoleAssignments_OneHolderPerTeamPosition  one TeamLead / ScrumMaster /
             //                                               ProductOwner per team, partial on
             //                                               "TeamId" IS NOT NULL
+            entity.Property(r => r.PrincipalType).HasConversion<string>().HasMaxLength(20);
+
             entity.HasIndex(r => new { r.Scope, r.ProjectId, r.TeamId, r.OrganizationId });
             entity.HasIndex(r => r.UserId);
             entity.HasIndex(r => r.TeamId);
@@ -279,6 +292,12 @@ public class BoardSyncDbContext : DbContext
             entity.HasKey(p => p.Id);
             entity.HasIndex(p => new { p.OrganizationId, p.Slug }).IsUnique();
             entity.HasIndex(p => p.IsActive);
+
+            entity.Property(p => p.Key).IsRequired().HasMaxLength(10);
+
+            // Unique per organization, and the lookup every git binding makes: a reference names a
+            // key, and the key has to resolve to exactly one project.
+            entity.HasIndex(p => new { p.OrganizationId, p.Key }).IsUnique();
 
             entity.Property(p => p.Slug).IsRequired().HasMaxLength(60);
             entity.Property(p => p.Name).IsRequired().HasMaxLength(100);

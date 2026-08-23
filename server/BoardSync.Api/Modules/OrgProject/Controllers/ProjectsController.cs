@@ -33,7 +33,7 @@ public class ProjectsController : ControllerBase
     /// narrower thing wearing a wider name.
     /// </remarks>
     private static readonly IReadOnlyList<RoleType> AssignableProjectRoles =
-        RolePermissions.AssignableAt(RoleScope.Project);
+        RolePermissions.GrantableToUsersAt(RoleScope.Project);
 
     private readonly IProjectService _projectService;
     private readonly IOrganizationService _orgService;
@@ -186,7 +186,7 @@ public class ProjectsController : ControllerBase
             projectId, project.OrganizationId, project.Name, request.UserId, request.Role, _currentUser.UserId));
 
         var assignment = await _rbac.AssignRoleAsync(
-            request.UserId, request.Role, RoleScope.Project, projectId, _currentUser.UserId, ct);
+            request.UserId, request.Role, RoleScope.Project, projectId, _currentUser.UserId, ct: ct);
 
         return Ok(new ApiResponse<ProjectRoleResponse>(true, $"Role updated to {request.Role}.",
             new ProjectRoleResponse(assignment.UserId, assignment.Role, assignment.CreatedAt)));

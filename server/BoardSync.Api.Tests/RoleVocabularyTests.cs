@@ -36,11 +36,42 @@ public class RoleVocabularyTests
              RoleType.TeamMember, RoleType.Tester, RoleType.Viewer],
             RolePermissions.AssignableAt(RoleScope.Team));
 
+    /// <summary>
+    /// Project scope, including the role no person may hold.
+    /// </summary>
+    /// <remarks>
+    /// <c>AssignableAt</c> answers what the database check constraint permits, and <c>Integration</c>
+    /// genuinely belongs there — a connected git installation holds it on the projects its repository
+    /// feeds. It must never reach a person, which is a different question with a different answer
+    /// below.
+    /// </remarks>
     [Fact]
     public void ProjectScopeHasItsOwnRoles() =>
         Assert.Equal(
-            [RoleType.ProjectAdmin, RoleType.Contributor, RoleType.Tester, RoleType.Viewer],
+            [RoleType.ProjectAdmin, RoleType.Contributor, RoleType.Tester, RoleType.Viewer,
+             RoleType.Integration],
             RolePermissions.AssignableAt(RoleScope.Project));
+
+    /// <summary>
+    /// What a role picker may offer, which excludes the roles held by non-human principals.
+    /// </summary>
+    /// <remarks>
+    /// The distinction exists because adding <c>Integration</c> to the project table would otherwise
+    /// have let a project administrator grant it to a colleague. That grants less than
+    /// <c>Contributor</c> so it is not an escalation — but it is a role nobody could explain the
+    /// presence of, and the endpoints that hand out roles validate against this list.
+    /// </remarks>
+    [Fact]
+    public void RolesHeldOnlyByIntegrationsAreNotGrantableToPeople()
+    {
+        Assert.Equal(
+            [RoleType.ProjectAdmin, RoleType.Contributor, RoleType.Tester, RoleType.Viewer],
+            RolePermissions.GrantableToUsersAt(RoleScope.Project));
+
+        // The other two scopes have no such role, so the two lists coincide there.
+        foreach (var scope in new[] { RoleScope.Organization, RoleScope.Team })
+            Assert.Equal(RolePermissions.AssignableAt(scope), RolePermissions.GrantableToUsersAt(scope));
+    }
 
     /// <summary>
     /// Every role means something somewhere. An enum member valid at no scope is unassignable and

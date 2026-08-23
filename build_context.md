@@ -874,7 +874,7 @@ behind it.
 *Exit: work reaches Done only through a human holding `workitem:verify`. The principal model that git
 sync depends on exists and is tested.*
 
-### Phase C — Git sync, GitHub first · **ingest shipped**, binding next
+### Phase C — Git sync, GitHub first · **the loop works**; management endpoints and backfill outstanding
 
 - [x] `kernel.Jobs` (§9) with `IJobQueue`, `JobWorker`, leases, exponential backoff and a dead-row
       state that stays queryable.
@@ -882,14 +882,17 @@ sync depends on exists and is tested.*
 - [x] GitHub App: HMAC-SHA256 verification over the raw body, constant-time compared; push and
       pull-request normalization.
 - [x] Ingest pipeline: verify → dedupe → persist → 202 → job.
+- [x] Project keys and work item numbers (`BS-142`), with existing rows backfilled.
+- [x] Binding resolver: branch, commit messages and pull request text, unioned; merge commits skipped.
+- [x] Typed principals — `PrincipalType`, the `Integration` role, and `WorkItemHistory.ActorType` +
+      `AttributedToUserId`.
+- [x] Transition application as the integration principal, with all three invariants.
 - [ ] Installation and repository-link management endpoints. Rows are created directly today, so
-      connecting a repository is not yet self-service.
-- [ ] Project keys and work item numbers (`BS-142`) — a migration and a display change everywhere.
-- [ ] Binding resolver: branch primary, commit token fallback, PR references.
-- [ ] Typed principals, alongside `GitProviderInstallation` as the second principal (§6.3).
-- [ ] Transition application as the integration principal, with all three invariants.
-- [ ] Unbound-commits view.
-- [ ] Backfill on link.
+      connecting a repository is not yet self-service — this is the gap before anyone outside the
+      team can use it.
+- [ ] Unbound-commits view. The data is there (deliveries record when they bound nothing); it needs
+      an endpoint and a screen.
+- [ ] Backfill on link — walk the last 90 days so the first report is meaningful on day one.
 
 *Split deliberately at the ingest/binding boundary.* Verification, idempotency, durability and the
 job pipeline are provably working before any of it is used to change a board — which is the half

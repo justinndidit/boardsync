@@ -1,3 +1,4 @@
+using BoardSync.Api.Modules.OrgProject.Domain.Helpers;
 using System.ComponentModel.DataAnnotations;
 
 namespace BoardSync.Api.Modules.OrgProject.Domain.DTOs;
@@ -49,6 +50,20 @@ public class CreateProjectRequest
     /// </summary>
     [Required]
     public Guid AssignedTeamId { get; init; }
+
+    /// <summary>
+    /// The short key people will type — the <c>BS</c> in <c>BS-142</c>. Derived from the name if
+    /// omitted.
+    /// </summary>
+    /// <remarks>
+    /// Settable only here. Changing it later orphans every branch name and commit message already
+    /// pushed that referenced the old one, and those cannot be rewritten — so there is no endpoint
+    /// to change it.
+    /// </remarks>
+    [MaxLength(ProjectKey.MaxLength)]
+    [RegularExpression("^[A-Za-z][A-Za-z0-9]{1,9}$",
+        ErrorMessage = "A project key must start with a letter and be 2–10 letters or digits.")]
+    public string? Key { get; init; }
 }
 
 public class UpdateProjectRequest

@@ -20,6 +20,18 @@ public interface IProjectService
     /// </remarks>
     Task<bool> AllowsSelfCertificationAsync(Guid projectId, CancellationToken ct = default);
 
+    /// <summary>
+    /// Takes the next work item number for a project, atomically.
+    /// </summary>
+    /// <remarks>
+    /// Runs in the caller's transaction, so a number taken by a create that then fails rolls back
+    /// with it rather than leaving a permanent gap in what people read as a continuous list.
+    /// </remarks>
+    Task<int> TakeNextWorkItemNumberAsync(Guid projectId, CancellationToken ct = default);
+
+    /// <summary>The project's short key, or an empty string if it no longer exists.</summary>
+    Task<string> GetKeyAsync(Guid projectId, CancellationToken ct = default);
+
     Task<bool> ExistsAsync(Guid projectId, CancellationToken ct = default);
 
     Task<PagedResult<ProjectSummaryResponse>> GetForOrgAsync(Guid orgId, PaginationQuery pagination, CancellationToken ct = default);

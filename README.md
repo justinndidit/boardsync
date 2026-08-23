@@ -82,7 +82,7 @@ access lives behind a repository per module; no controller or service touches `B
 | `Modules/Notifications` | The notification bell, derived from work item history |
 | `Modules/Search` | Global search across organizations, projects, members, work items |
 | `Shared/Auth` | Users, JWT issuance/refresh, password and email flows |
-| `Modules/GitSync` | Git provider connections, webhook ingest, normalization |
+| `Modules/GitSync` | Git provider connections, webhook ingest, work item binding, git-driven transitions |
 | `Shared/Kernel` | Outbox event bus and dispatcher, background job queue, rate limiting, typed configuration, domain exceptions |
 | `Shared/Data` | `BoardSyncDbContext` and EF Core migrations |
 
@@ -114,6 +114,24 @@ in `RolePermissions`, and a user holding several roles at one scope gets the **u
 permit — never a rank comparison, since a Scrum Master and a Product Owner are peers. Controllers
 authorize by declaring the permission an endpoint needs, `[RequirePermission(Permissions.SprintManage,
 From = "sprintId")]`, rather than by checking roles or raw claims.
+
+### Git-driven transitions
+
+A work item is referenced as `KEY-NUMBER` — `BS-142` — where the key belongs to the project and the
+number is per project. Put it in a branch name once (`bs-142-fix-login`) and every commit on that
+branch inherits it; a mention in a commit message or pull request text works too.
+
+| Git event | Moves the item to |
+| --- | --- |
+| First commit on a referencing branch | `Active` |
+| Pull request opened | `InReview` |
+| Pull request merged **into the project's default branch** | `Resolved` |
+| Pull request closed unmerged | `Active` |
+
+Three invariants make it trustworthy: a git event never moves an item **backwards**; a **person who
+changed the state after the event happened wins**; and `Resolved` is the ceiling — enforced because
+the installation is a principal holding `RoleType.Integration`, which carries `workitem:write` and
+deliberately not `workitem:verify`.
 
 ### The QA gate
 

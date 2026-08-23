@@ -110,6 +110,16 @@ public class WorkItem : BaseEntity
 
     public Guid ProjectId { get; set; }
 
+    /// <summary>
+    /// This item's number within its project: the <c>142</c> in <c>BS-142</c>.
+    /// </summary>
+    /// <remarks>
+    /// Per project, not global, so the key carries meaning — <c>BS-1</c> and <c>PAY-1</c> are both a
+    /// project's first item, which is what people expect and what makes the key worth typing.
+    /// Allocated from <c>Project.NextWorkItemNumber</c> in the creating transaction.
+    /// </remarks>
+    public int Number { get; set; }
+
     /// <summary>Optional team scope (for board/sprint assignment).</summary>
     public Guid? TeamId { get; set; }
 

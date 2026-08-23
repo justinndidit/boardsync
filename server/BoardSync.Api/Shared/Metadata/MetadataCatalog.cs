@@ -82,6 +82,7 @@ public static class MetadataCatalog
                     Label: display.Label,
                     Order: display.Order,
                     Scope: scope.ToString(),
+                    Grantable: !RolePermissions.HeldOnlyByIntegrations(role),
                     IsPosition: scope == RoleScope.Team && Modules.Rbac.Models.TeamPositions.Includes(role),
                     Permissions: Sorted(PermissionsFor(role, scope)),
 
