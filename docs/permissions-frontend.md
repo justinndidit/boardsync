@@ -7,8 +7,8 @@ Scope: `server/BoardSync.Api` · Companion to `docs/permissions-model.md`
 
 ## TL;DR
 
-**No route was renamed and no existing response body changed shape.** But the permission model was
-rebuilt underneath, and five things need frontend work:
+**Three sprint routes were renamed and the sprint response body changed one field.** Everything else
+kept its shape, but the permission model was rebuilt underneath. Six things need frontend work:
 
 | | Change | Impact |
 | --- | --- | --- |
@@ -17,14 +17,22 @@ rebuilt underneath, and five things need frontend work:
 | 3 | **New team positions**: Team Lead, Scrum Master, Product Owner | §6 — new endpoints, new UI. |
 | 4 | **Every role renamed to its scope**: `Reader` splits into `Member` / `Viewer`, project `TeamMember` becomes `Contributor` | ⚠️ **§7.4 — every role string you send or display changes.** |
 | 5 | **`GET /api/users/by-email` now needs member-management rights** | ⚠️ §7.2 — breaks mention/assignee pickers if used there. |
+| 6 | **Sprints moved from teams to projects**: 3 routes renamed, `teamId` → `projectId` | ⚠️ **§7.5, and §11 for the full route table.** Team-scoped sprint routes now 404. |
 
 Smaller behaviour changes worth knowing: §2 (last OrgAdmin), §3 (cascade), §4 (reassignment),
 §7.3 (work item type validation), §8 (bug fixes you may have coded around).
 
-**On deployment state:** everything in §1–§4 is on `origin/fix/conflict` now. Everything from §5
-onward — the permission vocabulary, team positions, the endpoint filter and the `by-email`
-restriction — is implemented and tested locally but **not yet pushed**, so do not build against
-§5–§8 until that lands. The 404 change in §5.1 in particular is not live yet.
+**On deployment state** (as of 2026-08-20):
+
+- **§1–§7.4 are merged and pushed** — the permission vocabulary, the role rename, team positions,
+  the endpoint filter, the `by-email` restriction and the 404/403 split. These are live on
+  `fix/conflict`; build against them.
+- **§7.5 and §11 — the sprint re-scoping — are committed on the branch but the fixes to it are not
+  yet.** The route rename itself landed with the sprint work; the authorization layer that makes
+  those routes usable is in review. Until it lands, sprint endpoints deny every caller, so a client
+  switched to the project routes will see 403s that are **not** a permission problem on your side.
+  Coordinate the switch rather than shipping it blind.
+- No migration has been applied to any shared environment yet.
 
 ---
 
@@ -186,11 +194,16 @@ read.
 
 ### What the positions actually change
 
+> **One row below is superseded by §7.5.** When sprints moved from teams to projects, **Team Lead
+> lost sprint authority** — it belongs to the Scrum Master and Product Owner, who keep it across
+> every project their team serves. The rest of this table still holds. §11.1 is the current,
+> authoritative version; where the two disagree, §11.1 wins.
+
 | Action | Before | Now |
 | --- | --- | --- |
-| Create / update / start / complete / delete a sprint | OrgAdmin only, in practice | Scrum Master, Product Owner, Team Lead, OrgAdmin |
+| Create / update / start / complete / delete a sprint | OrgAdmin only, in practice | Scrum Master, Product Owner, OrgAdmin — ~~Team Lead~~ (§7.5), plus `ProjectAdmin` |
 | Add / remove team members; rename or archive the team | OrgAdmin only, in practice | Team Lead, OrgAdmin |
-| Add / remove sprint backlog items | any team member | Scrum Master, Product Owner, Team Lead, OrgAdmin — **plus the exception below** |
+| Add / remove sprint backlog items | any team member | Scrum Master, Product Owner, OrgAdmin, `ProjectAdmin` — **plus the exception below** |
 | Move / reorder within a sprint | any team member | unchanged |
 | Create work items | any team member | unchanged |
 
@@ -200,8 +213,9 @@ for anyone else.
 
 ### The exception that affects the board UI
 
-A plain team member **can** add a work item to the sprint when **its parent is already in that
-sprint**. Breaking down committed work is not a scope change; committing new work is.
+Anyone with `sprint:order` — a plain team member, or a project contributor — **can** add a work item
+to the sprint when **its parent is already in that sprint**. Breaking down committed work is not a
+scope change; committing new work is.
 
 So "may I drag this into the sprint?" is not answerable from the user's role alone — it depends on
 the item's parent. Treat the 403 as the answer and surface its message, which explains the rule:
@@ -318,7 +332,8 @@ A sprint belongs to a project. Three things follow.
 | Decide what the sprint commits to | Team Lead, Scrum Master, Product Owner | Scrum Master or Product Owner of the project's team, `ProjectAdmin` on the project, or OrgAdmin |
 
 A Scrum Master and a Product Owner keep sprint authority over every project their team serves, so a
-UI gating sprint controls on those positions stays correct. Two things did change: a **Team Lead** no
+UI gating sprint controls on those positions stays correct. **§11.1 has the full matrix**, and §11
+the route table. Two things did change: a **Team Lead** no
 longer runs sprints unless they also hold `ProjectAdmin`, and a **project administrator who is on no
 team** now can. Sprint authority stops at the sprint — neither position gains any power to rename the
 project, configure its board, delete work items or grant roles on it.
@@ -350,8 +365,13 @@ work around this, you can stop.
 
 ## 9. What did *not* change
 
-- No routes added beyond §6, none removed or renamed.
-- No existing request or response body changed shape.
+- ~~No routes added beyond §6, none removed or renamed.~~ **No longer true.** Three sprint routes
+  were renamed when sprints moved from teams to projects — see §7.5 and the table in §11. Verified
+  by diffing every controller route across the change: those three are the *only* renames, and
+  nothing anywhere was removed.
+- ~~No existing request or response body changed shape.~~ One did: `SprintResponse.teamId` is now
+  `projectId` (§11). Every other request and response is unchanged.
+- Sprint work-item, board, backlog and org/team/project routes are all untouched.
 - Organization membership (`Member`, formerly `Reader`) still grants nothing inside the
   organization. An org member on no team holding no project role still sees no projects.
 - OrgAdmin still implicitly satisfies every check inside their organization.
@@ -368,3 +388,83 @@ This is now much easier to add than it was — permissions are named server-side
 returning the caller's permission set for a given scope is a small piece of work. If the UI is doing
 much guessing about what to show, ask for it; the guessing will get worse as positions and the
 sprint-scope rule land.
+
+---
+
+## 11. Sprint route reference
+
+The three renamed routes, which is the part that breaks a running client:
+
+| Was (now **404**) | Is |
+| --- | --- |
+| `GET /api/teams/{teamId}/sprints` | `GET /api/projects/{projectId}/sprints` |
+| `GET /api/teams/{teamId}/sprints/active` | `GET /api/projects/{projectId}/sprints/active` |
+| `POST /api/teams/{teamId}/sprints` | `POST /api/projects/{projectId}/sprints` |
+
+**No team-scoped sprint route answers any more.** They were not kept as aliases. Anything still
+calling `/api/teams/{teamId}/sprints…` gets a 404 from routing — not from the permission layer, so
+the 404/403 rules in §5.1 do not apply and no amount of permission will make it succeed.
+
+Every other sprint route is unchanged. The full surface, with the permission each one requires:
+
+| Method | Route | Requires |
+| --- | --- | --- |
+| GET | `/api/projects/{projectId}/sprints` | `sprint:read` |
+| GET | `/api/projects/{projectId}/sprints/active` | `sprint:read` |
+| POST | `/api/projects/{projectId}/sprints` | `sprint:manage` |
+| GET | `/api/sprints/{sprintId}` | `sprint:read` |
+| PUT | `/api/sprints/{sprintId}` | `sprint:manage` |
+| PATCH | `/api/sprints/{sprintId}/status` | `sprint:manage` |
+| DELETE | `/api/sprints/{sprintId}` | `sprint:manage` |
+| POST | `/api/sprints/{sprintId}/close` | `sprint:manage` |
+| GET | `/api/sprints/{sprintId}/workitems` | `sprint:read` |
+| POST | `/api/sprints/{sprintId}/workitems` | `sprint:scope`, or `sprint:order` if the item's parent is already in the sprint |
+| DELETE | `/api/sprints/{sprintId}/workitems/{workItemId}` | same as above |
+| PATCH | `/api/sprints/{sprintId}/workitems/{workItemId}/move` | `sprint:order` |
+| PATCH | `/api/sprints/{sprintId}/workitems/reorder` | `sprint:order` |
+
+Related, and unchanged: `POST /api/projects/{projectId}/backlog/move-to-sprint` and
+`…/return-from-sprint` both require `workitem:write` on the route's project *and* `sprint:scope` on
+the target sprint's project — the two need not be the same project. `GET /api/projects/{projectId}/board`
+returns the project's active sprint cards and requires `board:read`.
+
+### 11.1 Who holds each sprint permission
+
+This is the table to drive UI gating from. "Team" means a role held on the team the project is
+assigned to, which reaches the project through the team → project edge (§1).
+
+| | `sprint:read` | `sprint:order` | `sprint:manage` / `sprint:scope` |
+| --- | :---: | :---: | :---: |
+| **Project** `Viewer` | ✅ | — | — |
+| **Project** `Contributor` | ✅ | ✅ | — |
+| **Project** `ProjectAdmin` | ✅ | ✅ | ✅ |
+| **Team** `Viewer` | ✅ | — | — |
+| **Team** `TeamMember` | ✅ | ✅ | — |
+| **Team** `TeamLead` | ✅ | ✅ | — |
+| **Team** `ScrumMaster` | ✅ | ✅ | ✅ |
+| **Team** `ProductOwner` | ✅ | ✅ | ✅ |
+| `OrgAdmin` | ✅ | ✅ | ✅ |
+
+Two things worth reading off it. A **Scrum Master or Product Owner runs sprints on every project
+their team serves** — that is the appointment, and it needs no per-project grant. A **Team Lead does
+not**: they lead the people, and running the sprint is the other two positions' job, so a Team Lead
+who also needs it holds `ProjectAdmin` on the project. Sprint authority stops at the sprint in every
+case: none of these positions can rename the project, configure its board, delete work items or grant
+roles on it.
+
+### 11.2 Response shape
+
+`SprintResponse.teamId` is now **`projectId`**. That is the one response-body change in this whole
+note, and it affects `sprintApi.types.ts`. `SprintSummaryResponse` — what the list endpoint returns —
+never carried either field and is unchanged:
+
+```
+SprintResponse         { id, projectId, number, goal, startDate, endDate, status,
+                         workItemCount, completedCount, totalStoryPoints,
+                         completedStoryPoints, createdAt }
+
+SprintSummaryResponse  { id, number, goal, startDate, endDate, status, workItemCount }
+```
+
+Sprint **domain events** likewise carry `projectId` where they carried `teamId`, and are published to
+the project topic rather than the team topic (§7.5).
