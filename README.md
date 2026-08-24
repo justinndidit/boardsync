@@ -133,6 +133,24 @@ changed the state after the event happened wins**; and `Resolved` is the ceiling
 the installation is a principal holding `RoleType.Integration`, which carries `workitem:write` and
 deliberately not `workitem:verify`.
 
+### Git providers
+
+| Provider | Verification | What a verified delivery proves |
+| --- | --- | --- |
+| GitHub | HMAC-SHA256 over the raw body | Origin **and** that the payload was not altered |
+| GitLab | `X-Gitlab-Token`, a shared secret | Origin only |
+| Azure DevOps | HTTP Basic | Origin only — ADO cannot sign payloads at all |
+
+The difference is real and is recorded on every delivery rather than inferred from the provider, so
+an audit can answer what a given event was trusted on. For the two that cannot sign, the
+high-entropy segment in the webhook URL is part of the credential.
+
+One conformance suite runs the same scenarios against every adapter. It exists because the three
+express the same events differently — GitHub sends `closed` for a merge *and* an abandonment with a
+`merged` boolean to tell them apart, GitLab puts it in the action name, and Azure DevOps raises
+`git.pullrequest.merged` for its speculative conflict check so only `status: completed` means the
+pull request landed. Getting any of those backwards resolves work that was thrown away.
+
 ### Connecting a repository
 
 1. An **organization admin** connects the git host: `POST /api/orgs/{orgId}/git/installations`. The

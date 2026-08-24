@@ -903,7 +903,20 @@ There is a new role value, `Integration`, which will appear on `GET /api/metadat
 with **`grantable: false`**. Filter role pickers on that field rather than on the role name — it is
 there so you can render an existing grant, not so you can offer it.
 
-### 18.4 Settings screens you can now build
+### 18.4 Three providers now, not one
+
+`provider` on the connect request accepts `GitHub`, `GitLab` and `AzureDevOps`. Each gets its own
+webhook URL (`/api/git/gitlab/webhook/…`) and its own verification strength, which the connect
+response reports in `verification` and explains in `guidance`.
+
+⚠️ **Show the guidance.** GitHub proves a delivery's origin *and* its contents; GitLab and Azure
+DevOps prove only that the caller knew a secret, because neither signs the payload the way GitHub
+does. Administrators should know which they are getting — and for Azure DevOps, that the webhook URL
+is itself part of the credential.
+
+The delivery list carries `verification` per row for the same reason.
+
+### 18.5 Settings screens you can now build
 
 | Endpoint | Permission |
 | --- | --- |

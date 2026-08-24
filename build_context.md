@@ -907,11 +907,20 @@ the product.
 *Exit: a developer branches `bs-142-fix-login`, commits, opens a PR, merges — and the card moves
 New → Active → InReview → Resolved with nobody touching the board. It stops there, waiting for QA.*
 
-### Phase D — Providers 2–4, and notifications that notify · **notifications shipped**
+### Phase D — Providers 2–4, and notifications that notify · **GitLab, Azure DevOps and notifications shipped**
 
-- [ ] GitLab (signing token), Azure DevOps (Service Hooks + §7.3 compensating controls + merge
-      read-back), Bitbucket.
-- [ ] Provider conformance test suite: one set of scenarios, run against every adapter.
+- [x] GitLab (shared token) and Azure DevOps (Service Hooks, Basic auth).
+- [x] Provider conformance test suite: one set of scenarios run against every adapter, which is what
+      keeps three hosts that disagree about naming from putting three vocabularies into the domain.
+- [ ] Azure DevOps merge read-back (§7.3 control 3). ADO cannot sign payloads and raises
+      `git.pullrequest.merged` for its speculative conflict check, so `status: completed` is what the
+      adapter trusts. Corroborating a merge against the REST API before it resolves anything is the
+      remaining control, and it needs the same outbound provider clients as Phase C's backfill.
+- [ ] GitLab signing tokens. GitLab now offers an HMAC over the payload, which would put it level
+      with GitHub. Deliberately not guessed at: the header name and digest encoding want confirming
+      against a real delivery, and a subtly wrong signature check is worse than an honest shared
+      secret.
+- [ ] Bitbucket.
 - [x] Audit finding 10: a real `Notification` entity, recipient resolution off the outbox, read
       state, watching. The QA-lane notification needed a reverse permission lookup — who holds
       `workitem:verify` here — which is the inverse of every question the evaluator answered before.

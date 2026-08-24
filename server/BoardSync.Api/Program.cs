@@ -274,6 +274,8 @@ builder.Services.AddHostedService<JobWorker>();
 // rests entirely on the provider's signature and the installation's endpoint token.
 builder.Services.AddScoped<IGitRepository, GitRepository>();
 builder.Services.AddScoped<IGitProvider, GitHubProvider>();
+builder.Services.AddScoped<IGitProvider, GitLabProvider>();
+builder.Services.AddScoped<IGitProvider, AzureDevOpsProvider>();
 builder.Services.AddScoped<IGitProviderRegistry, GitProviderRegistry>();
 builder.Services.AddScoped<IWebhookIngestService, WebhookIngestService>();
 builder.Services.AddScoped<IRepositoryLinkService, RepositoryLinkService>();
