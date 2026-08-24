@@ -52,6 +52,31 @@ public static class RolePermissions
         Permissions.WorkItemVerify
     ];
 
+    /// <summary>
+    /// What a git installation may do on a project it feeds.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Contribution without certification: it moves work through the states a git signal can
+    /// identify, comments, and reads what it needs to decide. It carries no <c>workitem:verify</c>,
+    /// no <c>workitem:delete</c>, no <c>sprint:scope</c> and nothing administrative.
+    /// </para>
+    /// <para>
+    /// This list is the QA gate. Adding <c>workitem:verify</c> here would let a merge close a work
+    /// item, which is precisely what the product promises it cannot do — so it is the one entry in
+    /// this file worth guarding in review.
+    /// </para>
+    /// </remarks>
+    private static readonly string[] ProjectIntegration =
+    [
+        Permissions.ProjectRead,
+        Permissions.BoardRead,
+        Permissions.WorkItemRead,
+        Permissions.WorkItemWrite,
+        Permissions.WorkItemComment,
+        Permissions.SprintRead
+    ];
+
     private static readonly string[] ProjectViewer =
     [
         Permissions.ProjectRead,
@@ -177,7 +202,12 @@ public static class RolePermissions
             [RoleType.ProjectAdmin] = ProjectAdministrator.ToFrozenSet(),
             [RoleType.Contributor] = ProjectContributor.ToFrozenSet(),
             [RoleType.Tester] = ProjectTester.ToFrozenSet(),
-            [RoleType.Viewer] = ProjectViewer.ToFrozenSet()
+            [RoleType.Viewer] = ProjectViewer.ToFrozenSet(),
+
+            // Assignable only to an Integration principal. AssignableAt still lists it, because the
+            // check constraint has to permit it — the endpoints that hand out roles filter it out
+            // separately, and PrincipalType is what actually keeps it away from people.
+            [RoleType.Integration] = ProjectIntegration.ToFrozenSet()
         }.ToFrozenDictionary();
 
     // ── Team → project inheritance ────────────────────────────────────────────
@@ -294,6 +324,29 @@ public static class RolePermissions
                 ?.GetCustomAttribute<DisplayMetadataAttribute>()?.Order ?? int.MaxValue)
             .ThenBy(role => role.ToString(), StringComparer.Ordinal)
     ];
+
+    /// <summary>
+    /// Roles that may be granted to a <em>person</em> at a scope.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="AssignableAt"/> answers a different question — what the database check constraint
+    /// permits — and the two stopped coinciding when <see cref="RoleType.Integration"/> arrived. It
+    /// has to be valid at project scope, because a git installation genuinely holds it there; it must
+    /// never appear in a role picker or be accepted by an endpoint that hands roles to people.
+    /// </para>
+    /// <para>
+    /// Conflating the two would have let a project administrator grant <c>Integration</c> to a
+    /// colleague. That grants less than <c>Contributor</c>, so it is not an escalation — but it is a
+    /// role nobody can explain the presence of, and the kind of confusion that erodes trust in the
+    /// whole model.
+    /// </para>
+    /// </remarks>
+    public static IReadOnlyList<RoleType> GrantableToUsersAt(RoleScope scope) =>
+        [.. AssignableAt(scope).Where(role => !HeldOnlyByIntegrations(role))];
+
+    /// <summary>Whether a role exists for a non-human principal and must never be handed to a person.</summary>
+    public static bool HeldOnlyByIntegrations(RoleType role) => role is RoleType.Integration;
 
     private static FrozenDictionary<RoleType, FrozenSet<string>> RolesAt(RoleScope scope) => scope switch
     {

@@ -26,6 +26,7 @@ public class RbacService : IRbacService
         RoleScope scope,
         Guid scopeId,
         Guid? assignedBy = null,
+        PrincipalType principalType = PrincipalType.User,
         CancellationToken ct = default)
     {
         var existing = await _repository.GetAsync(userId, role, scope, scopeId, ct);
@@ -34,6 +35,7 @@ public class RbacService : IRbacService
             return existing;
 
         var assignment = CreateAssignment(userId, role, scope, scopeId, assignedBy);
+        assignment.PrincipalType = principalType;
 
         _repository.Add(assignment);
         await _repository.SaveChangesAsync(ct);
@@ -155,6 +157,38 @@ public class RbacService : IRbacService
         var snapshot = await _resolver.GetSnapshotAsync(userId, ct);
 
         return AccessEvaluator.VisibleProjects(snapshot, permission);
+    }
+
+    public async Task<IReadOnlyList<Guid>> GetUsersWithPermissionOnProjectAsync(
+        Guid projectId,
+        string permission,
+        CancellationToken ct = default)
+    {
+        var location = await _resolver.GetProjectLocationAsync(projectId, ct);
+
+        if (location is null) return [];
+
+        // Derived from the same table the evaluator reads, so "who may do this" and "may they do
+        // this" cannot disagree about which roles carry the permission.
+        var atProject = RolePermissions.AssignableAt(RoleScope.Project)
+            .Where(r => RolePermissions.ForProject(r).Contains(permission))
+            .ToList();
+
+        var viaTeam = RolePermissions.AssignableAt(RoleScope.Team)
+            .Where(r => RolePermissions.ForProjectViaTeam(r).Contains(permission))
+            .ToList();
+
+        var atOrganization = RolePermissions.AssignableAt(RoleScope.Organization)
+            .Where(r => RolePermissions.ForOrganization(r).Contains(permission))
+            .ToList();
+
+        // Membership confers TeamMember, so if that role carries the permission, everyone on the
+        // team has it whether or not a role row says so.
+        var includeTeamMembers = viaTeam.Contains(RoleType.TeamMember);
+
+        return await _repository.GetUsersWithProjectRolesAsync(
+            projectId, location.AssignedTeamId, location.OrganizationId,
+            atProject, viaTeam, atOrganization, includeTeamMembers, ct);
     }
 
     public async Task<Guid[]> GetVisibleOrganizationIdsAsync(

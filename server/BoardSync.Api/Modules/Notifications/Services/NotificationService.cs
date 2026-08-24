@@ -1,61 +1,59 @@
 using BoardSync.Api.Modules.Notifications.DTOs;
+using BoardSync.Api.Modules.Notifications.Models;
 using BoardSync.Api.Modules.Notifications.Repositories.Interfaces;
-using BoardSync.Api.Modules.Rbac.Models;
-using BoardSync.Api.Modules.Rbac.Services.Interfaces;
 
 namespace BoardSync.Api.Modules.Notifications.Services;
 
 /// <inheritdoc />
+/// <remarks>
+/// <para>
+/// Thin, and deliberately so. The bell used to derive its contents by querying work item history and
+/// wording each row on read, which meant every reader recomputed the same sentences and the module
+/// needed the permission model to decide what to hide. A notification is now addressed to one person
+/// when it is written, so reading it is a lookup by recipient and nothing else.
+/// </para>
+/// <para>
+/// <b>No permission filtering here, and that is not an omission.</b> A notification exists because
+/// somebody was entitled to it at the moment it was raised — they were the assignee, they were
+/// watching, they hold <c>workitem:verify</c>. Re-checking on read would be a second, weaker
+/// implementation of the same decision.
+/// </para>
+/// </remarks>
 public class NotificationService : INotificationService
 {
     private readonly INotificationRepository _repository;
-    private readonly IRbacService _rbac;
 
-    public NotificationService(INotificationRepository repository, IRbacService rbac)
+    public NotificationService(INotificationRepository repository)
     {
         _repository = repository;
-        _rbac = rbac;
     }
 
-    public async Task<IReadOnlyList<NotificationResponse>> GetForUserAsync(
-        Guid userId,
-        int limit = NotificationDefaults.DefaultLimit,
-        CancellationToken ct = default)
+    public async Task<NotificationFeedResponse> GetFeedAsync(
+        Guid userId, bool unreadOnly, int limit, CancellationToken ct = default)
     {
         var take = Math.Clamp(limit, 1, NotificationDefaults.MaxLimit);
 
-        // Every entry describes a work item change, so workitem:read is the gate — the same one that
-        // decides whether the client could open the item the entry points at.
-        var visibility = await _rbac.GetProjectVisibilityAsync(userId, Permissions.WorkItemRead, ct);
+        var items = await _repository.GetForRecipientAsync(userId, unreadOnly, take, ct);
 
-        if (visibility.IsEmpty) return [];
+        // Counted separately rather than taken from the page: the badge has to be right even when
+        // the list is truncated, and "20+" is a worse answer than the number.
+        var unread = await _repository.CountUnreadAsync(userId, ct);
 
-        var sources = await _repository.GetRecentForVisibleProjectsAsync(visibility, take, ct);
-
-        return sources.Select(Describe).ToList();
+        return new NotificationFeedResponse([.. items.Select(Describe)], unread);
     }
 
-    /// <summary>
-    /// Words a raw history row for display.
-    /// </summary>
-    /// <remarks>
-    /// The <c>type</c> vocabulary is preserved exactly as it was before this module existed —
-    /// <c>WorkItem{NewState}</c> for a state change, <c>WorkItemUpdated</c> for everything else —
-    /// because clients already switch on those strings.
-    /// </remarks>
-    private static NotificationResponse Describe(NotificationSource source)
-    {
-        var type = source.FieldName == "State"
-            ? $"WorkItem{source.NewValue}"
-            : "WorkItemUpdated";
+    public Task<bool> MarkReadAsync(Guid notificationId, Guid userId, CancellationToken ct = default) =>
+        _repository.MarkReadAsync(notificationId, userId, ct);
 
-        var title = $"{source.WorkItemTitle} — {source.FieldName} changed to {source.NewValue}";
+    public Task<int> MarkAllReadAsync(Guid userId, CancellationToken ct = default) =>
+        _repository.MarkAllReadAsync(userId, ct);
+
+    private static NotificationResponse Describe(NotificationWithContext row)
+    {
+        var n = row.Notification;
 
         return new NotificationResponse(
-            source.Id,
-            type,
-            title,
-            source.OrganizationName ?? string.Empty,
-            source.CreatedAt);
+            n.Id, n.Type, n.Title, n.Detail, n.Reference, n.EntityId, n.ProjectId,
+            row.OrganizationSlug, n.ActorName, n.ReadAt is not null, n.CreatedAt);
     }
 }

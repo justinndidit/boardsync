@@ -321,6 +321,117 @@ namespace BoardSync.Api.Shared.Data.Migrations
                     b.ToTable("WebhookDeliveries", "git");
                 });
 
+            modelBuilder.Entity("BoardSync.Api.Modules.Notifications.Models.Notification", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ActorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ActorName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Detail")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<Guid>("EntityId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("EventId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ReadAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("RecipientId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Reference")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RecipientId")
+                        .HasDatabaseName("IX_Notifications_Unread")
+                        .HasFilter("\"ReadAt\" IS NULL");
+
+                    b.HasIndex("EventId", "RecipientId")
+                        .IsUnique();
+
+                    b.HasIndex("RecipientId", "CreatedAt");
+
+                    b.ToTable("Notifications", "notify");
+                });
+
+            modelBuilder.Entity("BoardSync.Api.Modules.Notifications.Models.WorkItemWatcher", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsWatching")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("WorkItemId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("WorkItemId")
+                        .HasFilter("\"IsWatching\"");
+
+                    b.HasIndex("WorkItemId", "UserId")
+                        .IsUnique();
+
+                    b.ToTable("WorkItemWatchers", "notify");
+                });
+
             modelBuilder.Entity("BoardSync.Api.Modules.OrgProject.Domain.Models.Organization", b =>
                 {
                     b.Property<Guid>("Id")
@@ -428,10 +539,18 @@ namespace BoardSync.Api.Shared.Data.Migrations
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
+
+                    b.Property<int>("NextWorkItemNumber")
+                        .HasColumnType("integer");
 
                     b.Property<Guid>("OrganizationId")
                         .HasColumnType("uuid");
@@ -449,6 +568,9 @@ namespace BoardSync.Api.Shared.Data.Migrations
                     b.HasIndex("AssignedTeamId");
 
                     b.HasIndex("IsActive");
+
+                    b.HasIndex("OrganizationId", "Key")
+                        .IsUnique();
 
                     b.HasIndex("OrganizationId", "Slug")
                         .IsUnique();
@@ -545,6 +667,11 @@ namespace BoardSync.Api.Shared.Data.Migrations
 
                     b.Property<Guid?>("OrganizationId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("PrincipalType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
 
                     b.Property<Guid?>("ProjectId")
                         .HasColumnType("uuid");
@@ -771,6 +898,9 @@ namespace BoardSync.Api.Shared.Data.Migrations
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
 
+                    b.Property<int>("Number")
+                        .HasColumnType("integer");
+
                     b.Property<Guid?>("ParentId")
                         .HasColumnType("uuid");
 
@@ -828,6 +958,9 @@ namespace BoardSync.Api.Shared.Data.Migrations
 
                     b.HasIndex("Type");
 
+                    b.HasIndex("ProjectId", "Number")
+                        .IsUnique();
+
                     b.HasIndex("ProjectId", "IsActive", "State");
 
                     b.ToTable("WorkItems", "work");
@@ -877,6 +1010,14 @@ namespace BoardSync.Api.Shared.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("ActorType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<Guid?>("AttributedToUserId")
+                        .HasColumnType("uuid");
+
                     b.Property<Guid>("ChangedBy")
                         .HasColumnType("uuid");
 
@@ -916,6 +1057,8 @@ namespace BoardSync.Api.Shared.Data.Migrations
 
                     b.HasIndex("ProjectId", "CreatedAt")
                         .IsDescending(false, true);
+
+                    b.HasIndex("WorkItemId", "FieldName", "CreatedAt");
 
                     b.ToTable("WorkItemHistory", "work");
                 });

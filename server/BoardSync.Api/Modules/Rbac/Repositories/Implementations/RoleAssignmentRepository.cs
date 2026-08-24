@@ -93,6 +93,39 @@ public class RoleAssignmentRepository : IRoleAssignmentRepository
             .Where(ra => ra.TeamId == teamId && ra.Role == position)
             .ToListAsync(ct);
 
+    public async Task<IReadOnlyList<Guid>> GetUsersWithProjectRolesAsync(
+        Guid projectId,
+        Guid teamId,
+        Guid organizationId,
+        IReadOnlyCollection<RoleType> projectRoles,
+        IReadOnlyCollection<RoleType> teamRoles,
+        IReadOnlyCollection<RoleType> organizationRoles,
+        bool includeTeamMembers,
+        CancellationToken ct = default)
+    {
+        var atProject = projectRoles as List<RoleType> ?? [.. projectRoles];
+        var viaTeam = teamRoles as List<RoleType> ?? [.. teamRoles];
+        var atOrganization = organizationRoles as List<RoleType> ?? [.. organizationRoles];
+
+        var granted = _context.RoleAssignments
+            .Where(ra => ra.PrincipalType == PrincipalType.User
+                         && ((ra.ProjectId == projectId && atProject.Contains(ra.Role))
+                             || (ra.TeamId == teamId && viaTeam.Contains(ra.Role))
+                             || (ra.OrganizationId == organizationId && atOrganization.Contains(ra.Role))))
+            .Select(ra => ra.UserId);
+
+        // Membership is a grant in its own right — the same fold-in AccessResolver does when it
+        // builds a snapshot — so it has to be unioned rather than left to a TeamMember role row that
+        // may not exist.
+        if (includeTeamMembers)
+        {
+            granted = granted.Union(
+                _context.TeamMemberships.Where(m => m.TeamId == teamId).Select(m => m.UserId));
+        }
+
+        return await granted.Distinct().ToListAsync(ct);
+    }
+
     public Task<ProjectLocation?> GetProjectLocationAsync(
         Guid projectId,
         CancellationToken ct = default) =>

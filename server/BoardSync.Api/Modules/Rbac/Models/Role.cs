@@ -105,7 +105,29 @@ public enum RoleType
 
     /// <summary>Read-only: may view a team, or a project's board, sprints and work items.</summary>
     [DisplayMetadata("Viewer", 90, Description = "Read-only.")]
-    Viewer = 32
+    Viewer = 32,
+
+    // ── Not held by people ────────────────────────────────────────────────────
+
+    /// <summary>
+    /// What a connected git installation may do on a project it feeds.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Held only by a <see cref="PrincipalType.Integration"/> principal, never granted to a person —
+    /// there is no endpoint that hands it out, and it is deliberately absent from the roles a picker
+    /// offers.
+    /// </para>
+    /// <para>
+    /// <b>What it lacks is the point.</b> It permits contribution and carries neither
+    /// <c>workitem:verify</c> nor <c>workitem:delete</c> nor anything administrative, so automation
+    /// can carry work as far as "merged, awaiting test" and structurally cannot close it. See
+    /// <see cref="PrincipalType"/>.
+    /// </para>
+    /// </remarks>
+    [DisplayMetadata("Git integration", 100,
+        Description = "A connected git provider acting on webhook events.")]
+    Integration = 40
 }
 
 /// <summary>

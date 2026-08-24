@@ -1,28 +1,63 @@
+using BoardSync.Api.Modules.Notifications.Models;
+
 namespace BoardSync.Api.Modules.Notifications.DTOs;
 
 /// <summary>
 /// One entry in the notification bell.
 /// </summary>
 /// <remarks>
-/// Field-for-field identical to the shape this endpoint returned when it lived on
-/// <c>WorkspaceController</c>, so moving it here changed nothing on the wire.
+/// <para>
+/// ⚠️ <b>The shape changed.</b> The bell used to return work item history rows worded into
+/// sentences, with a <c>type</c> drawn from a field name and no read state — because there was no
+/// notification to have state. It is now a real record addressed to one person.
+/// </para>
+/// <para>
+/// Everything needed to render a row is here, so a bell showing twenty entries makes one request and
+/// no joins.
+/// </para>
 /// </remarks>
+/// <param name="Id">The notification.</param>
+/// <param name="Type">Why it was sent. Switch on this for the icon and the destination.</param>
+/// <param name="Title">One line, already worded — e.g. "BS-142 is awaiting QA".</param>
+/// <param name="Detail">Supporting detail: the work item title, or a comment's first line.</param>
+/// <param name="Reference">The work item as people call it, e.g. <c>BS-142</c>.</param>
+/// <param name="EntityId">The work item, for the deep link.</param>
+/// <param name="ProjectId">Its project.</param>
+/// <param name="OrganizationSlug">
+/// The organization's URL slug, so a client can build the deep link.
+///
+/// Here because the bell is global — it renders outside any organization's routes — and a client
+/// holding only a project id cannot construct a URL without a second round trip per row. A
+/// notification nobody can click through to is a worse notification.
+/// </param>
+/// <param name="ActorName">
+/// Who caused it. <b>May be an integration</b> — "GitHub" rather than a person — now that git moves
+/// the board on its own.
+/// </param>
+/// <param name="IsRead">Whether the recipient has read it.</param>
+/// <param name="CreatedAt">When it was raised.</param>
 public record NotificationResponse(
     Guid Id,
-    string Type,
+    NotificationType Type,
     string Title,
-    string Organization,
-    DateTime CreatedAt
-);
+    string? Detail,
+    string Reference,
+    Guid EntityId,
+    Guid ProjectId,
+    string OrganizationSlug,
+    string ActorName,
+    bool IsRead,
+    DateTime CreatedAt);
 
-/// <summary>
-/// A work item change as it comes out of the database, before it is worded for display.
-/// </summary>
-public readonly record struct NotificationSource(
-    Guid Id,
-    string FieldName,
-    string? NewValue,
-    string WorkItemTitle,
-    string? OrganizationName,
-    DateTime CreatedAt
-);
+/// <summary>The bell's contents and its badge.</summary>
+/// <param name="Items">The entries, newest first.</param>
+/// <param name="UnreadCount">
+/// How many unread the recipient has in total, which is not the same as how many unread are in
+/// <paramref name="Items"/> — the badge has to be right even when the list is truncated.
+/// </param>
+public record NotificationFeedResponse(
+    IReadOnlyList<NotificationResponse> Items,
+    int UnreadCount);
+
+/// <summary>Whether the caller is watching a work item.</summary>
+public record WatchStateResponse(Guid WorkItemId, bool IsWatching);

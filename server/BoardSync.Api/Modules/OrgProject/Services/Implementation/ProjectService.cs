@@ -58,11 +58,31 @@ public class ProjectService : IProjectService
         if (await _projectRepo.SlugExistsInOrganizationAsync(orgId, slug, ct))
             throw new ConflictException($"A project with slug '{slug}' already exists in this organization.");
 
+        // An explicit key is honoured and a collision is an error the caller can act on; a derived
+        // one silently disambiguates, because nobody chose it and failing on it would be a strange
+        // thing to refuse a project over.
+        var takenKeys = await _projectRepo.GetKeysInOrganizationAsync(orgId, ct);
+        string key;
+
+        if (request.Key is { Length: > 0 } requested)
+        {
+            key = requested.ToUpperInvariant();
+
+            if (takenKeys.Contains(key))
+                throw new ConflictException(
+                    $"A project with key '{key}' already exists in this organization.");
+        }
+        else
+        {
+            key = ProjectKey.Unique(request.Name, takenKeys);
+        }
+
         var project = new Project
         {
             OrganizationId = orgId,
             AssignedTeamId = request.AssignedTeamId,
             Slug = slug,
+            Key = key,
             Name = request.Name.Trim(),
             Description = request.Description?.Trim() ?? string.Empty,
             CreatedBy = createdBy
@@ -73,7 +93,7 @@ public class ProjectService : IProjectService
         await _projectRepo.SaveChangesAsync(ct);
 
         // Creator becomes ProjectAdmin
-        await _rbac.AssignRoleAsync(createdBy, RoleType.ProjectAdmin, RoleScope.Project, project.Id, createdBy, ct);
+        await _rbac.AssignRoleAsync(createdBy, RoleType.ProjectAdmin, RoleScope.Project, project.Id, createdBy, ct: ct);
 
         _logger.LogInformation("Project '{Name}' ({Id}) created in org {OrgId} by {UserId}",
             project.Name, project.Id, orgId, createdBy);
@@ -91,6 +111,15 @@ public class ProjectService : IProjectService
 
     public Task<bool> ExistsAsync(Guid projectId, CancellationToken ct = default) =>
         _projectRepo.ExistsActiveAsync(projectId, ct);
+
+    public Task<int> TakeNextWorkItemNumberAsync(Guid projectId, CancellationToken ct = default) =>
+        _projectRepo.TakeNextWorkItemNumberAsync(projectId, ct);
+
+    public Task<string> GetKeyAsync(Guid projectId, CancellationToken ct = default) =>
+        _projectRepo.GetKeyAsync(projectId, ct);
+
+    public Task<Guid?> GetOrganizationIdAsync(Guid projectId, CancellationToken ct = default) =>
+        _projectRepo.GetOrganizationIdAsync(projectId, ct);
 
     public Task<bool> AllowsSelfCertificationAsync(Guid projectId, CancellationToken ct = default) =>
         _projectRepo.AllowsSelfCertificationAsync(projectId, ct);
@@ -188,7 +217,7 @@ public class ProjectService : IProjectService
     {
         var team = await _teamRepo.GetActiveByIdAsync(p.AssignedTeamId, ct);
 
-        return new(p.Id, p.OrganizationId, p.Slug, p.Name, p.Description, p.IsActive,
+        return new(p.Id, p.OrganizationId, p.Slug, p.Key, p.Name, p.Description, p.IsActive,
             p.AssignedTeamId, team?.Name ?? string.Empty, p.AllowSelfCertification, p.CreatedAt);
     }
 }

@@ -91,6 +91,7 @@ public class WorkItemService : IWorkItemService
         var item = new WorkItem
         {
             ProjectId = projectId,
+            Number = await _projectService.TakeNextWorkItemNumberAsync(projectId, ct),
             TeamId = request.TeamId,
             ParentId = request.ParentId,
             Type = workItemTypeParsed,
@@ -723,9 +724,13 @@ public class WorkItemService : IWorkItemService
         var commentCount = await _repository.GetCommentCountAsync(workItemId, ct);
         var childCount = await _repository.GetChildCountAsync(workItemId, ct);
 
+        var projectKey = await _projectService.GetKeyAsync(item.ProjectId, ct);
+
         return new WorkItemResponse(
             item.Id,
             item.ProjectId,
+            item.Number,
+            $"{projectKey}-{item.Number}",
             item.TeamId,
             item.ParentId,
             item.Type,

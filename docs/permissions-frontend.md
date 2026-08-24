@@ -20,7 +20,8 @@ Scope: `server/BoardSync.Api` · Companions: `docs/permissions-model.md`, `build
 > | **E** | ⚠️ **Work item activity now appears in the feed, and boards update live.** It never did before — that was a bug, not a design. | **§15** |
 > | **F** | Search, the notification bell and the workspace summary now return **less** for some users, and the bell returns **more** for everyone. | **§16** |
 > | **G** | **`PATCH /api/workitems/{id}` exists**, and `expectedVersion` is now honoured — it was accepted and ignored before. | **§17** |
-> | **H** | Git webhook ingest has landed. Nothing visible yet, but §18 says what changes when binding does. | **§18** |
+> | **H** | ⚠️ **The board now updates itself from git.** Work items gained a `reference` (`BS-142`), state changes arrive with no user behind them, and some history rows have no person as the actor. | **§18** |
+> | **I** | ⚠️ **The notification bell changed shape and became real.** Object not array, new `type` values, read state, watching — and it now actually delivers, which it never did. | **§19** |
 >
 > If you only change one thing this week, make it **A** — everything you build against hardcoded
 > constants has to be rewritten once you adopt it.
@@ -859,35 +860,212 @@ stop being a rare race and become a routine event.
 
 ---
 
-## 18. Git integration — nothing for you yet, but here is the shape
+## 18. Git integration — the board now moves on its own
 
-Webhook ingest has landed: `POST /api/git/{provider}/webhook/{endpointToken}` accepts deliveries
-from GitHub, verifies them, and queues them. **It changes nothing you can see.** Deliveries are
-normalized and recorded; binding a commit to a work item is the next increment.
+⚠️ **This is live.** A developer branching `bs-142-fix-login`, committing, opening a pull request and
+merging now walks the work item `New → Active → InReview → Resolved` with nobody touching the board.
 
-Two things to know so you can plan around them:
+### 18.1 Work items have a reference now
 
-**A repository connection is not yet self-service.** Installation and repository-link rows are
-created directly in the database today, so there are no settings screens to build against. Those
-endpoints come with the binding work.
+`WorkItemResponse` gains two fields:
 
-**When binding lands, work items will start moving on their own.** A developer branching
-`bs-142-fix-login`, committing, opening a pull request and merging will walk the item
-`New → Active → InReview → Resolved` with nobody touching the board. Consequences for the client:
+```jsonc
+{ "number": 142, "reference": "BS-142", … }
+```
 
-- **State changes will arrive over the realtime channel from no user action of yours.** The contract
-  is unchanged (`docs/realtime-frontend.md`), but a board that only re-renders on local interaction
-  will look stale. Handle inbound `WorkItemStateChanged` for items nobody on this client touched.
-- **Activity entries will be attributed to the integration**, not to a person — with the commit
-  author carried alongside as attribution. Rendering an actor name will need to handle "GitHub (Ada
-  Lovelace)" as well as a plain user.
-- **`expectedVersion` stops being optional in practice.** A webhook worker writing while your user
-  edits is routine, not a rare race. §17.2 is the reason to start sending it now.
+**Show `reference` wherever an item is identified.** It is the only form a developer can put in a
+branch name, and the entire integration keys on it. `ProjectResponse` gains `key` (the `BS`), and
+`POST /api/orgs/{orgId}/projects` accepts an optional `key` — derived from the name when omitted,
+and **not changeable afterwards**, because renaming it orphans every branch already pushed.
 
-Nothing in this list requires work today. It is here so none of it is a surprise.
+Existing projects and work items were backfilled: keys from the slug, numbers in creation order.
+
+### 18.2 Three things change for the client
+
+- ⚠️ **State changes arrive from no action of yours.** The realtime contract is unchanged
+  (`docs/realtime-frontend.md`), but a board that only re-renders on local interaction will now look
+  stale. Handle inbound `WorkItemStateChanged` for items nobody on this client touched.
+- ⚠️ **Some history and activity entries have no user behind them.** `WorkItemHistory` rows now carry
+  `actorType` (`User` or `Integration`) and an optional `attributedToUserId` — the commit author,
+  when their git email matches a BoardSync account. Render "GitHub" or "GitHub (Ada Lovelace)"; do
+  not assume `changedBy` resolves to a person.
+- ⚠️ **`expectedVersion` matters now.** A webhook worker writing while your user edits is routine,
+  not a rare race. See §17.2.
+
+### 18.3 What the automation will not do
+
+It never closes a work item. `Resolved` — "Awaiting QA" — is the ceiling, and it holds structurally:
+the integration is a principal holding a role that carries `workitem:write` and deliberately not
+`workitem:verify`. It also never moves an item backwards, and never overrides a state a person set
+after the git event happened.
+
+There is a new role value, `Integration`, which will appear on `GET /api/metadata` at project scope
+with **`grantable: false`**. Filter role pickers on that field rather than on the role name — it is
+there so you can render an existing grant, not so you can offer it.
+
+### 18.4 Three providers now, not one
+
+`provider` on the connect request accepts `GitHub`, `GitLab` and `AzureDevOps`. Each gets its own
+webhook URL (`/api/git/gitlab/webhook/…`) and its own verification strength, which the connect
+response reports in `verification` and explains in `guidance`.
+
+⚠️ **Show the guidance.** GitHub proves a delivery's origin *and* its contents; GitLab and Azure
+DevOps prove only that the caller knew a secret, because neither signs the payload the way GitHub
+does. Administrators should know which they are getting — and for Azure DevOps, that the webhook URL
+is itself part of the credential.
+
+The delivery list carries `verification` per row for the same reason.
+
+### 18.5 Settings screens you can now build
+
+| Endpoint | Permission |
+| --- | --- |
+| `GET\|POST /api/orgs/{orgId}/git/installations` | `org:admin` |
+| `POST /api/git/installations/{id}/rotate-secret` | `org:admin` |
+| `DELETE /api/git/installations/{id}` | `org:admin` |
+| `GET /api/git/installations/{id}/deliveries` | `org:admin` |
+| `GET /api/projects/{projectId}/git/repositories` | **`project:read`** |
+| `POST\|DELETE /api/projects/{projectId}/git/repositories[/{linkId}]` | `project:admin` |
+
+⚠️ **The webhook secret is returned exactly once**, in the response to connecting or rotating. It is
+never retrievable again, on any endpoint. Your connect screen must make the user copy it before they
+navigate away — there is no "show secret" to fall back on, by design. The response also carries a
+`guidance` string saying what that provider's verification actually proves; show it, because it
+differs between providers and the difference is the customer's to weigh.
+
+**Rotating invalidates the old secret immediately**, so warn that the provider's configuration has to
+be updated before the next push. The URL does not change.
+
+**Linking is `project:admin` but listing is `project:read`** — knowing which repository moves your
+board is part of understanding the board, not an administrative detail. Show the list to anyone who
+can see the project.
+
+**The deliveries endpoint is the "is it working?" screen.** Each row carries an `outcome` in plain
+prose, including for deliveries that deliberately did nothing. Without it a quiet integration and a
+broken one look identical.
 
 ---
 
-## 19. Still missing
+## 19. ⚠️ The notification bell is a different thing now
+
+**The bell used to return work item history rows** worded into sentences, with a `type` derived from
+a field name and no read state — because there was no notification to have state. It showed everyone
+the same rows, and since it filtered on a column nothing wrote, it showed **nobody anything**.
+
+It is now a real record addressed to one person.
+
+### 19.1 The response shape changed
+
+```jsonc
+// GET /api/notifications?unreadOnly=false&limit=20
+{
+  "items": [
+    { "id": "…", "type": "WorkItemAwaitingVerification",
+      "title": "BS-142 is awaiting QA",
+      "detail": "Fix the login redirect",
+      "reference": "BS-142",
+      "entityId": "…",          // the work item, for the deep link
+      "projectId": "…",
+      "actorName": "GitHub",     // ⚠️ may be an integration, not a person
+      "isRead": false,
+      "createdAt": "…" }
+  ],
+  "unreadCount": 3
+}
+```
+
+⚠️ **It is an object now, not a bare array.** The list is `items`; `unreadCount` is the badge and is
+counted separately from the page, so it stays right when the list is truncated.
+
+⚠️ **`type` values changed.** They were `WorkItemActive`, `WorkItemUpdated` and so on — a field name
+glued to a value. They are now: `WorkItemAssigned`, `WorkItemStateChanged`, `WorkItemCommented`,
+`WorkItemAwaitingVerification`. Switch on these for the icon and the destination.
+
+`title` and `detail` are already worded for display — render them, do not reconstruct them.
+
+### 19.2 Read state exists
+
+```
+POST /api/notifications/{id}/read      → 204, or 404
+POST /api/notifications/read-all       → { data: <count> }
+GET  /api/notifications?unreadOnly=true
+```
+
+Marking somebody else's notification read returns **404**, not 403 — the recipient is part of the
+update's predicate, so another person's notification is indistinguishable from one that does not
+exist.
+
+### 19.3 Watching
+
+```
+GET    /api/workitems/{id}/watch     → { workItemId, isWatching }
+POST   /api/workitems/{id}/watch
+DELETE /api/workitems/{id}/watch
+```
+
+All three need `workitem:read`. **Most watching is implicit** — being assigned an item or commenting
+on it starts you watching — so the explicit control is for following work somebody else is doing. A
+watch toggle on a work item is worth showing; a "watch" onboarding flow is not.
+
+⚠️ **Unwatching is remembered.** Commenting on an item you unwatched will not re-subscribe you, so
+the toggle means what it says.
+
+### 19.4 What generates a notification
+
+| Event | Who is told |
+| --- | --- |
+| A work item is created with an assignee | The assignee |
+| A work item is reassigned | The new assignee |
+| A work item changes state | Everyone watching |
+| **A work item reaches `Resolved`** | **Everyone who can certify it** — the QA queue |
+| A comment is added | Everyone watching |
+
+**Nobody is ever notified about their own action.**
+
+The QA one is the notification this product exists to send: git carries work as far as "merged,
+awaiting test" on its own, and a gate nobody is told about is just a column people have to remember
+to check. Its recipients are whoever holds `workitem:verify` on the project, however they came by it.
+
+### 19.5 Not built yet
+
+No preferences — everyone gets everything they are entitled to, and unwatching an item is the escape
+hatch. No `@mentions`. No email; the bell is in-app only.
+
+---
+
+## 20. Delivery metrics you can chart
+
+```
+GET /api/sprints/{sprintId}/report                     sprint:read
+GET /api/projects/{projectId}/reports/velocity?sprints=6   project:read
+```
+
+Both are gated on **reading**, not administering — a burndown is something a team looks at together.
+
+**The sprint report** carries `summary`, a `burndown` array, `cycleTime`, and `itemsWithNoActivity`.
+
+- `burndown` has one point per elapsed day and **stops at today** — it does not project forward, so
+  do not pad it. Each point carries `remainingPoints`, `remainingItems` and `idealPoints`; chart the
+  ideal as a reference line, not a target.
+- `remainingItems` matters because items with no estimate contribute zero points. A sprint of
+  unestimated work has a flat points line and a falling item line, and showing only the first looks
+  like nothing is happening.
+- `summary.awaitingVerificationItems` is work merged and waiting to be tested. Worth its own
+  treatment: a sprint that looks behind may be finished work nobody has verified, which is a
+  different problem with a different owner.
+
+**`cycleTime`** reports medians in hours, and any of them may be `null` — that means "not enough
+closed work to say", not zero. `medianVerificationWaitHours` is the interesting one: how long
+finished work waits for QA.
+
+**Velocity** returns completed sprints only, oldest first. An in-flight sprint is deliberately
+excluded, so do not expect the current one to appear — its completed points would be a partial
+number and would render as a collapse.
+
+Nothing here is AI-generated. Every figure is computed from recorded history.
+
+---
+
+## 21. Still missing
 
 Nothing outstanding from the frontend contract's point of view.

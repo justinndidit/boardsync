@@ -15,6 +15,7 @@ using BoardSync.Api.Modules.Sprints.Repositories.Implementations;
 using BoardSync.Api.Modules.Sprints.Repositories.Interfaces;
 using BoardSync.Api.Modules.Sprints.Services;
 using BoardSync.Api.Modules.Rbac.Models;
+using BoardSync.Api.Modules.Reporting.Services;
 using BoardSync.Api.Modules.Rbac.Repositories.Implementations;
 using BoardSync.Api.Modules.Rbac.Repositories.Interfaces;
 using BoardSync.Api.Modules.WorkItems;
@@ -38,6 +39,7 @@ using BoardSync.Api.Modules.GitSync.Controllers;
 using BoardSync.Api.Modules.GitSync.Ingest;
 using BoardSync.Api.Modules.GitSync.Providers;
 using BoardSync.Api.Modules.GitSync.Repositories;
+using BoardSync.Api.Modules.GitSync.Services;
 using BoardSync.Api.Shared.Kernel.Events;
 using BoardSync.Api.Shared.Kernel.Jobs;
 using BoardSync.Api.Shared.Kernel.RateLimiting;
@@ -218,6 +220,9 @@ builder.Services.AddScoped<IScopeResolver, WorkItemLinkScopeResolver>();
 builder.Services.AddScoped<IScopeResolver, SprintScopeResolver>();
 builder.Services.AddScoped<IScopeResolver, BoardScopeResolver>();
 builder.Services.AddScoped<IScopeResolver, BoardColumnScopeResolver>();
+
+// A git installation is administered by the organization it belongs to.
+builder.Services.AddScoped<IScopeResolver, InstallationScopeResolver>();
 builder.Services.AddScoped<ScopeResolverRegistry>();
 builder.Services.AddScoped<PermissionAuthorizationFilter>();
 
@@ -270,9 +275,21 @@ builder.Services.AddHostedService<JobWorker>();
 // rests entirely on the provider's signature and the installation's endpoint token.
 builder.Services.AddScoped<IGitRepository, GitRepository>();
 builder.Services.AddScoped<IGitProvider, GitHubProvider>();
+builder.Services.AddScoped<IGitProvider, GitLabProvider>();
+builder.Services.AddScoped<IGitProvider, AzureDevOpsProvider>();
 builder.Services.AddScoped<IGitProviderRegistry, GitProviderRegistry>();
 builder.Services.AddScoped<IWebhookIngestService, WebhookIngestService>();
+builder.Services.AddScoped<IRepositoryLinkService, RepositoryLinkService>();
+builder.Services.AddScoped<IGitConnectionService, GitConnectionService>();
+builder.Services.AddScoped<IGitBindingService, GitBindingService>();
+builder.Services.AddScoped<IGitTransitionService, GitTransitionService>();
 builder.Services.AddScoped<IJobHandler<ProcessGitDelivery>, ProcessGitDeliveryHandler>();
+
+// Reporting Module
+// Deliberately separate from the Intelligence module that will narrate over it: everything here is
+// computed from recorded facts, and keeping that boundary in the module structure makes it harder to
+// blur than a comment would.
+builder.Services.AddScoped<IReportingService, ReportingService>();
 
 // Activity Module — subscribes to the other modules' domain events
 builder.Services.AddActivityModule();

@@ -65,6 +65,11 @@ public record EnumMetadata(string Value, string Label, int Order, string? Descri
 /// correctly within each scope's subset.
 /// </param>
 /// <param name="Scope">Where this grant applies: <c>Organization</c>, <c>Team</c> or <c>Project</c>.</param>
+/// <param name="Grantable">
+/// Whether a person may be given this role. False for roles that exist for non-human principals —
+/// today only <c>Integration</c>, held by a connected git installation. A role picker should offer
+/// only grantable roles; a display of an existing grant should still render this one.
+/// </param>
 /// <param name="IsPosition">
 /// Whether this is a singular appointment — one holder per team, handed over as an explicit act —
 /// rather than an ordinary grant. Positions are assigned through
@@ -83,6 +88,7 @@ public sealed record RoleMetadata(
     string Label,
     int Order,
     string Scope,
+    bool Grantable,
     bool IsPosition,
     IReadOnlyList<string> Permissions,
     IReadOnlyList<string>? InheritedProjectPermissions = null,

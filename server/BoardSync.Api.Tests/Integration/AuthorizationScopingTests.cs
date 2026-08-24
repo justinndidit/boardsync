@@ -70,18 +70,27 @@ public class AuthorizationScopingTests(BoardSyncApiFactory factory)
     }
 
     /// <summary>
-    /// The notification bell does not return history from projects the caller cannot open.
+    /// The notification bell tells people only what was addressed to them.
     /// </summary>
+    /// <remarks>
+    /// The leak this was written for is now structurally impossible rather than filtered away. The
+    /// bell used to read everyone's work item history and narrow it by permission; a notification
+    /// is now written to one recipient when it is raised, so somebody nothing was addressed to has an
+    /// empty bell by construction. Kept because that is the property that matters, however it is
+    /// achieved.
+    /// </remarks>
     [Fact]
-    public async Task NotificationsDoNotLeakAcrossThePermissionBoundary()
+    public async Task NotificationsAreAddressedRatherThanFiltered()
     {
         var workspace = await Workspace.CreateAsync(factory);
         await workspace.AddWorkItemAsync("notify me");
 
         var member = await workspace.AddOrganizationMemberAsync(factory);
 
-        Assert.NotEmpty(await workspace.Owner.Get<List<Notification>>("/api/notifications"));
-        Assert.Empty(await member.Get<List<Notification>>("/api/notifications"));
+        var theirs = await member.Get<Feed>("/api/notifications");
+
+        Assert.Empty(theirs.Items);
+        Assert.Equal(0, theirs.UnreadCount);
     }
 
     /// <summary>
@@ -117,7 +126,7 @@ public class AuthorizationScopingTests(BoardSyncApiFactory factory)
         var outsider = await TestApi.RegisterAsync(factory);
 
         Assert.Empty((await outsider.Get<SearchResults>($"/api/search?q={term}")).WorkItems);
-        Assert.Empty(await outsider.Get<List<Notification>>("/api/notifications"));
+        Assert.Empty((await outsider.Get<Feed>("/api/notifications")).Items);
 
         var summary = await outsider.Get<Summary>("/api/workspace/summary");
         Assert.Equal(0, summary.Organizations);
@@ -129,5 +138,6 @@ public class AuthorizationScopingTests(BoardSyncApiFactory factory)
 
     private sealed record Hit(Guid Id, string Title);
     private sealed record Notification(Guid Id, string Type, string Title);
+    private sealed record Feed(List<Notification> Items, int UnreadCount);
     private sealed record Summary(int Organizations, int Projects, int Members, int ActiveWorkItems);
 }

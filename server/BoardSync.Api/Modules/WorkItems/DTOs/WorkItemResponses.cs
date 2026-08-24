@@ -4,6 +4,11 @@ namespace BoardSync.Api.Modules.WorkItems.DTOs;
 
 /// <remarks>
 /// <para>
+/// <c>Reference</c> is what people type — <c>BS-142</c> — assembled from the project's key and this
+/// item's number. Show it wherever an item is identified; it is the only form a developer can put in
+/// a branch name, and the whole git integration keys on it.
+/// </para>
+/// <para>
 /// <c>Version</c> is an opaque row version. Send it back as <c>expectedVersion</c> when updating to
 /// be told about a conflict instead of silently overwriting whoever edited in between. Compare only
 /// — never compute with it or assume it increments by one.
@@ -19,6 +24,8 @@ namespace BoardSync.Api.Modules.WorkItems.DTOs;
 public record WorkItemResponse(
     Guid Id,
     Guid ProjectId,
+    int Number,
+    string Reference,
     Guid? TeamId,
     Guid? ParentId,
     WorkItemType Type,

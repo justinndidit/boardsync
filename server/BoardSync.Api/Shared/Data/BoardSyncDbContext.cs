@@ -6,6 +6,7 @@ using BoardSync.Api.Modules.Sprints.Models;
 using BoardSync.Api.Modules.WorkItems.Models;
 using BoardSync.Api.Shared.Auth.Models;
 using BoardSync.Api.Modules.GitSync.Ingest;
+using BoardSync.Api.Modules.Notifications.Models;
 using BoardSync.Api.Modules.GitSync.Models;
 using BoardSync.Api.Shared.Kernel.Events;
 using BoardSync.Api.Shared.Kernel.Jobs;
@@ -52,6 +53,10 @@ public class BoardSyncDbContext : DbContext
     // ---- Activity module ----
     public DbSet<ActivityLog> ActivityLogs { get; set; } = null!;
 
+    // ---- Notifications module ----
+    public DbSet<Notification> Notifications { get; set; } = null!;
+    public DbSet<WorkItemWatcher> WorkItemWatchers { get; set; } = null!;
+
     // ---- GitSync module ----
     public DbSet<GitProviderInstallation> GitProviderInstallations { get; set; } = null!;
     public DbSet<RepositoryLink> RepositoryLinks { get; set; } = null!;
@@ -85,6 +90,11 @@ public class BoardSyncDbContext : DbContext
             // that costs a heap probe per candidate row — this one answers the workspace summary's
             // active-work-item count straight from the index.
             entity.HasIndex(w => new { w.ProjectId, w.IsActive, w.State });
+
+            // What BS-142 resolves to. Unique because a reference that matched two items would make
+            // the binding ambiguous, and the allocator guarantees it anyway — the index is what
+            // turns "guaranteed" into "enforced".
+            entity.HasIndex(w => new { w.ProjectId, w.Number }).IsUnique();
 
             // Postgres maintains xmin itself; mapping it costs no column and no migration, and
             // gives every work item a version EF can check on update.
@@ -147,6 +157,12 @@ public class BoardSyncDbContext : DbContext
             // Serves the workspace notification feed, which filters by a set of projects and sorts
             // by recency. Descending on CreatedAt so the feed's ORDER BY reads straight out of the
             // index instead of sorting the matched rows.
+            entity.Property(h => h.ActorType).HasConversion<string>().HasMaxLength(20);
+
+            // The git transition rules ask "has a person changed this item's state since?", which
+            // this serves directly — it is on the hot path of every webhook delivery.
+            entity.HasIndex(h => new { h.WorkItemId, h.FieldName, h.CreatedAt });
+
             entity.HasIndex(h => new { h.ProjectId, h.CreatedAt })
                 .IsDescending(false, true);
 
@@ -204,6 +220,8 @@ public class BoardSyncDbContext : DbContext
             //   IX_RoleAssignments_OneHolderPerTeamPosition  one TeamLead / ScrumMaster /
             //                                               ProductOwner per team, partial on
             //                                               "TeamId" IS NOT NULL
+            entity.Property(r => r.PrincipalType).HasConversion<string>().HasMaxLength(20);
+
             entity.HasIndex(r => new { r.Scope, r.ProjectId, r.TeamId, r.OrganizationId });
             entity.HasIndex(r => r.UserId);
             entity.HasIndex(r => r.TeamId);
@@ -279,6 +297,12 @@ public class BoardSyncDbContext : DbContext
             entity.HasKey(p => p.Id);
             entity.HasIndex(p => new { p.OrganizationId, p.Slug }).IsUnique();
             entity.HasIndex(p => p.IsActive);
+
+            entity.Property(p => p.Key).IsRequired().HasMaxLength(10);
+
+            // Unique per organization, and the lookup every git binding makes: a reference names a
+            // key, and the key has to resolve to exactly one project.
+            entity.HasIndex(p => new { p.OrganizationId, p.Key }).IsUnique();
 
             entity.Property(p => p.Slug).IsRequired().HasMaxLength(60);
             entity.Property(p => p.Name).IsRequired().HasMaxLength(100);
@@ -569,6 +593,49 @@ public class BoardSyncDbContext : DbContext
             entity.Property(m => m.Topics).HasColumnType("text[]");
             entity.HasIndex(m => m.Topics).HasMethod("gin");
             entity.Property(m => m.LastError).HasMaxLength(2000);
+        });
+
+        // ----------------------------------------------------------------
+        // Notifications
+        // ----------------------------------------------------------------
+        modelBuilder.Entity<Notification>(entity =>
+        {
+            entity.ToTable("Notifications", "notify");
+            entity.HasKey(n => n.Id);
+
+            entity.Property(n => n.Type).HasConversion<string>().HasMaxLength(40);
+            entity.Property(n => n.Reference).IsRequired().HasMaxLength(30);
+            entity.Property(n => n.Title).IsRequired().HasMaxLength(300);
+            entity.Property(n => n.Detail).HasMaxLength(500);
+            entity.Property(n => n.ActorName).IsRequired().HasMaxLength(200);
+
+            // The bell's own query: one recipient, newest first.
+            entity.HasIndex(n => new { n.RecipientId, n.CreatedAt });
+
+            // The badge. Partial, because the count only ever asks about unread rows and the table
+            // is mostly read ones within a week of going live.
+            entity.HasIndex(n => n.RecipientId)
+                .HasFilter("\"ReadAt\" IS NULL")
+                .HasDatabaseName("IX_Notifications_Unread");
+
+            // What makes at-least-once outbox delivery safe: a redelivered event finds the row
+            // already there. Per recipient, because one event legitimately notifies several people.
+            entity.HasIndex(n => new { n.EventId, n.RecipientId }).IsUnique();
+        });
+
+        modelBuilder.Entity<WorkItemWatcher>(entity =>
+        {
+            entity.ToTable("WorkItemWatchers", "notify");
+            entity.HasKey(w => w.Id);
+
+            // One row per person per item — the row records a decision, including the decision to
+            // stop, so it must not accumulate.
+            entity.HasIndex(w => new { w.WorkItemId, w.UserId }).IsUnique();
+
+            // Fanning out to watchers, which happens on every state change and every comment.
+            entity.HasIndex(w => w.WorkItemId).HasFilter("\"IsWatching\"");
+
+            entity.HasIndex(w => w.UserId);
         });
 
         // ----------------------------------------------------------------

@@ -102,6 +102,35 @@ public interface IRoleAssignmentRepository
         CancellationToken ct = default);
 
     /// <summary>
+    /// The people who hold any of these roles on a project, by any of the three routes.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The inverse of every question the evaluator answers. <c>GrantsAtProject</c> takes a person and
+    /// a project; this takes a project and asks who. Nothing needed it until notifications did —
+    /// "who should be told this work is waiting to be tested" has no other way to be answered.
+    /// </para>
+    /// <para>
+    /// The three role sets are computed from <see cref="Models.RolePermissions"/> by the caller and
+    /// passed in, so this stays a query and the rules stay in one place. Team membership is folded in
+    /// because it is a grant in its own right, exactly as it is when building a snapshot.
+    /// </para>
+    /// <para>
+    /// <b>Integrations are excluded.</b> A principal that is not a person has nobody to notify, and
+    /// including it would put a notification row in a bell nobody opens.
+    /// </para>
+    /// </remarks>
+    Task<IReadOnlyList<Guid>> GetUsersWithProjectRolesAsync(
+        Guid projectId,
+        Guid teamId,
+        Guid organizationId,
+        IReadOnlyCollection<RoleType> projectRoles,
+        IReadOnlyCollection<RoleType> teamRoles,
+        IReadOnlyCollection<RoleType> organizationRoles,
+        bool includeTeamMembers,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Where a project sits in the scope tree, or null if it does not exist.
     /// </summary>
     Task<ProjectLocation?> GetProjectLocationAsync(Guid projectId, CancellationToken ct = default);

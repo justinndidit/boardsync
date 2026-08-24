@@ -82,7 +82,8 @@ access lives behind a repository per module; no controller or service touches `B
 | `Modules/Notifications` | The notification bell, derived from work item history |
 | `Modules/Search` | Global search across organizations, projects, members, work items |
 | `Shared/Auth` | Users, JWT issuance/refresh, password and email flows |
-| `Modules/GitSync` | Git provider connections, webhook ingest, normalization |
+| `Modules/GitSync` | Git provider connections, webhook ingest, work item binding, git-driven transitions |
+| `Modules/Reporting` | Burndown, velocity, cycle time — computed from work item history, never generated |
 | `Shared/Kernel` | Outbox event bus and dispatcher, background job queue, rate limiting, typed configuration, domain exceptions |
 | `Shared/Data` | `BoardSyncDbContext` and EF Core migrations |
 
@@ -115,6 +116,75 @@ permit — never a rank comparison, since a Scrum Master and a Product Owner are
 authorize by declaring the permission an endpoint needs, `[RequirePermission(Permissions.SprintManage,
 From = "sprintId")]`, rather than by checking roles or raw claims.
 
+### Git-driven transitions
+
+A work item is referenced as `KEY-NUMBER` — `BS-142` — where the key belongs to the project and the
+number is per project. Put it in a branch name once (`bs-142-fix-login`) and every commit on that
+branch inherits it; a mention in a commit message or pull request text works too.
+
+| Git event | Moves the item to |
+| --- | --- |
+| First commit on a referencing branch | `Active` |
+| Pull request opened | `InReview` |
+| Pull request merged **into the project's default branch** | `Resolved` |
+| Pull request closed unmerged | `Active` |
+
+Three invariants make it trustworthy: a git event never moves an item **backwards**; a **person who
+changed the state after the event happened wins**; and `Resolved` is the ceiling — enforced because
+the installation is a principal holding `RoleType.Integration`, which carries `workitem:write` and
+deliberately not `workitem:verify`.
+
+### Git providers
+
+| Provider | Verification | What a verified delivery proves |
+| --- | --- | --- |
+| GitHub | HMAC-SHA256 over the raw body | Origin **and** that the payload was not altered |
+| GitLab | `X-Gitlab-Token`, a shared secret | Origin only |
+| Azure DevOps | HTTP Basic | Origin only — ADO cannot sign payloads at all |
+
+The difference is real and is recorded on every delivery rather than inferred from the provider, so
+an audit can answer what a given event was trusted on. For the two that cannot sign, the
+high-entropy segment in the webhook URL is part of the credential.
+
+One conformance suite runs the same scenarios against every adapter. It exists because the three
+express the same events differently — GitHub sends `closed` for a merge *and* an abandonment with a
+`merged` boolean to tell them apart, GitLab puts it in the action name, and Azure DevOps raises
+`git.pullrequest.merged` for its speculative conflict check so only `status: completed` means the
+pull request landed. Getting any of those backwards resolves work that was thrown away.
+
+### Connecting a repository
+
+1. An **organization admin** connects the git host: `POST /api/orgs/{orgId}/git/installations`. The
+   response carries the webhook URL and secret — **once**. Neither is retrievable afterwards; a lost
+   secret is rotated, not recovered.
+2. They paste both into the provider's webhook configuration.
+3. A **project admin** wires a repository to their project:
+   `POST /api/projects/{projectId}/git/repositories`. That grant is what lets git move that board,
+   and the installation must belong to the project's own organization.
+
+`GET /api/git/installations/{id}/deliveries` shows what each delivery did, including when it
+deliberately did nothing — an unhandled event, an unlinked repository, a branch naming no work item.
+That is the difference between an integration that is quiet and one that is broken.
+
+### Delivery metrics
+
+`Modules/Reporting` computes burndown, velocity and cycle time by reconstructing state transitions
+from `WorkItemHistory`. Nothing is snapshotted nightly, so a burndown is correct for a sprint that
+ran before the feature existed and cannot be wrong because a job did not run.
+
+The figure worth having is **median verification wait** — how long finished work sits in the QA lane
+before somebody tests it. BoardSync can report it because the QA gate makes `Resolved → Closed` a
+real transition somebody performs, rather than a convention people follow when they remember. Cycle
+time generally means more here than in a hand-updated tracker: the board moves itself from git, so
+"reached In Review" is a pull request opening, not somebody dragging a card at the end of the day.
+
+Medians rather than means, because one item that sat in a backlog for three months drags an average
+somewhere nobody recognises — and a figure nobody recognises gets ignored.
+
+**These numbers are computed, never generated.** The planned Intelligence module will narrate over
+them and is deliberately a separate module for that reason: a model asked to both compute and
+narrate returns plausible numbers, and nobody downstream can tell which were which.
+
 ### The QA gate
 
 Work items run `New → Active → InReview → Resolved → Closed`. `Resolved` means **merged, awaiting
@@ -139,6 +209,7 @@ the authoritative reference; the table below is the map.
 | Auth (anonymous) | `POST /api/auth/{login,register,refresh-token,forgot-password,reset-password,confirm-email,resend-confirmation}` |
 | Auth (authenticated) | `POST /api/auth/{logout,revoke-token,change-password}`, `GET /api/auth/me`, `GET|PUT /api/auth/profile` |
 | Users | `GET /api/users/me`, `GET /api/users/{userId}`, `GET /api/users/by-email` |
+| Reports | `GET /api/sprints/{sprintId}/report` (`sprint:read`), `GET /api/projects/{projectId}/reports/velocity` (`project:read`) |
 | Metadata | `GET /api/metadata` — every enum the client renders, with labels and sort order; ETag/304 |
 | Capabilities | `GET /api/me/capabilities?scope=project:{id}`, `POST /api/me/capabilities` (batch, max 50) |
 | Search | `GET /api/search` |
@@ -152,6 +223,8 @@ the authoritative reference; the table below is the map.
 | Work items | `GET|POST /api/projects/{projectId}/workitems`, `GET|PUT|DELETE /api/workitems/{workItemId}`, `PATCH /api/workitems/{workItemId}/state`, `GET|POST /api/workitems/{workItemId}/comments`, `PUT|DELETE /api/workitems/comments/{commentId}`, `GET /api/workitems/{workItemId}/history`, `GET|POST /api/workitems/{workItemId}/links`, `DELETE /api/workitems/links/{linkId}` |
 | Sprint backlog move | `PATCH /api/sprints/{sprintId}/workitems/{workItemId}/move` — single-row drag-and-drop |
 | Real-time hub | `WS /hubs/workspace` — see `docs/realtime-frontend.md` |
+| Git connections | `GET\|POST /api/orgs/{orgId}/git/installations`, `POST /api/git/installations/{installationId}/rotate-secret`, `DELETE /api/git/installations/{installationId}`, `GET /api/git/installations/{installationId}/deliveries` |
+| Git repositories | `GET\|POST /api/projects/{projectId}/git/repositories`, `DELETE /api/projects/{projectId}/git/repositories/{linkId}` |
 | Git webhooks (anonymous) | `POST /api/git/{provider}/webhook/{endpointToken}` — verified by the provider's signature, not by a token |
 | Health (anonymous) | `GET /healthz` |
 

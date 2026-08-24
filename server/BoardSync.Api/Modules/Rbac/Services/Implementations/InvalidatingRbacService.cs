@@ -73,6 +73,12 @@ public sealed class InvalidatingRbacService : IRbacService
         CancellationToken ct = default)
         => _inner.GetPermissionsAtAsync(userId, scope, ct);
 
+    public Task<IReadOnlyList<Guid>> GetUsersWithPermissionOnProjectAsync(
+        Guid projectId,
+        string permission,
+        CancellationToken ct = default)
+        => _inner.GetUsersWithPermissionOnProjectAsync(projectId, permission, ct);
+
     public Task<IReadOnlyList<RoleAssignment>> GetUserRolesAsync(Guid userId, CancellationToken ct = default)
         => _inner.GetUserRolesAsync(userId, ct);
 
@@ -90,9 +96,11 @@ public sealed class InvalidatingRbacService : IRbacService
         RoleScope scope,
         Guid scopeId,
         Guid? assignedBy = null,
+        PrincipalType principalType = PrincipalType.User,
         CancellationToken ct = default)
     {
-        var assignment = await _inner.AssignRoleAsync(userId, role, scope, scopeId, assignedBy, ct);
+        var assignment = await _inner.AssignRoleAsync(
+            userId, role, scope, scopeId, assignedBy, principalType, ct);
         await InvalidateAsync(userId);
         return assignment;
     }

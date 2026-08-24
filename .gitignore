@@ -474,3 +474,4 @@ server/BoardSync.Api/BoardSync.Api.xml
 
 # Stray debug logs
 *.log
+ui/

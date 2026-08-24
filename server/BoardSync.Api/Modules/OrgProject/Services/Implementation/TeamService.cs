@@ -86,7 +86,7 @@ public class TeamService : ITeamService
             // authority over a project while granting authority over a team, and the database now
             // rejects the pairing outright. TeamLead is that authority said plainly, and it makes
             // the creator the team's first position holder rather than an anonymous administrator.
-            await _rbac.AssignRoleAsync(createdBy, RoleType.TeamLead, RoleScope.Team, team.Id, createdBy, token);
+            await _rbac.AssignRoleAsync(createdBy, RoleType.TeamLead, RoleScope.Team, team.Id, createdBy, ct: token);
         }, ct);
 
         _logger.LogInformation("Team '{Name}' ({Id}) created in organization {OrganizationId} by {UserId}",
@@ -188,7 +188,7 @@ public class TeamService : ITeamService
                 _eventBus.Enqueue(new MemberAddedToTeam(teamId, team.OrganizationId, userId, addedBy));
                 await _teamRepo.SaveChangesAsync(token);
 
-                await _rbac.AssignRoleAsync(userId, RoleType.TeamMember, RoleScope.Team, teamId, addedBy, token);
+                await _rbac.AssignRoleAsync(userId, RoleType.TeamMember, RoleScope.Team, teamId, addedBy, ct: token);
             }, ct);
         }
 

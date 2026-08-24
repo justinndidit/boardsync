@@ -1,4 +1,7 @@
 using System.Diagnostics;
+using BoardSync.Api.Data;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace BoardSync.Api.Tests.Integration;
 
@@ -118,35 +121,37 @@ public class OutboxDeliveryTests(BoardSyncApiFactory factory)
     /// The defect this pins: <c>WorkItemHistory.ProjectId</c> is documented on the model as copied
     /// from the work item at write time, <c>(ProjectId, CreatedAt)</c> is indexed for it, and a
     /// migration shipped the column — but <c>AddHistory</c> only ever received a work item id, so
-    /// every row ever written carried <c>Guid.Empty</c>. The notification feed filters on exactly
-    /// that column, so it returned nothing to anybody, including users who could see everything.
+    /// every row ever written carried <c>Guid.Empty</c>.
     /// </para>
     /// <para>
-    /// Asserted through the bell rather than by reading the column, because the bell is what the
-    /// unset value actually broke, and a test that reached into the table would have kept passing
-    /// while the feature stayed dead.
+    /// <b>This used to assert through the notification bell</b>, which filtered on the column and so
+    /// returned nothing to anybody. The bell is now a real addressed record and no longer reads
+    /// history at all, which leaves this column with no observable consumer — so the assertion goes
+    /// directly to the table. That is a weaker test than one that watches a feature break, and it is
+    /// the honest one available: see the note in docs/audit-2026-08.md about whether the column and
+    /// its index still earn their place.
     /// </para>
     /// </remarks>
     [Fact]
-    public async Task WorkItemHistoryIsFiledUnderItsProjectSoTheBellCanFindIt()
+    public async Task WorkItemHistoryIsFiledUnderItsProject()
     {
         var workspace = await Workspace.CreateAsync(factory);
-        var workItemId = await workspace.AddWorkItemAsync($"bell-{Guid.NewGuid():N}"[..20]);
+        var workItemId = await workspace.AddWorkItemAsync($"history-{Guid.NewGuid():N}"[..20]);
 
-        // A second history row, from a transition rather than creation, so both write paths are
-        // covered — they were separate calls and could have been fixed separately.
+        // Both write paths: creation and a transition were separate calls and could have been fixed
+        // separately.
         await workspace.Owner.Patch<object>($"/api/workitems/{workItemId}/state", new { state = "Active" });
 
-        var notifications = await Poll<List<Notification>>(
-            async () => await workspace.Owner.Get<List<Notification>>("/api/notifications"),
-            until: n => n.Count >= 2,
-            within: TimeSpan.FromSeconds(10));
+        using var scope = factory.Services.CreateScope();
 
-        Assert.True(notifications.Count >= 2,
-            $"Expected the creation and the transition to both appear; got {notifications.Count}. " +
-            "WorkItemHistory.ProjectId is probably unset again.");
+        var rows = await scope.ServiceProvider.GetRequiredService<BoardSyncDbContext>()
+            .WorkItemHistory
+            .Where(h => h.WorkItemId == workItemId)
+            .Select(h => h.ProjectId)
+            .ToListAsync();
 
-        Assert.Contains(notifications, n => n.Type == "WorkItemActive");
+        Assert.Equal(2, rows.Count);
+        Assert.All(rows, projectId => Assert.Equal(workspace.ProjectId, projectId));
     }
 
     // ── Polling helpers ───────────────────────────────────────────────────────

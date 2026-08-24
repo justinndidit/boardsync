@@ -874,7 +874,7 @@ behind it.
 *Exit: work reaches Done only through a human holding `workitem:verify`. The principal model that git
 sync depends on exists and is tested.*
 
-### Phase C — Git sync, GitHub first · **ingest shipped**, binding next
+### Phase C — Git sync, GitHub first · **usable end to end**; backfill outstanding
 
 - [x] `kernel.Jobs` (§9) with `IJobQueue`, `JobWorker`, leases, exponential backoff and a dead-row
       state that stays queryable.
@@ -882,14 +882,22 @@ sync depends on exists and is tested.*
 - [x] GitHub App: HMAC-SHA256 verification over the raw body, constant-time compared; push and
       pull-request normalization.
 - [x] Ingest pipeline: verify → dedupe → persist → 202 → job.
-- [ ] Installation and repository-link management endpoints. Rows are created directly today, so
-      connecting a repository is not yet self-service.
-- [ ] Project keys and work item numbers (`BS-142`) — a migration and a display change everywhere.
-- [ ] Binding resolver: branch primary, commit token fallback, PR references.
-- [ ] Typed principals, alongside `GitProviderInstallation` as the second principal (§6.3).
-- [ ] Transition application as the integration principal, with all three invariants.
-- [ ] Unbound-commits view.
-- [ ] Backfill on link.
+- [x] Project keys and work item numbers (`BS-142`), with existing rows backfilled.
+- [x] Binding resolver: branch, commit messages and pull request text, unioned; merge commits skipped.
+- [x] Typed principals — `PrincipalType`, the `Integration` role, and `WorkItemHistory.ActorType` +
+      `AttributedToUserId`.
+- [x] Transition application as the integration principal, with all three invariants.
+- [x] Installation and repository-link management endpoints — connect, rotate, disconnect, link,
+      unlink, and a delivery history. Connecting is `org:admin`; linking a repository to a project is
+      `project:admin`, and cross-organization links are refused.
+- [x] Delivery history endpoint, which is the "is the integration working?" view — a quiet
+      integration and a broken one are otherwise identical from the board.
+- [ ] Backfill on link — walk the last 90 days so the first report is meaningful on day one. Needs
+      the provider REST clients (installation-token exchange for GitHub), which is the first piece of
+      this module that talks *out* rather than only receiving.
+- [ ] A per-project view of unbound commits. The delivery history answers it at organization scope;
+      a team wants it filtered to their own project, which needs deliveries to carry the projects
+      they touched rather than only a prose outcome.
 
 *Split deliberately at the ingest/binding boundary.* Verification, idempotency, durability and the
 job pipeline are provably working before any of it is used to change a board — which is the half
@@ -899,24 +907,50 @@ the product.
 *Exit: a developer branches `bs-142-fix-login`, commits, opens a PR, merges — and the card moves
 New → Active → InReview → Resolved with nobody touching the board. It stops there, waiting for QA.*
 
-### Phase D — Providers 2–4, and notifications that notify
+### Phase D — Providers 2–4, and notifications that notify · **GitLab, Azure DevOps and notifications shipped**
 
-- GitLab (signing token), Azure DevOps (Service Hooks + §7.3 compensating controls + merge read-back),
-  Bitbucket.
-- Provider conformance test suite: one set of scenarios, run against every adapter.
-- Audit finding 10: a real `Notification` entity, recipient resolution off the outbox, read state,
-  preferences, watching. Git events are the highest-value notification source — *"your PR merged, BS-142
-  is awaiting QA"* — so this belongs here rather than earlier.
-- Audit finding 9: Postgres FTS for search.
+- [x] GitLab (shared token) and Azure DevOps (Service Hooks, Basic auth).
+- [x] Provider conformance test suite: one set of scenarios run against every adapter, which is what
+      keeps three hosts that disagree about naming from putting three vocabularies into the domain.
+- [ ] Azure DevOps merge read-back (§7.3 control 3). ADO cannot sign payloads and raises
+      `git.pullrequest.merged` for its speculative conflict check, so `status: completed` is what the
+      adapter trusts. Corroborating a merge against the REST API before it resolves anything is the
+      remaining control, and it needs the same outbound provider clients as Phase C's backfill.
+- [ ] GitLab signing tokens. GitLab now offers an HMAC over the payload, which would put it level
+      with GitHub. Deliberately not guessed at: the header name and digest encoding want confirming
+      against a real delivery, and a subtly wrong signature check is worse than an honest shared
+      secret.
+- [ ] Bitbucket.
+- [x] Audit finding 10: a real `Notification` entity, recipient resolution off the outbox, read
+      state, watching. The QA-lane notification needed a reverse permission lookup — who holds
+      `workitem:verify` here — which is the inverse of every question the evaluator answered before.
+- [ ] Notification preferences. Everyone currently gets everything they are entitled to; the escape
+      hatch is unwatching an item. Per-type opt-outs are the next thing people will ask for.
+- [ ] `@mentions` in comments. Deliberately deferred: matching a name or email in free text is
+      ambiguous enough to want a real mention syntax and a picker, not a regex.
+- [ ] Email delivery. The bell is in-app only.
+- [ ] Audit finding 9: Postgres FTS for search.
 
 *Exit: an Azure DevOps shop can adopt BoardSync. QA gets told when something needs testing.*
 
-### Phase E — Intelligence
+### Phase E — Intelligence · **the metrics layer is shipped; the narrative layer is not**
 
-- `Modules/Intelligence`, proposal model, acceptance flow, budget enforcement.
-- PRD decomposition with structured outputs.
-- Deterministic metrics layer — burndown, velocity, CFD, cycle time, merge-to-certification gap.
-- Narrative report layer over those metrics.
+- [x] Deterministic metrics — burndown, velocity, cycle time, and the merge-to-certification gap.
+      **Shipped as `Modules/Reporting`, not `Modules/Intelligence`.** §8.3's argument is that a model
+      asked to both compute and narrate produces plausible numbers nobody downstream can audit;
+      putting the computed figures in a module named for AI would blur that boundary before the AI
+      exists. Reporting computes, Intelligence will narrate over it, and the module structure is what
+      keeps the two from merging later.
+- [ ] `Modules/Intelligence`, proposal model, acceptance flow, budget enforcement.
+- [ ] PRD decomposition with structured outputs.
+- [ ] Narrative report layer, which receives a `SprintReport` and is instructed to cite only its
+      figures.
+- [ ] Cumulative flow diagram. Needs a state-count-per-day series, which the same history
+      reconstruction can produce — deferred only for size.
+- [ ] Git activity per work item — commits per item, items with no git activity. **Not currently
+      computable:** binding is stateless (no `CommitLink` table), which was the right call for
+      binding and means commit counts have nowhere to come from. Recording links is a real cost with
+      a real benefit; worth deciding deliberately rather than discovering when a report needs it.
 
 *Exit: a PRD becomes a reviewable sprint plan. A completed sprint produces a report whose numbers are
 computed and whose prose cites them.*
