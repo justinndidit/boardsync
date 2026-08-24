@@ -43,6 +43,15 @@ public class SprintService : ISprintService
         _logger         = logger;
     }
 
+    private static void ValidateDates(DateTime startDate, DateTime endDate)
+{
+    if (startDate.Date < DateTime.UtcNow.Date)
+        throw new BusinessRuleException("Sprint start date cannot be in the past.");
+
+    if (endDate <= startDate)
+        throw new BusinessRuleException("End date must be after start date.");
+}
+
     // ── CRUD ──────────────────────────────────────────────────────────────────
 
     public async Task<SprintResponse> CreateAsync(
@@ -54,8 +63,13 @@ public class SprintService : ISprintService
         if (!await _repository.ProjectExistsAsync(teamId, ct))
             throw new NotFoundException("Team", teamId);
 
-        if (request.EndDate <= request.StartDate)
-            throw new BusinessRuleException("End date must be after start date.");
+         if (!await _repository.ProjectExistsAsync(teamId, ct))
+         throw new NotFoundException("Team", teamId);
+
+         ValidateDates(request.StartDate, request.EndDate);
+
+        if (await _repository.HasOverlappingSprintAsync(teamId, request.StartDate, request.EndDate, ct))
+         throw new ConflictException("Sprint dates overlap with an existing sprint for this team.");
 
         if (await _repository.HasOverlappingSprintAsync(teamId, request.StartDate, request.EndDate, ct))
             throw new ConflictException("Sprint dates overlap with an existing sprint for this team.");
@@ -117,11 +131,12 @@ public class SprintService : ISprintService
         Guid updatedBy,
         CancellationToken ct = default)
     {
-        var sprint = await GetOrThrowAsync(sprintId, ct);
+       var sprint = await GetOrThrowAsync(sprintId, ct);
 
         if (sprint.Status != SprintStatus.Planning)
-            throw new BusinessRuleException("Only Planning sprints can be updated.");
+           throw new BusinessRuleException("Only Planning sprints can be updated.");
 
+         ValidateDates(request.StartDate, request.EndDate);
         if (request.EndDate <= request.StartDate)
             throw new BusinessRuleException("End date must be after start date.");
 
