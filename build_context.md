@@ -907,15 +907,20 @@ the product.
 *Exit: a developer branches `bs-142-fix-login`, commits, opens a PR, merges — and the card moves
 New → Active → InReview → Resolved with nobody touching the board. It stops there, waiting for QA.*
 
-### Phase D — Providers 2–4, and notifications that notify
+### Phase D — Providers 2–4, and notifications that notify · **notifications shipped**
 
-- GitLab (signing token), Azure DevOps (Service Hooks + §7.3 compensating controls + merge read-back),
-  Bitbucket.
-- Provider conformance test suite: one set of scenarios, run against every adapter.
-- Audit finding 10: a real `Notification` entity, recipient resolution off the outbox, read state,
-  preferences, watching. Git events are the highest-value notification source — *"your PR merged, BS-142
-  is awaiting QA"* — so this belongs here rather than earlier.
-- Audit finding 9: Postgres FTS for search.
+- [ ] GitLab (signing token), Azure DevOps (Service Hooks + §7.3 compensating controls + merge
+      read-back), Bitbucket.
+- [ ] Provider conformance test suite: one set of scenarios, run against every adapter.
+- [x] Audit finding 10: a real `Notification` entity, recipient resolution off the outbox, read
+      state, watching. The QA-lane notification needed a reverse permission lookup — who holds
+      `workitem:verify` here — which is the inverse of every question the evaluator answered before.
+- [ ] Notification preferences. Everyone currently gets everything they are entitled to; the escape
+      hatch is unwatching an item. Per-type opt-outs are the next thing people will ask for.
+- [ ] `@mentions` in comments. Deliberately deferred: matching a name or email in free text is
+      ambiguous enough to want a real mention syntax and a picker, not a regex.
+- [ ] Email delivery. The bell is in-app only.
+- [ ] Audit finding 9: Postgres FTS for search.
 
 *Exit: an Azure DevOps shop can adopt BoardSync. QA gets told when something needs testing.*
 

@@ -1,7 +1,6 @@
 using BoardSync.Api.Data;
-using BoardSync.Api.Modules.Notifications.DTOs;
+using BoardSync.Api.Modules.Notifications.Models;
 using BoardSync.Api.Modules.Notifications.Repositories.Interfaces;
-using BoardSync.Api.Modules.Rbac.Models;
 using Microsoft.EntityFrameworkCore;
 
 namespace BoardSync.Api.Modules.Notifications.Repositories.Implementations;
@@ -16,37 +15,39 @@ public class NotificationRepository : INotificationRepository
         _context = context;
     }
 
-    public async Task<IReadOnlyList<NotificationSource>> GetRecentForVisibleProjectsAsync(
-        ProjectVisibility visibility,
-        int take,
-        CancellationToken ct = default)
+    public async Task<IReadOnlyList<Notification>> GetForRecipientAsync(
+        Guid recipientId, bool unreadOnly, int take, CancellationToken ct = default)
     {
-        if (visibility.IsEmpty) return [];
+        var query = _context.Notifications.Where(n => n.RecipientId == recipientId);
 
-        // Left unmaterialized so it becomes a subquery rather than a round trip whose result is
-        // shipped straight back as an IN list.
-        var projectIds = _context.Projects
-            .Where(visibility.Predicate())
-            .Where(p => p.IsActive)
-            .Select(p => p.Id);
+        if (unreadOnly) query = query.Where(n => n.ReadAt == null);
 
-        // Id breaks ties: entries written in one transaction share a CreatedAt, and without a
+        // Id breaks ties: notifications written in one transaction share a CreatedAt, and without a
         // total order the rows returned are not deterministic between calls.
-        return await _context.WorkItemHistory
-            .Where(h => projectIds.Contains(h.ProjectId))
-            .OrderByDescending(h => h.CreatedAt)
-            .ThenByDescending(h => h.Id)
+        return await query
+            .OrderByDescending(n => n.CreatedAt)
+            .ThenByDescending(n => n.Id)
             .Take(take)
-            .Select(h => new NotificationSource(
-                h.Id,
-                h.FieldName,
-                h.NewValue,
-                h.WorkItem.Title,
-                _context.Projects
-                    .Where(p => p.Id == h.ProjectId)
-                    .Select(p => p.Organization.Name)
-                    .FirstOrDefault(),
-                h.CreatedAt))
             .ToListAsync(ct);
     }
+
+    public Task<int> CountUnreadAsync(Guid recipientId, CancellationToken ct = default) =>
+        _context.Notifications.CountAsync(n => n.RecipientId == recipientId && n.ReadAt == null, ct);
+
+    public async Task<bool> MarkReadAsync(
+        Guid notificationId, Guid recipientId, CancellationToken ct = default)
+    {
+        var updated = await _context.Notifications
+            .Where(n => n.Id == notificationId && n.RecipientId == recipientId && n.ReadAt == null)
+            .ExecuteUpdateAsync(set => set.SetProperty(n => n.ReadAt, DateTime.UtcNow), ct);
+
+        // Zero means it was already read, is not theirs, or does not exist. All three are "nothing
+        // to do", and telling them apart would say more than the caller is entitled to know.
+        return updated > 0;
+    }
+
+    public Task<int> MarkAllReadAsync(Guid recipientId, CancellationToken ct = default) =>
+        _context.Notifications
+            .Where(n => n.RecipientId == recipientId && n.ReadAt == null)
+            .ExecuteUpdateAsync(set => set.SetProperty(n => n.ReadAt, DateTime.UtcNow), ct);
 }

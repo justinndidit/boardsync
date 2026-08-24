@@ -6,6 +6,7 @@ using BoardSync.Api.Modules.Sprints.Models;
 using BoardSync.Api.Modules.WorkItems.Models;
 using BoardSync.Api.Shared.Auth.Models;
 using BoardSync.Api.Modules.GitSync.Ingest;
+using BoardSync.Api.Modules.Notifications.Models;
 using BoardSync.Api.Modules.GitSync.Models;
 using BoardSync.Api.Shared.Kernel.Events;
 using BoardSync.Api.Shared.Kernel.Jobs;
@@ -51,6 +52,10 @@ public class BoardSyncDbContext : DbContext
 
     // ---- Activity module ----
     public DbSet<ActivityLog> ActivityLogs { get; set; } = null!;
+
+    // ---- Notifications module ----
+    public DbSet<Notification> Notifications { get; set; } = null!;
+    public DbSet<WorkItemWatcher> WorkItemWatchers { get; set; } = null!;
 
     // ---- GitSync module ----
     public DbSet<GitProviderInstallation> GitProviderInstallations { get; set; } = null!;
@@ -588,6 +593,49 @@ public class BoardSyncDbContext : DbContext
             entity.Property(m => m.Topics).HasColumnType("text[]");
             entity.HasIndex(m => m.Topics).HasMethod("gin");
             entity.Property(m => m.LastError).HasMaxLength(2000);
+        });
+
+        // ----------------------------------------------------------------
+        // Notifications
+        // ----------------------------------------------------------------
+        modelBuilder.Entity<Notification>(entity =>
+        {
+            entity.ToTable("Notifications", "notify");
+            entity.HasKey(n => n.Id);
+
+            entity.Property(n => n.Type).HasConversion<string>().HasMaxLength(40);
+            entity.Property(n => n.Reference).IsRequired().HasMaxLength(30);
+            entity.Property(n => n.Title).IsRequired().HasMaxLength(300);
+            entity.Property(n => n.Detail).HasMaxLength(500);
+            entity.Property(n => n.ActorName).IsRequired().HasMaxLength(200);
+
+            // The bell's own query: one recipient, newest first.
+            entity.HasIndex(n => new { n.RecipientId, n.CreatedAt });
+
+            // The badge. Partial, because the count only ever asks about unread rows and the table
+            // is mostly read ones within a week of going live.
+            entity.HasIndex(n => n.RecipientId)
+                .HasFilter("\"ReadAt\" IS NULL")
+                .HasDatabaseName("IX_Notifications_Unread");
+
+            // What makes at-least-once outbox delivery safe: a redelivered event finds the row
+            // already there. Per recipient, because one event legitimately notifies several people.
+            entity.HasIndex(n => new { n.EventId, n.RecipientId }).IsUnique();
+        });
+
+        modelBuilder.Entity<WorkItemWatcher>(entity =>
+        {
+            entity.ToTable("WorkItemWatchers", "notify");
+            entity.HasKey(w => w.Id);
+
+            // One row per person per item — the row records a decision, including the decision to
+            // stop, so it must not accumulate.
+            entity.HasIndex(w => new { w.WorkItemId, w.UserId }).IsUnique();
+
+            // Fanning out to watchers, which happens on every state change and every comment.
+            entity.HasIndex(w => w.WorkItemId).HasFilter("\"IsWatching\"");
+
+            entity.HasIndex(w => w.UserId);
         });
 
         // ----------------------------------------------------------------

@@ -21,6 +21,7 @@ Scope: `server/BoardSync.Api` · Companions: `docs/permissions-model.md`, `build
 > | **F** | Search, the notification bell and the workspace summary now return **less** for some users, and the bell returns **more** for everyone. | **§16** |
 > | **G** | **`PATCH /api/workitems/{id}` exists**, and `expectedVersion` is now honoured — it was accepted and ignored before. | **§17** |
 > | **H** | ⚠️ **The board now updates itself from git.** Work items gained a `reference` (`BS-142`), state changes arrive with no user behind them, and some history rows have no person as the actor. | **§18** |
+> | **I** | ⚠️ **The notification bell changed shape and became real.** Object not array, new `type` values, read state, watching — and it now actually delivers, which it never did. | **§19** |
 >
 > If you only change one thing this week, make it **A** — everything you build against hardcoded
 > constants has to be rewritten once you adopt it.
@@ -932,6 +933,93 @@ broken one look identical.
 
 ---
 
-## 19. Still missing
+## 19. ⚠️ The notification bell is a different thing now
+
+**The bell used to return work item history rows** worded into sentences, with a `type` derived from
+a field name and no read state — because there was no notification to have state. It showed everyone
+the same rows, and since it filtered on a column nothing wrote, it showed **nobody anything**.
+
+It is now a real record addressed to one person.
+
+### 19.1 The response shape changed
+
+```jsonc
+// GET /api/notifications?unreadOnly=false&limit=20
+{
+  "items": [
+    { "id": "…", "type": "WorkItemAwaitingVerification",
+      "title": "BS-142 is awaiting QA",
+      "detail": "Fix the login redirect",
+      "reference": "BS-142",
+      "entityId": "…",          // the work item, for the deep link
+      "projectId": "…",
+      "actorName": "GitHub",     // ⚠️ may be an integration, not a person
+      "isRead": false,
+      "createdAt": "…" }
+  ],
+  "unreadCount": 3
+}
+```
+
+⚠️ **It is an object now, not a bare array.** The list is `items`; `unreadCount` is the badge and is
+counted separately from the page, so it stays right when the list is truncated.
+
+⚠️ **`type` values changed.** They were `WorkItemActive`, `WorkItemUpdated` and so on — a field name
+glued to a value. They are now: `WorkItemAssigned`, `WorkItemStateChanged`, `WorkItemCommented`,
+`WorkItemAwaitingVerification`. Switch on these for the icon and the destination.
+
+`title` and `detail` are already worded for display — render them, do not reconstruct them.
+
+### 19.2 Read state exists
+
+```
+POST /api/notifications/{id}/read      → 204, or 404
+POST /api/notifications/read-all       → { data: <count> }
+GET  /api/notifications?unreadOnly=true
+```
+
+Marking somebody else's notification read returns **404**, not 403 — the recipient is part of the
+update's predicate, so another person's notification is indistinguishable from one that does not
+exist.
+
+### 19.3 Watching
+
+```
+GET    /api/workitems/{id}/watch     → { workItemId, isWatching }
+POST   /api/workitems/{id}/watch
+DELETE /api/workitems/{id}/watch
+```
+
+All three need `workitem:read`. **Most watching is implicit** — being assigned an item or commenting
+on it starts you watching — so the explicit control is for following work somebody else is doing. A
+watch toggle on a work item is worth showing; a "watch" onboarding flow is not.
+
+⚠️ **Unwatching is remembered.** Commenting on an item you unwatched will not re-subscribe you, so
+the toggle means what it says.
+
+### 19.4 What generates a notification
+
+| Event | Who is told |
+| --- | --- |
+| A work item is created with an assignee | The assignee |
+| A work item is reassigned | The new assignee |
+| A work item changes state | Everyone watching |
+| **A work item reaches `Resolved`** | **Everyone who can certify it** — the QA queue |
+| A comment is added | Everyone watching |
+
+**Nobody is ever notified about their own action.**
+
+The QA one is the notification this product exists to send: git carries work as far as "merged,
+awaiting test" on its own, and a gate nobody is told about is just a column people have to remember
+to check. Its recipients are whoever holds `workitem:verify` on the project, however they came by it.
+
+### 19.5 Not built yet
+
+No preferences — everyone gets everything they are entitled to, and unwatching an item is the escape
+hatch. No `@mentions`. No email; the bell is in-app only.
+
+---
+
+## 20. Still missing
 
 Nothing outstanding from the frontend contract's point of view.

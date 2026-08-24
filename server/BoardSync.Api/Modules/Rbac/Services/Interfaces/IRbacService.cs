@@ -134,6 +134,26 @@ public interface IRbacService
         ScopeRef scope,
         CancellationToken ct = default);
 
+    /// <summary>
+    /// The people who may do <paramref name="permission"/> on a project.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The inverse of <see cref="HasPermissionAsync"/>, and the only way to answer "who should be
+    /// told about this?" — the notification for work reaching the QA lane has to reach whoever can
+    /// certify it, and nothing else can work that out.
+    /// </para>
+    /// <para>
+    /// Which roles carry the permission is derived from <see cref="Models.RolePermissions"/> rather
+    /// than listed, so this cannot fall out of step with what the guards actually allow. People
+    /// only: an integration principal has nobody to notify.
+    /// </para>
+    /// </remarks>
+    Task<IReadOnlyList<Guid>> GetUsersWithPermissionOnProjectAsync(
+        Guid projectId,
+        string permission,
+        CancellationToken ct = default);
+
     /// <summary>Return all role assignments for a user.</summary>
     Task<IReadOnlyList<RoleAssignment>> GetUserRolesAsync(Guid userId, CancellationToken ct = default);
 
