@@ -83,6 +83,7 @@ access lives behind a repository per module; no controller or service touches `B
 | `Modules/Search` | Global search across organizations, projects, members, work items |
 | `Shared/Auth` | Users, JWT issuance/refresh, password and email flows |
 | `Modules/GitSync` | Git provider connections, webhook ingest, work item binding, git-driven transitions |
+| `Modules/Reporting` | Burndown, velocity, cycle time — computed from work item history, never generated |
 | `Shared/Kernel` | Outbox event bus and dispatcher, background job queue, rate limiting, typed configuration, domain exceptions |
 | `Shared/Data` | `BoardSyncDbContext` and EF Core migrations |
 
@@ -165,6 +166,25 @@ pull request landed. Getting any of those backwards resolves work that was throw
 deliberately did nothing — an unhandled event, an unlinked repository, a branch naming no work item.
 That is the difference between an integration that is quiet and one that is broken.
 
+### Delivery metrics
+
+`Modules/Reporting` computes burndown, velocity and cycle time by reconstructing state transitions
+from `WorkItemHistory`. Nothing is snapshotted nightly, so a burndown is correct for a sprint that
+ran before the feature existed and cannot be wrong because a job did not run.
+
+The figure worth having is **median verification wait** — how long finished work sits in the QA lane
+before somebody tests it. BoardSync can report it because the QA gate makes `Resolved → Closed` a
+real transition somebody performs, rather than a convention people follow when they remember. Cycle
+time generally means more here than in a hand-updated tracker: the board moves itself from git, so
+"reached In Review" is a pull request opening, not somebody dragging a card at the end of the day.
+
+Medians rather than means, because one item that sat in a backlog for three months drags an average
+somewhere nobody recognises — and a figure nobody recognises gets ignored.
+
+**These numbers are computed, never generated.** The planned Intelligence module will narrate over
+them and is deliberately a separate module for that reason: a model asked to both compute and
+narrate returns plausible numbers, and nobody downstream can tell which were which.
+
 ### The QA gate
 
 Work items run `New → Active → InReview → Resolved → Closed`. `Resolved` means **merged, awaiting
@@ -189,6 +209,7 @@ the authoritative reference; the table below is the map.
 | Auth (anonymous) | `POST /api/auth/{login,register,refresh-token,forgot-password,reset-password,confirm-email,resend-confirmation}` |
 | Auth (authenticated) | `POST /api/auth/{logout,revoke-token,change-password}`, `GET /api/auth/me`, `GET|PUT /api/auth/profile` |
 | Users | `GET /api/users/me`, `GET /api/users/{userId}`, `GET /api/users/by-email` |
+| Reports | `GET /api/sprints/{sprintId}/report` (`sprint:read`), `GET /api/projects/{projectId}/reports/velocity` (`project:read`) |
 | Metadata | `GET /api/metadata` — every enum the client renders, with labels and sort order; ETag/304 |
 | Capabilities | `GET /api/me/capabilities?scope=project:{id}`, `POST /api/me/capabilities` (batch, max 50) |
 | Search | `GET /api/search` |

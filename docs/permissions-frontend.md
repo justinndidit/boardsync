@@ -1033,6 +1033,39 @@ hatch. No `@mentions`. No email; the bell is in-app only.
 
 ---
 
-## 20. Still missing
+## 20. Delivery metrics you can chart
+
+```
+GET /api/sprints/{sprintId}/report                     sprint:read
+GET /api/projects/{projectId}/reports/velocity?sprints=6   project:read
+```
+
+Both are gated on **reading**, not administering — a burndown is something a team looks at together.
+
+**The sprint report** carries `summary`, a `burndown` array, `cycleTime`, and `itemsWithNoActivity`.
+
+- `burndown` has one point per elapsed day and **stops at today** — it does not project forward, so
+  do not pad it. Each point carries `remainingPoints`, `remainingItems` and `idealPoints`; chart the
+  ideal as a reference line, not a target.
+- `remainingItems` matters because items with no estimate contribute zero points. A sprint of
+  unestimated work has a flat points line and a falling item line, and showing only the first looks
+  like nothing is happening.
+- `summary.awaitingVerificationItems` is work merged and waiting to be tested. Worth its own
+  treatment: a sprint that looks behind may be finished work nobody has verified, which is a
+  different problem with a different owner.
+
+**`cycleTime`** reports medians in hours, and any of them may be `null` — that means "not enough
+closed work to say", not zero. `medianVerificationWaitHours` is the interesting one: how long
+finished work waits for QA.
+
+**Velocity** returns completed sprints only, oldest first. An in-flight sprint is deliberately
+excluded, so do not expect the current one to appear — its completed points would be a partial
+number and would render as a collapse.
+
+Nothing here is AI-generated. Every figure is computed from recorded history.
+
+---
+
+## 21. Still missing
 
 Nothing outstanding from the frontend contract's point of view.

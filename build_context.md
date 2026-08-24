@@ -933,12 +933,24 @@ New → Active → InReview → Resolved with nobody touching the board. It stop
 
 *Exit: an Azure DevOps shop can adopt BoardSync. QA gets told when something needs testing.*
 
-### Phase E — Intelligence
+### Phase E — Intelligence · **the metrics layer is shipped; the narrative layer is not**
 
-- `Modules/Intelligence`, proposal model, acceptance flow, budget enforcement.
-- PRD decomposition with structured outputs.
-- Deterministic metrics layer — burndown, velocity, CFD, cycle time, merge-to-certification gap.
-- Narrative report layer over those metrics.
+- [x] Deterministic metrics — burndown, velocity, cycle time, and the merge-to-certification gap.
+      **Shipped as `Modules/Reporting`, not `Modules/Intelligence`.** §8.3's argument is that a model
+      asked to both compute and narrate produces plausible numbers nobody downstream can audit;
+      putting the computed figures in a module named for AI would blur that boundary before the AI
+      exists. Reporting computes, Intelligence will narrate over it, and the module structure is what
+      keeps the two from merging later.
+- [ ] `Modules/Intelligence`, proposal model, acceptance flow, budget enforcement.
+- [ ] PRD decomposition with structured outputs.
+- [ ] Narrative report layer, which receives a `SprintReport` and is instructed to cite only its
+      figures.
+- [ ] Cumulative flow diagram. Needs a state-count-per-day series, which the same history
+      reconstruction can produce — deferred only for size.
+- [ ] Git activity per work item — commits per item, items with no git activity. **Not currently
+      computable:** binding is stateless (no `CommitLink` table), which was the right call for
+      binding and means commit counts have nowhere to come from. Recording links is a real cost with
+      a real benefit; worth deciding deliberately rather than discovering when a report needs it.
 
 *Exit: a PRD becomes a reviewable sprint plan. A completed sprint produces a report whose numbers are
 computed and whose prose cites them.*

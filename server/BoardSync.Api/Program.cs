@@ -15,6 +15,7 @@ using BoardSync.Api.Modules.Sprints.Repositories.Implementations;
 using BoardSync.Api.Modules.Sprints.Repositories.Interfaces;
 using BoardSync.Api.Modules.Sprints.Services;
 using BoardSync.Api.Modules.Rbac.Models;
+using BoardSync.Api.Modules.Reporting.Services;
 using BoardSync.Api.Modules.Rbac.Repositories.Implementations;
 using BoardSync.Api.Modules.Rbac.Repositories.Interfaces;
 using BoardSync.Api.Modules.WorkItems;
@@ -283,6 +284,12 @@ builder.Services.AddScoped<IGitConnectionService, GitConnectionService>();
 builder.Services.AddScoped<IGitBindingService, GitBindingService>();
 builder.Services.AddScoped<IGitTransitionService, GitTransitionService>();
 builder.Services.AddScoped<IJobHandler<ProcessGitDelivery>, ProcessGitDeliveryHandler>();
+
+// Reporting Module
+// Deliberately separate from the Intelligence module that will narrate over it: everything here is
+// computed from recorded facts, and keeping that boundary in the module structure makes it harder to
+// blur than a comment would.
+builder.Services.AddScoped<IReportingService, ReportingService>();
 
 // Activity Module — subscribes to the other modules' domain events
 builder.Services.AddActivityModule();
