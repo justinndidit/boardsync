@@ -12,8 +12,8 @@ namespace BoardSync.Api.Modules.Notifications.Repositories.Interfaces;
 /// </remarks>
 public interface INotificationRepository
 {
-    /// <summary>The recipient's notifications, newest first.</summary>
-    Task<IReadOnlyList<Notification>> GetForRecipientAsync(
+    /// <summary>The recipient's notifications, newest first, each with its organization's slug.</summary>
+    Task<IReadOnlyList<NotificationWithContext>> GetForRecipientAsync(
         Guid recipientId, bool unreadOnly, int take, CancellationToken ct = default);
 
     /// <summary>How many the recipient has not read.</summary>
@@ -32,3 +32,14 @@ public interface INotificationRepository
     /// <summary>Marks everything the recipient has unread as read. Returns how many.</summary>
     Task<int> MarkAllReadAsync(Guid recipientId, CancellationToken ct = default);
 }
+
+/// <summary>A notification and the routing context a client needs to link to it.</summary>
+/// <remarks>
+/// Joined on read rather than stored on the row. A slug is renameable, and a copy written at
+/// notification time would send people to a URL that stopped existing — the id is the fact, the slug
+/// is how it is spelled today.
+/// </remarks>
+/// <param name="Notification">The row.</param>
+/// <param name="OrganizationSlug">The slug of the organization owning its project.</param>
+public sealed record NotificationWithContext(
+    Notification Notification, string OrganizationSlug);

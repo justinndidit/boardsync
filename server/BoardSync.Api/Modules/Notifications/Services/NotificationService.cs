@@ -48,7 +48,12 @@ public class NotificationService : INotificationService
     public Task<int> MarkAllReadAsync(Guid userId, CancellationToken ct = default) =>
         _repository.MarkAllReadAsync(userId, ct);
 
-    private static NotificationResponse Describe(Notification n) =>
-        new(n.Id, n.Type, n.Title, n.Detail, n.Reference, n.EntityId, n.ProjectId,
-            n.ActorName, n.ReadAt is not null, n.CreatedAt);
+    private static NotificationResponse Describe(NotificationWithContext row)
+    {
+        var n = row.Notification;
+
+        return new NotificationResponse(
+            n.Id, n.Type, n.Title, n.Detail, n.Reference, n.EntityId, n.ProjectId,
+            row.OrganizationSlug, n.ActorName, n.ReadAt is not null, n.CreatedAt);
+    }
 }

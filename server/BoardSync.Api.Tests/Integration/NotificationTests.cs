@@ -334,12 +334,39 @@ public class NotificationTests(BoardSyncApiFactory factory)
         Assert.DoesNotContain(feed.Items, n => n.Type == "WorkItemCommented" && !n.IsRead);
     }
 
+    /// <summary>
+    /// A notification carries enough to link to the thing it is about.
+    /// </summary>
+    /// <remarks>
+    /// The bell is global — it renders outside any organization's routes — so a client holding only
+    /// a project id cannot build a URL without a round trip per row. The slug is joined on read
+    /// rather than stored on the notification, because a slug is renameable and a copy taken when
+    /// the notification was raised would point at a URL that had since stopped existing.
+    /// </remarks>
+    [Fact]
+    public async Task ANotificationCarriesWhatALinkToItNeeds()
+    {
+        var workspace = await Workspace.CreateAsync(factory);
+        var teammate = await AddTeammateAsync(workspace);
+
+        var item = await AssignedItemAsync(workspace, teammate, "click through to me");
+
+        var feed = await WaitForAsync(teammate, f => f.Items.Count > 0);
+
+        var notification = Assert.Single(feed.Items);
+
+        Assert.Equal(item, notification.EntityId);
+        Assert.Equal(workspace.ProjectId, notification.ProjectId);
+        Assert.False(string.IsNullOrWhiteSpace(notification.OrganizationSlug));
+    }
+
     private sealed record Created(Guid Id);
     private sealed record WatchState(Guid WorkItemId, bool IsWatching);
 
     private sealed record NotificationView(
         Guid Id, string Type, string Title, string? Detail, string Reference,
-        Guid EntityId, Guid ProjectId, string ActorName, bool IsRead, DateTime CreatedAt);
+        Guid EntityId, Guid ProjectId, string OrganizationSlug, string ActorName,
+        bool IsRead, DateTime CreatedAt);
 
     private sealed record Feed(List<NotificationView> Items, int UnreadCount);
 }

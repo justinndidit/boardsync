@@ -57,6 +57,90 @@ public class QaGateEndpointTests(BoardSyncApiFactory factory)
     }
 
     /// <summary>
+    /// A team member cannot certify, reaching the project through the team edge.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Distinct from the contributor case above, and not covered by it. A project-scope
+    /// <c>Contributor</c> is a direct grant the evaluator finds without leaving the project; a
+    /// team-scope <c>TeamMember</c> reaches the project only through
+    /// <c>GetProjectLocationAsync</c> and the team → project inheritance table. Different code,
+    /// different chance of being wrong, and it is the shape most real users have — people are added
+    /// to teams, not granted project roles one at a time.
+    /// </para>
+    /// <para>
+    /// <c>QaGateTests</c> asserts the same thing against a hand-built snapshot. This asserts that a
+    /// real membership resolves to that snapshot.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task ATeamMemberCannotCertifyThroughTheTeamEdge()
+    {
+        var workspace = await Workspace.CreateAsync(factory);
+        var member = await workspace.AddOrganizationMemberAsync(factory);
+
+        // Team membership only. No project role at all — this is the whole point.
+        await workspace.Owner.Post($"/api/teams/{workspace.TeamId}/members",
+            new { userId = member.UserId });
+
+        var workItemId = await workspace.AddWorkItemAsync("team member path");
+
+        // Contribution reaches the QA lane, which confirms the team edge is granting write.
+        await MoveTo(member, workItemId, "Active");
+        await MoveTo(member, workItemId, "Resolved");
+
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await TryMoveTo(member, workItemId, "Closed")).StatusCode);
+
+        // And cannot pull it back out of the lane either.
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await TryMoveTo(member, workItemId, "Active")).StatusCode);
+    }
+
+    /// <summary>
+    /// An OrgAdmin can certify, including work on a team they merely belong to.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Asserted because it is the behaviour most likely to be reported as a hole in the gate. An
+    /// organization administrator holds every permission at every scope beneath them, so joining a
+    /// team as an ordinary member does not reduce what they may do — the team grant adds to their
+    /// authority, it does not replace it. Somebody testing the gate from the account that created
+    /// the organization will find they can close anything, and nothing is wrong.
+    /// </para>
+    /// <para>
+    /// If that is not wanted, the change is to <c>RolePermissions.Everything</c>, and it is a
+    /// product decision rather than a bug fix: an OrgAdmin can already grant themselves
+    /// <c>Tester</c> on any project in one request, so withholding certification would inconvenience
+    /// them without actually separating the authority.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task AnOrgAdminCertifiesEvenAsAnOrdinaryTeamMember()
+    {
+        var workspace = await Workspace.CreateAsync(factory);
+
+        // The owner is the organization's OrgAdmin and a plain member of the team.
+        var workItemId = await workspace.AddWorkItemAsync("org admin path");
+
+        await MoveTo(workspace.Owner, workItemId, "Active");
+        await MoveTo(workspace.Owner, workItemId, "Resolved");
+
+        // Self-certification is the separate rule, and it is what stops this one — the item is
+        // assigned to them. Reassigning removes that, leaving only the permission question.
+        var other = await workspace.AddOrganizationMemberAsync(factory);
+        await workspace.Owner.Post($"/api/teams/{workspace.TeamId}/members",
+            new { userId = other.UserId });
+
+        await workspace.Owner.Patch<object>($"/api/workitems/{workItemId}",
+            new { assigneeId = other.UserId });
+
+        var closing = await TryMoveTo(workspace.Owner, workItemId, "Closed");
+
+        Assert.Equal(HttpStatusCode.OK, closing.StatusCode);
+    }
+
+    /// <summary>
     /// A contributor cannot pull work back out of the QA lane either.
     /// </summary>
     /// <remarks>

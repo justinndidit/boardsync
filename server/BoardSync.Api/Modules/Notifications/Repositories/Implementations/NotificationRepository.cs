@@ -15,7 +15,7 @@ public class NotificationRepository : INotificationRepository
         _context = context;
     }
 
-    public async Task<IReadOnlyList<Notification>> GetForRecipientAsync(
+    public async Task<IReadOnlyList<NotificationWithContext>> GetForRecipientAsync(
         Guid recipientId, bool unreadOnly, int take, CancellationToken ct = default)
     {
         var query = _context.Notifications.Where(n => n.RecipientId == recipientId);
@@ -24,10 +24,21 @@ public class NotificationRepository : INotificationRepository
 
         // Id breaks ties: notifications written in one transaction share a CreatedAt, and without a
         // total order the rows returned are not deterministic between calls.
+        //
+        // The organization is joined rather than stored on the row, and left-joined rather than
+        // required: a project deleted after a notification was raised must not remove the entry
+        // telling somebody what happened. Those rows come back with an empty slug and render
+        // unlinked.
         return await query
             .OrderByDescending(n => n.CreatedAt)
             .ThenByDescending(n => n.Id)
             .Take(take)
+            .Select(n => new NotificationWithContext(
+                n,
+                _context.Projects
+                    .Where(p => p.Id == n.ProjectId)
+                    .Join(_context.Organizations, p => p.OrganizationId, o => o.Id, (p, o) => o.Slug)
+                    .FirstOrDefault() ?? string.Empty))
             .ToListAsync(ct);
     }
 

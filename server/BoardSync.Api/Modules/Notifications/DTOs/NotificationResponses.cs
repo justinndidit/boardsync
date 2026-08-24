@@ -23,6 +23,13 @@ namespace BoardSync.Api.Modules.Notifications.DTOs;
 /// <param name="Reference">The work item as people call it, e.g. <c>BS-142</c>.</param>
 /// <param name="EntityId">The work item, for the deep link.</param>
 /// <param name="ProjectId">Its project.</param>
+/// <param name="OrganizationSlug">
+/// The organization's URL slug, so a client can build the deep link.
+///
+/// Here because the bell is global — it renders outside any organization's routes — and a client
+/// holding only a project id cannot construct a URL without a second round trip per row. A
+/// notification nobody can click through to is a worse notification.
+/// </param>
 /// <param name="ActorName">
 /// Who caused it. <b>May be an integration</b> — "GitHub" rather than a person — now that git moves
 /// the board on its own.
@@ -37,6 +44,7 @@ public record NotificationResponse(
     string Reference,
     Guid EntityId,
     Guid ProjectId,
+    string OrganizationSlug,
     string ActorName,
     bool IsRead,
     DateTime CreatedAt);
