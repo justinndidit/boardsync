@@ -8,9 +8,10 @@ access control, and an activity feed.
 - React 19 + Vite frontend
 - Docker-based dev and production workflows
 
-> Status: the API is the mature part of the codebase. `boardsync-ui` is still the Vite starter
-> template — the client is not wired to the API yet. See `docs/activity-feed-frontend.md` for the
-> planned frontend contract.
+> Status: the API is the mature part of the codebase and is near feature-complete for v1. The
+> frontend lives in `ui/boardsync` (its own git repository, ignored here) and calls 73 of the API's
+> 113 routes. **The build paths below still point at `boardsync-ui`, which does not exist** — see
+> `docs/status-2026-08-24.md` §4 before trying to deploy.
 
 ## 1) Local Development Setup
 
