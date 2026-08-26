@@ -3,8 +3,16 @@ using BoardSync.Api.Modules.WorkItems.Models;
 namespace BoardSync.Api.Modules.Sprints.DTOs;
 
 /// <summary>A work item card displayed in a board column.</summary>
+/// <param name="Reference">
+/// The work item as people say it — <c>BS-142</c>.
+///
+/// On the card because it is what a developer types into a branch name, and branch names are how
+/// work binds to git. A board that never shows it makes the whole integration something you have to
+/// go and look up somewhere else first.
+/// </param>
 public record BoardCardResponse(
     Guid WorkItemId,
+    string Reference,
     string Title,
     WorkItemType Type,
     WorkItemPriority Priority,

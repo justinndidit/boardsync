@@ -43,6 +43,12 @@ public record SprintSummaryResponse(
 /// <summary>A single work item entry within a sprint backlog.</summary>
 public record SprintWorkItemResponse(
     Guid WorkItemId,
+
+    /// <summary>
+    /// The work item as people say it — <c>BS-142</c>. What a developer puts in a branch name.
+    /// </summary>
+    string Reference,
+
     string Title,
     WorkItemType Type,
     WorkItemState State,

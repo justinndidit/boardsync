@@ -56,14 +56,24 @@ public class BoardRepository : IBoardRepository
     public async Task<IReadOnlyList<BoardCardRow>> GetCardsForSprintAsync(
         Guid sprintId,
         Guid projectId,
-        CancellationToken ct = default) =>
-        await _context.SprintWorkItems
+        CancellationToken ct = default)
+    {
+        // One lookup for the whole board rather than a join per card. `Reference` is the key and
+        // the number composed — the key is the project's and identical for every card here, so
+        // joining it onto each row would ship the same string once per card.
+        var key = await _context.Projects
+            .Where(p => p.Id == projectId)
+            .Select(p => p.Key)
+            .FirstOrDefaultAsync(ct) ?? string.Empty;
+
+        var rows = await _context.SprintWorkItems
             .Where(sw => sw.SprintId == sprintId)
             .Join(_context.WorkItems.Where(w => w.ProjectId == projectId),
                 sw => sw.WorkItemId,
                 w => w.Id,
-                (sw, w) => new BoardCardRow(
+                (sw, w) => new CardRow(
                     w.Id,
+                    w.Number,
                     w.Title,
                     w.Type,
                     w.State,
@@ -78,6 +88,23 @@ public class BoardRepository : IBoardRepository
                         .Select(t => t.Name)
                         .ToList()))
             .ToListAsync(ct);
+
+        return [.. rows.Select(r => new BoardCardRow(
+            r.WorkItemId, $"{key}-{r.Number}", r.Title, r.Type, r.State,
+            r.Priority, r.AssigneeId, r.StoryPoints, r.Tags))];
+    }
+
+    /// <summary>The card as queried, before the project key is folded into a reference.</summary>
+    private sealed record CardRow(
+        Guid WorkItemId,
+        int Number,
+        string Title,
+        WorkItems.Models.WorkItemType Type,
+        WorkItems.Models.WorkItemState State,
+        WorkItems.Models.WorkItemPriority Priority,
+        Guid? AssigneeId,
+        int? StoryPoints,
+        List<string> Tags);
 
     public void Add(Board board) => _context.Boards.Add(board);
 

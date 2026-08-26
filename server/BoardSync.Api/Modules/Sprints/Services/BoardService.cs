@@ -252,7 +252,7 @@ public class BoardService : IBoardService
                 var colCards = cards
                     .Where(w => w.State.ToString() == col.MappedState)
                     .Select(w => new BoardCardResponse(
-                        w.WorkItemId, w.Title, w.Type, w.Priority,
+                        w.WorkItemId, w.Reference, w.Title, w.Type, w.Priority,
                         w.AssigneeId, w.StoryPoints, w.Tags))
                     .ToList();
 

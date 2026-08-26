@@ -289,8 +289,15 @@ public class SprintService : ISprintService
 
         await _repository.SaveChangesAsync(ct);
 
+        // Read directly rather than through the project service: this module already holds the
+        // context, and the key is one column on a row it has the id for.
+        var projectKey = await _context.Projects
+            .Where(p => p.Id == workItem.ProjectId)
+            .Select(p => p.Key)
+            .FirstOrDefaultAsync(ct) ?? string.Empty;
+
         return new SprintWorkItemResponse(
-            workItem.Id, workItem.Title, workItem.Type,
+            workItem.Id, $"{projectKey}-{workItem.Number}", workItem.Title, workItem.Type,
             workItem.State, workItem.Priority,
             workItem.AssigneeId, workItem.StoryPoints, position);
     }

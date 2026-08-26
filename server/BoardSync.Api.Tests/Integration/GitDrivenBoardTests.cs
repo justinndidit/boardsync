@@ -440,6 +440,63 @@ public class GitDrivenBoardTests(BoardSyncApiFactory factory)
             Assert.NotEqual(c.Workspace.Owner.UserId, h.ChangedBy));
     }
 
+    /// <summary>
+    /// The board's cards carry the reference a branch name has to contain.
+    /// </summary>
+    /// <remarks>
+    /// Work binds to git by its reference appearing in a branch name, a commit message or a pull
+    /// request title. A board that shows a card without ever showing <c>BS-142</c> makes that
+    /// something a developer has to go and look up elsewhere before they can start — which is the
+    /// integration being technically present and practically unusable.
+    /// </remarks>
+    [Fact]
+    public async Task BoardCardsCarryTheReferenceBranchNamesNeed()
+    {
+        var c = await ConnectAsync();
+        var itemId = await c.Workspace.AddWorkItemAsync("needs a reference");
+
+        var sprint = await c.Workspace.Owner.Post<Created>(
+            $"/api/projects/{c.Workspace.ProjectId}/sprints",
+            new
+            {
+                goal = "reference on cards",
+                startDate = DateTime.UtcNow.Date,
+                endDate = DateTime.UtcNow.Date.AddDays(7)
+            });
+
+        await c.Workspace.Owner.Post(
+            $"/api/sprints/{sprint.Id}/workitems", new { workItemId = itemId });
+
+        await c.Workspace.Owner.Patch<object>(
+            $"/api/sprints/{sprint.Id}/status", new { status = "Active" });
+
+        var expected = (await c.Workspace.Owner.Get<WorkItemView>(
+            $"/api/workitems/{itemId}")).Reference;
+
+        var board = await c.Workspace.Owner.Get<BoardView>(
+            $"/api/projects/{c.Workspace.ProjectId}/board");
+
+        var card = Assert.Single(
+            board.Columns.SelectMany(col => col.Cards),
+            x => x.WorkItemId == itemId);
+
+        Assert.Equal(expected, card.Reference);
+        Assert.Matches(@"^[A-Z][A-Z0-9]*-\d+$", card.Reference);
+
+        // And on the sprint listing, which is the other place work is picked up from.
+        var items = await c.Workspace.Owner.Get<Paged<SprintItemView>>(
+            $"/api/sprints/{sprint.Id}/workitems");
+
+        Assert.Equal(expected,
+            Assert.Single(items.Items, i => i.WorkItemId == itemId).Reference);
+    }
+
+    private sealed record Created(Guid Id);
+    private sealed record BoardView(List<BoardColumnView> Columns);
+    private sealed record BoardColumnView(Guid Id, string Name, List<BoardCardView> Cards);
+    private sealed record BoardCardView(Guid WorkItemId, string Reference, string Title);
+    private sealed record SprintItemView(Guid WorkItemId, string Reference, string Title);
+
     private sealed record HistoryView(
         Guid Id, Guid WorkItemId, Guid ChangedBy, string ActorType, Guid? AttributedToUserId,
         string FieldName, string? OldValue, string? NewValue, DateTime CreatedAt);
