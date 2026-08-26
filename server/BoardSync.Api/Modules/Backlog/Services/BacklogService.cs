@@ -58,10 +58,16 @@ public class BacklogService : IBacklogService
         var workItems = await _repository.GetWorkItemsAsync(workItemIds, ct);
         var childCounts = await _repository.GetChildCountsAsync(workItemIds, ct);
 
+        // Once for the page. The key is the same string for every item in a project's backlog, so
+        // joining it onto each row would ship it once per row for nothing.
+        var projectKey = await _repository.GetProjectKeyAsync(projectId, ct);
+
         // An entry whose work item has since been deleted is skipped rather than rendered blank.
         var items = entries
             .Where(b => workItems.ContainsKey(b.WorkItemId))
-            .Select(b => Map(b, workItems[b.WorkItemId], childCounts.GetValueOrDefault(b.WorkItemId, 0)))
+            .Select(b => Map(
+                b, workItems[b.WorkItemId],
+                childCounts.GetValueOrDefault(b.WorkItemId, 0), projectKey))
             .ToList();
 
         return new PagedResult<BacklogItemResponse>(items, total, pagination.Page, pagination.PageSize);
@@ -235,11 +241,14 @@ public class BacklogService : IBacklogService
     {
         var counts = await _repository.GetChildCountsAsync([workItem.Id], ct);
 
-        return Map(entry, workItem, counts.GetValueOrDefault(workItem.Id, 0));
+        return Map(entry, workItem, counts.GetValueOrDefault(workItem.Id, 0),
+            await _repository.GetProjectKeyAsync(entry.ProjectId, ct));
     }
 
-    private static BacklogItemResponse Map(BacklogItem entry, WorkItem w, int childCount) =>
-        new(entry.Id, entry.WorkItemId, entry.ProjectId, entry.TeamId, entry.SprintId, entry.Rank,
+    private static BacklogItemResponse Map(
+        BacklogItem entry, WorkItem w, int childCount, string projectKey) =>
+        new(entry.Id, entry.WorkItemId, $"{projectKey}-{w.Number}",
+            entry.ProjectId, entry.TeamId, entry.SprintId, entry.Rank,
             w.Title, w.Type, w.State, w.Priority, w.AssigneeId, w.StoryPoints,
             w.Tags.Select(t => t.Name).ToList(),
             childCount, w.CreatedAt);

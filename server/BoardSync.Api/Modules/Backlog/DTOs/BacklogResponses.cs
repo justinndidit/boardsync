@@ -3,9 +3,16 @@ using BoardSync.Api.Modules.WorkItems.Models;
 namespace BoardSync.Api.Modules.Backlog.DTOs;
 
 /// <summary>A single item in the backlog list view.</summary>
+/// <summary>One item awaiting a sprint.</summary>
+/// <param name="Reference">
+/// The work item as people say it — <c>BS-142</c>. On the backlog because this is the list work is
+/// picked up from, and the reference is what a branch name has to contain for the board to move
+/// itself once somebody starts.
+/// </param>
 public record BacklogItemResponse(
     Guid BacklogItemId,
     Guid WorkItemId,
+    string Reference,
     Guid ProjectId,
     Guid? TeamId,
     Guid? SprintId,

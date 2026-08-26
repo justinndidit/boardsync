@@ -489,6 +489,22 @@ public class GitDrivenBoardTests(BoardSyncApiFactory factory)
 
         Assert.Equal(expected,
             Assert.Single(items.Items, i => i.WorkItemId == itemId).Reference);
+
+        // And on the backlog — the third list work is picked up from, and the one where somebody is
+        // most likely to be deciding what to start next.
+        var backlogItem = await c.Workspace.AddWorkItemAsync("waiting in the backlog");
+
+        await c.Workspace.Owner.Post(
+            $"/api/projects/{c.Workspace.ProjectId}/backlog",
+            new { workItemId = backlogItem });
+
+        var backlog = await c.Workspace.Owner.Get<Paged<BacklogItemView>>(
+            $"/api/projects/{c.Workspace.ProjectId}/backlog");
+
+        var queued = Assert.Single(
+            backlog.Items, b => b.WorkItemId == backlogItem);
+
+        Assert.Matches(@"^[A-Z][A-Z0-9]*-\d+$", queued.Reference);
     }
 
     private sealed record Created(Guid Id);
@@ -496,6 +512,7 @@ public class GitDrivenBoardTests(BoardSyncApiFactory factory)
     private sealed record BoardColumnView(Guid Id, string Name, List<BoardCardView> Cards);
     private sealed record BoardCardView(Guid WorkItemId, string Reference, string Title);
     private sealed record SprintItemView(Guid WorkItemId, string Reference, string Title);
+    private sealed record BacklogItemView(Guid WorkItemId, string Reference, string Title);
 
     private sealed record HistoryView(
         Guid Id, Guid WorkItemId, Guid ChangedBy, string ActorType, Guid? AttributedToUserId,
