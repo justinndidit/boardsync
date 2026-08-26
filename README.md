@@ -9,9 +9,9 @@ access control, and an activity feed.
 - Docker-based dev and production workflows
 
 > Status: the API is the mature part of the codebase and is near feature-complete for v1. The
-> frontend lives in `ui/boardsync` (its own git repository, ignored here) and calls 73 of the API's
-> 113 routes. **The build paths below still point at `boardsync-ui`, which does not exist** — see
-> `docs/status-2026-08-24.md` §4 before trying to deploy.
+> frontend lives in `ui/boardsync` — **its own git repository, ignored by this one**, so a clone of
+> this repo alone cannot build the UI image. See `docs/status-2026-08-24.md` for where both sides
+> stand.
 
 ## 1) Local Development Setup
 
@@ -329,8 +329,8 @@ make prod-down
 - Dev compose (Postgres + MailHog): `docker-compose.dev.yaml`
 - Production compose: `docker-compose.prod.yaml`
 - API image: `server/BoardSync.Api/Dockerfile` (dev variant: `Dockerfile.dev`)
-- Frontend image: `boardsync-ui/Dockerfile`
-- Frontend reverse proxy: `boardsync-ui/nginx.conf`
+- Frontend image: `ui/boardsync/Dockerfile`
+- Frontend reverse proxy: `ui/boardsync/nginx.conf`
 - Environment template: `.env.sample`
 - Common tasks: `Makefile`
 - Design notes: `docs/`

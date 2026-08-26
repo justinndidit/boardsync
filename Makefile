@@ -17,7 +17,7 @@ dev-backend:
 	cd server && dotnet watch --project BoardSync.Api/
 
 dev-frontend:
-	cd boardsync-ui && yarn dev
+	cd ui/boardsync && npm run dev
 
 # Kill all background infrastructure volumes
 down-all:
