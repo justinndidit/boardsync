@@ -410,7 +410,8 @@ public class WorkItemService : IWorkItemService
 
         return new PagedResult<WorkItemHistoryResponse>(
             items.Select(h => new WorkItemHistoryResponse(
-                h.Id, h.WorkItemId, h.ChangedBy, h.FieldName, h.OldValue, h.NewValue, h.CreatedAt
+                h.Id, h.WorkItemId, h.ChangedBy, h.ActorType, h.AttributedToUserId,
+                h.FieldName, h.OldValue, h.NewValue, h.CreatedAt
             )).ToList(),
             total, pagination.Page, pagination.PageSize);
     }

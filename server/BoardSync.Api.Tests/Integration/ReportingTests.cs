@@ -43,7 +43,16 @@ public class ReportingTests(BoardSyncApiFactory factory)
     private sealed record Velocity(
         List<VelocityPoint> Sprints, double? AverageCompletedPoints, CycleTime CycleTime);
 
-    /// <summary>Creates a sprint running from yesterday to a week out.</summary>
+    /// <summary>
+    /// Creates a sprint starting today and running a week.
+    /// </summary>
+    /// <remarks>
+    /// <b>Today, not yesterday.</b> The API refuses a start date in the past —
+    /// <c>SprintService.ValidateDates</c> — so a helper that back-dated the start only worked while
+    /// nothing checked, and failed the moment anything did. A sprint cannot be made to have elapsed
+    /// days through the API, which is why the burndown test below asserts the shape of a
+    /// single-day series rather than a multi-day one.
+    /// </remarks>
     private static async Task<Sprint> SprintAsync(Workspace workspace, string goal = "ship it")
     {
         return await workspace.Owner.Post<Sprint>(
@@ -51,8 +60,8 @@ public class ReportingTests(BoardSyncApiFactory factory)
             new
             {
                 goal,
-                startDate = DateTime.UtcNow.Date.AddDays(-1),
-                endDate = DateTime.UtcNow.Date.AddDays(6)
+                startDate = DateTime.UtcNow.Date,
+                endDate = DateTime.UtcNow.Date.AddDays(7)
             });
     }
 
@@ -146,15 +155,19 @@ public class ReportingTests(BoardSyncApiFactory factory)
 
         var report = await workspace.Owner.Get<Report>($"/api/sprints/{sprint.Id}/report");
 
-        // Started yesterday, so yesterday and today.
-        Assert.Equal(2, report.Burndown.Count);
-        Assert.All(report.Burndown, p => Assert.True(p.Date.Date <= DateTime.UtcNow.Date));
+        // The sprint runs a week, and one day has elapsed. The series is that one day — not the
+        // seven it will eventually cover. Padding it would draw a flat tail that reads as "no
+        // progress" rather than "has not happened yet".
+        var today = Assert.Single(report.Burndown);
 
-        // Nothing closed, so the line is flat at what was committed.
-        Assert.All(report.Burndown, p => Assert.Equal(5, p.RemainingPoints));
+        Assert.Equal(DateTime.UtcNow.Date, today.Date.Date);
 
-        // The ideal line falls across the sprint regardless.
-        Assert.True(report.Burndown[0].IdealPoints > report.Burndown[1].IdealPoints);
+        // Nothing closed, so remaining is still what was committed.
+        Assert.Equal(5, today.RemainingPoints);
+        Assert.Equal(1, today.RemainingItems);
+
+        // Day zero of the ideal line is the full commitment; it descends from here.
+        Assert.Equal(5, today.IdealPoints);
     }
 
     /// <summary>Closing work moves the burndown down.</summary>

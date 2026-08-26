@@ -21,6 +21,15 @@ public interface IBacklogRepository
     Task<bool> ProjectExistsAsync(Guid projectId, CancellationToken ct = default);
 
     /// <summary>
+    /// A project's work item key — the <c>BS</c> in <c>BS-142</c>.
+    /// </summary>
+    /// <remarks>
+    /// One lookup per page rather than a join per row: the key is the same string for every item in
+    /// a project's backlog, so joining it onto each would ship it once per row for nothing.
+    /// </remarks>
+    Task<string> GetProjectKeyAsync(Guid projectId, CancellationToken ct = default);
+
+    /// <summary>
     /// One page of the unscheduled backlog — entries with no sprint — ordered by rank.
     /// </summary>
     /// <param name="projectId">The project whose backlog to read.</param>

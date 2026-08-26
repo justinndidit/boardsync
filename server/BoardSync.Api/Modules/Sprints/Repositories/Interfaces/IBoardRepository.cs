@@ -85,6 +85,7 @@ public readonly record struct BoardSprintContext(Guid TeamId, Guid? ActiveSprint
 /// </summary>
 public sealed record BoardCardRow(
     Guid WorkItemId,
+    string Reference,
     string Title,
     WorkItems.Models.WorkItemType Type,
     WorkItems.Models.WorkItemState State,
