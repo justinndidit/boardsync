@@ -379,6 +379,147 @@ public class GitDrivenBoardTests(BoardSyncApiFactory factory)
         return null;
     }
 
+    /// <summary>
+    /// History says an integration made the change, not a person.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The product's claim is that the board updates itself, and a work item's history is the one
+    /// place that is most legible — but only if a client can tell the two apart. Without
+    /// <c>actorType</c> on the response, a git transition renders as though whoever the installation
+    /// is keyed to had dragged the card, which is both wrong and the opposite of the point.
+    /// </para>
+    /// <para>
+    /// <c>attributedToUserId</c> is the commit author matched by email. It is attribution, not
+    /// authorship: the integration made the change, and a client must not render it as though the
+    /// person did.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task GitDrivenHistoryIsDistinguishableFromAPerson()
+    {
+        var c = await ConnectAsync();
+        var itemId = await c.Workspace.AddWorkItemAsync("history provenance");
+
+        var reference = (await c.Workspace.Owner.Get<WorkItemView>(
+            $"/api/workitems/{itemId}")).Reference;
+
+        // A person moves it first, so both kinds of row exist on one item.
+        await c.Workspace.Owner.Patch<object>(
+            $"/api/workitems/{itemId}/state", new { state = "Active" });
+
+        await PushAsync(c, $"feature/{reference}-provenance", "work");
+        await PullRequestAsync(c, $"feature/{reference}-provenance", "opened", merged: false);
+
+        await StateAfterAsync(c.Workspace, itemId, "InReview");
+
+        var history = await c.Workspace.Owner.Get<Paged<HistoryView>>(
+            $"/api/workitems/{itemId}/history");
+
+        var states = history.Items
+            .Where(h => h.FieldName == "State")
+            .ToList();
+
+        var byPerson = states.Where(h => h.ActorType == "User").ToList();
+        var byIntegration = states
+            .Where(h => h.ActorType == "Integration")
+            .ToList();
+
+        // Both kinds are present on one item, which is the case a client has to render.
+        Assert.NotEmpty(byPerson);
+        Assert.NotEmpty(byIntegration);
+
+        Assert.Contains(byPerson, h => h.NewValue == "Active");
+        Assert.All(byPerson, h =>
+            Assert.Equal(c.Workspace.Owner.UserId, h.ChangedBy));
+
+        Assert.Contains(byIntegration, h => h.NewValue == "InReview");
+
+        // The installation made the change, so it is what `changedBy` names — never the person.
+        Assert.All(byIntegration, h =>
+            Assert.NotEqual(c.Workspace.Owner.UserId, h.ChangedBy));
+    }
+
+    /// <summary>
+    /// The board's cards carry the reference a branch name has to contain.
+    /// </summary>
+    /// <remarks>
+    /// Work binds to git by its reference appearing in a branch name, a commit message or a pull
+    /// request title. A board that shows a card without ever showing <c>BS-142</c> makes that
+    /// something a developer has to go and look up elsewhere before they can start — which is the
+    /// integration being technically present and practically unusable.
+    /// </remarks>
+    [Fact]
+    public async Task BoardCardsCarryTheReferenceBranchNamesNeed()
+    {
+        var c = await ConnectAsync();
+        var itemId = await c.Workspace.AddWorkItemAsync("needs a reference");
+
+        var sprint = await c.Workspace.Owner.Post<Created>(
+            $"/api/projects/{c.Workspace.ProjectId}/sprints",
+            new
+            {
+                goal = "reference on cards",
+                startDate = DateTime.UtcNow.Date,
+                endDate = DateTime.UtcNow.Date.AddDays(7)
+            });
+
+        await c.Workspace.Owner.Post(
+            $"/api/sprints/{sprint.Id}/workitems", new { workItemId = itemId });
+
+        await c.Workspace.Owner.Patch<object>(
+            $"/api/sprints/{sprint.Id}/status", new { status = "Active" });
+
+        var expected = (await c.Workspace.Owner.Get<WorkItemView>(
+            $"/api/workitems/{itemId}")).Reference;
+
+        var board = await c.Workspace.Owner.Get<BoardView>(
+            $"/api/projects/{c.Workspace.ProjectId}/board");
+
+        var card = Assert.Single(
+            board.Columns.SelectMany(col => col.Cards),
+            x => x.WorkItemId == itemId);
+
+        Assert.Equal(expected, card.Reference);
+        Assert.Matches(@"^[A-Z][A-Z0-9]*-\d+$", card.Reference);
+
+        // And on the sprint listing, which is the other place work is picked up from.
+        var items = await c.Workspace.Owner.Get<Paged<SprintItemView>>(
+            $"/api/sprints/{sprint.Id}/workitems");
+
+        Assert.Equal(expected,
+            Assert.Single(items.Items, i => i.WorkItemId == itemId).Reference);
+
+        // And on the backlog — the third list work is picked up from, and the one where somebody is
+        // most likely to be deciding what to start next.
+        var backlogItem = await c.Workspace.AddWorkItemAsync("waiting in the backlog");
+
+        await c.Workspace.Owner.Post(
+            $"/api/projects/{c.Workspace.ProjectId}/backlog",
+            new { workItemId = backlogItem });
+
+        var backlog = await c.Workspace.Owner.Get<Paged<BacklogItemView>>(
+            $"/api/projects/{c.Workspace.ProjectId}/backlog");
+
+        var queued = Assert.Single(
+            backlog.Items, b => b.WorkItemId == backlogItem);
+
+        Assert.Matches(@"^[A-Z][A-Z0-9]*-\d+$", queued.Reference);
+    }
+
+    private sealed record Created(Guid Id);
+    private sealed record BoardView(List<BoardColumnView> Columns);
+    private sealed record BoardColumnView(Guid Id, string Name, List<BoardCardView> Cards);
+    private sealed record BoardCardView(Guid WorkItemId, string Reference, string Title);
+    private sealed record SprintItemView(Guid WorkItemId, string Reference, string Title);
+    private sealed record BacklogItemView(Guid WorkItemId, string Reference, string Title);
+
+    private sealed record HistoryView(
+        Guid Id, Guid WorkItemId, Guid ChangedBy, string ActorType, Guid? AttributedToUserId,
+        string FieldName, string? OldValue, string? NewValue, DateTime CreatedAt);
+
+    private sealed record Paged<T>(List<T> Items, int TotalCount);
+
     private sealed record ProjectView(Guid Id, string Key, string Name);
     private sealed record WorkItemView(Guid Id, int Number, string Reference, string State, string Title);
 }

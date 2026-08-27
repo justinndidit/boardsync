@@ -232,12 +232,31 @@ public class SprintRepository : ISprintRepository
             .Join(_context.WorkItems,
                 sw => sw.WorkItemId,
                 w => w.Id,
-                (sw, w) => new SprintWorkItemResponse(
-                    w.Id, w.Title, w.Type, w.State,
-                    w.Priority, w.AssigneeId, w.StoryPoints, sw.Position))
+                // The project key is joined per row here rather than looked up once, because a
+                // sprint's items are all in one project but this query does not carry its id.
+                (sw, w) => new
+                {
+                    w.Id,
+                    w.Number,
+                    w.Title,
+                    w.Type,
+                    w.State,
+                    w.Priority,
+                    w.AssigneeId,
+                    w.StoryPoints,
+                    sw.Position,
+                    Key = _context.Projects
+                        .Where(p => p.Id == w.ProjectId)
+                        .Select(p => p.Key)
+                        .FirstOrDefault()
+                })
             .ToListAsync(ct);
 
-        return (items, total);
+        return (
+            [.. items.Select(i => new SprintWorkItemResponse(
+                i.Id, $"{i.Key}-{i.Number}", i.Title, i.Type, i.State,
+                i.Priority, i.AssigneeId, i.StoryPoints, i.Position))],
+            total);
     }
 
     public async Task<SprintProgress> GetProgressAsync(Guid sprintId, CancellationToken ct = default)

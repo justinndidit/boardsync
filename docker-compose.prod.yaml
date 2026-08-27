@@ -70,10 +70,15 @@ services:
 
   ui:
     build:
-      context: ./boardsync-ui
+      # The frontend lives in ui/boardsync and is its own git repository. If you
+      # clone only this repo you will not have it — see docs/status-2026-08-24.md.
+      context: ./ui/boardsync
       dockerfile: Dockerfile
       args:
-        VITE_API_BASE_URL: /api
+        # The variable Vite actually reads. `VITE_API_BASE_URL` was passed here
+        # and read by nothing, so every production build silently fell back to
+        # the dev default.
+        VITE_API_URL: /api
     container_name: boardsync-ui
     restart: unless-stopped
     depends_on:

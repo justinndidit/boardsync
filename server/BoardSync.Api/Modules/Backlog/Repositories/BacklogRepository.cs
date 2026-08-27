@@ -18,6 +18,13 @@ public class BacklogRepository : IBacklogRepository
     public Task<bool> ProjectExistsAsync(Guid projectId, CancellationToken ct = default) =>
         _context.Projects.AnyAsync(p => p.Id == projectId && p.IsActive, ct);
 
+    public async Task<string> GetProjectKeyAsync(
+        Guid projectId, CancellationToken ct = default) =>
+        await _context.Projects
+            .Where(p => p.Id == projectId)
+            .Select(p => p.Key)
+            .FirstOrDefaultAsync(ct) ?? string.Empty;
+
     public async Task<(IReadOnlyList<BacklogItem> Items, int TotalCount)> GetUnscheduledPageAsync(
         Guid projectId, Guid? teamId, int skip, int take, CancellationToken ct = default)
     {

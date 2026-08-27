@@ -128,3 +128,22 @@ public record TeamPositionResponse(
     RoleType Position,
     Guid? UserId
 );
+
+/// <summary>An ordinary team-scope role assignment.</summary>
+/// <remarks>
+/// Not a position. <c>TeamPositionResponse</c> covers Team Lead, Scrum Master and Product Owner,
+/// which are single seats handed over rather than granted — this is everything else, and in
+/// practice it is how somebody becomes the team's <c>Tester</c>.
+/// </remarks>
+/// <param name="UserId">Who holds it.</param>
+/// <param name="Role">What they hold.</param>
+/// <param name="AssignedAt">When it was granted.</param>
+public record TeamRoleResponse(
+    Guid UserId,
+    Rbac.Models.RoleType Role,
+    DateTime AssignedAt);
+
+/// <summary>Request body for granting a team-scope role.</summary>
+public record AssignTeamRoleRequest(
+    Guid UserId,
+    Rbac.Models.RoleType Role);

@@ -153,6 +153,129 @@ public class TeamsController : ControllerBase
         return Ok(new ApiResponse(true, "Member removed."));
     }
 
+    // ── Team roles ────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Ordinary team-scope roles — everything grantable at team scope that is not a position.
+    /// </summary>
+    /// <remarks>
+    /// Positions are excluded because they are handed over through
+    /// <c>PUT /api/teams/{teamId}/positions/{position}</c>, which transfers in one call so the seat
+    /// is never half empty. Granting one through here would let two people hold it at once.
+    /// </remarks>
+    private static readonly IReadOnlyList<RoleType> AssignableTeamRoles =
+        [.. RolePermissions.GrantableToUsersAt(RoleScope.Team)
+            .Where(role => !TeamPositions.Includes(role))];
+
+    /// <summary>The team's ordinary role assignments. Requires <c>team:read</c>.</summary>
+    /// <remarks>
+    /// Positions are not listed here — <c>GET .../positions</c> answers for those, and reporting a
+    /// Scrum Master as an ordinary grant would invite somebody to revoke it through the wrong door.
+    /// </remarks>
+    [HttpGet("api/teams/{teamId:guid}/roles")]
+    [RequirePermission(Permissions.TeamRead, From = "teamId")]
+    [ProducesResponseType(typeof(ApiResponse<IReadOnlyList<TeamRoleResponse>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<IActionResult> GetRoles(Guid teamId, CancellationToken ct)
+    {
+        var assignments = await _rbac.GetScopeRolesAsync(RoleScope.Team, teamId, ct);
+
+        var items = assignments
+            .Where(r => !TeamPositions.Includes(r.Role))
+            .Select(r => new TeamRoleResponse(r.UserId, r.Role, r.CreatedAt))
+            .OrderBy(r => r.Role)
+            .ToList();
+
+        return Ok(new ApiResponse<IReadOnlyList<TeamRoleResponse>>(true, "Team roles retrieved.", items));
+    }
+
+    /// <summary>
+    /// Grant a team-scope role, replacing any ordinary team role the user already holds.
+    /// Requires <c>team:role:assign</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b><c>Tester</c> is the reason this endpoint exists.</b> There was no way to grant an
+    /// ordinary team-scope role at all: membership carries none, and positions cover only the three
+    /// appointments. So a team Tester — who certifies work on <em>every</em> project the team serves,
+    /// through the team → project edge — could not be appointed, and the QA gate could only be
+    /// passed by people holding certification for some other reason.
+    /// </para>
+    /// <para>
+    /// The grantee must already be a member of the team. A role is what somebody's membership means,
+    /// not a way to join.
+    /// </para>
+    /// </remarks>
+    [HttpPost("api/teams/{teamId:guid}/roles")]
+    [RequirePermission(Permissions.TeamRoleAssign, From = "teamId")]
+    [ProducesResponseType(typeof(ApiResponse<TeamRoleResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> AssignRole(
+        Guid teamId,
+        [FromBody] AssignTeamRoleRequest request,
+        CancellationToken ct)
+    {
+        if (!AssignableTeamRoles.Contains(request.Role))
+            return BadRequest(new ApiResponse(false,
+                $"'{request.Role}' cannot be assigned at team scope. Valid roles: " +
+                $"{string.Join(", ", AssignableTeamRoles)}. " +
+                "Team Lead, Scrum Master and Product Owner are positions — use the positions endpoint."));
+
+        // 404s if the team does not exist.
+        _ = await _teamService.GetByIdAsync(teamId, ct);
+
+        if (!await _teamService.IsMemberAsync(teamId, request.UserId, ct))
+            return BadRequest(new ApiResponse(false,
+                "User must be a member of the team before receiving a team role."));
+
+        // One ordinary team role per user. Positions are left alone: they are a separate seat, and
+        // a Scrum Master who is also the team's Tester is a real and reasonable arrangement.
+        var existing = await _rbac.GetScopeRolesAsync(RoleScope.Team, teamId, ct);
+
+        foreach (var held in existing.Where(r =>
+                     r.UserId == request.UserId && !TeamPositions.Includes(r.Role)))
+        {
+            await _rbac.RemoveRoleAsync(request.UserId, held.Role, RoleScope.Team, teamId, ct);
+        }
+
+        var assignment = await _rbac.AssignRoleAsync(
+            request.UserId, request.Role, RoleScope.Team, teamId, _currentUser.UserId, ct: ct);
+
+        return Ok(new ApiResponse<TeamRoleResponse>(true, $"Role updated to {request.Role}.",
+            new TeamRoleResponse(assignment.UserId, assignment.Role, assignment.CreatedAt)));
+    }
+
+    /// <summary>
+    /// Revoke a user's ordinary team-scope role. Requires <c>team:role:assign</c>.
+    /// </summary>
+    /// <remarks>
+    /// Positions are untouched — vacating one goes through
+    /// <c>DELETE .../positions/{position}</c>, which is a different act with a different guard.
+    /// </remarks>
+    [HttpDelete("api/teams/{teamId:guid}/roles/{userId:guid}")]
+    [RequirePermission(Permissions.TeamRoleAssign, From = "teamId")]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> RemoveRole(Guid teamId, Guid userId, CancellationToken ct)
+    {
+        var existing = await _rbac.GetScopeRolesAsync(RoleScope.Team, teamId, ct);
+
+        var held = existing
+            .Where(r => r.UserId == userId && !TeamPositions.Includes(r.Role))
+            .ToList();
+
+        if (held.Count == 0)
+            throw new NotFoundException($"User {userId} holds no team role here.");
+
+        foreach (var role in held)
+            await _rbac.RemoveRoleAsync(userId, role.Role, RoleScope.Team, teamId, ct);
+
+        return Ok(new ApiResponse(true, "Team role revoked."));
+    }
+
     // ── Team positions ────────────────────────────────────────────────────────
 
     /// <summary>

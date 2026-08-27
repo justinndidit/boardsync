@@ -141,6 +141,78 @@ public class QaGateEndpointTests(BoardSyncApiFactory factory)
     }
 
     /// <summary>
+    /// A team Tester certifies on every project the team serves.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The grant most teams actually want, and until this endpoint existed there was no way to make
+    /// it: team membership carries no role, and positions cover only Team Lead, Scrum Master and
+    /// Product Owner. So the person doing the testing could not be given the role that exists for
+    /// testing, and the gate could only be passed by people holding certification incidentally.
+    /// </para>
+    /// <para>
+    /// It reaches the project through the team → project edge rather than through any project-scope
+    /// row, which is exactly what makes it worth having: one grant, every project the team serves.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task ATeamTesterCertifiesWithoutAnyProjectRole()
+    {
+        var workspace = await Workspace.CreateAsync(factory);
+        var tester = await workspace.AddOrganizationMemberAsync(factory);
+
+        await workspace.Owner.Post($"/api/teams/{workspace.TeamId}/members",
+            new { userId = tester.UserId });
+
+        // Team scope. No project role at all — that is the point.
+        await workspace.Owner.Post($"/api/teams/{workspace.TeamId}/roles",
+            new { userId = tester.UserId, role = "Tester" });
+
+        var workItemId = await workspace.AddWorkItemAsync("team tester certifies");
+
+        await MoveTo(workspace.Owner, workItemId, "Active");
+        await MoveTo(workspace.Owner, workItemId, "Resolved");
+
+        // Assigned to the owner, so self-certification is not in play for the tester.
+        var closing = await TryMoveTo(tester, workItemId, "Closed");
+
+        Assert.Equal(HttpStatusCode.OK, closing.StatusCode);
+    }
+
+    /// <summary>
+    /// The positions are not grantable through the ordinary role endpoint.
+    /// </summary>
+    /// <remarks>
+    /// They transfer in one call so the seat is never half empty. Granting one through here would
+    /// let two people hold it at once, which is the whole thing a position is defined against.
+    /// </remarks>
+    [Fact]
+    public async Task PositionsCannotBeGrantedAsOrdinaryTeamRoles()
+    {
+        var workspace = await Workspace.CreateAsync(factory);
+        var member = await workspace.AddOrganizationMemberAsync(factory);
+
+        await workspace.Owner.Post($"/api/teams/{workspace.TeamId}/members",
+            new { userId = member.UserId });
+
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await workspace.Owner.PostRaw($"/api/teams/{workspace.TeamId}/roles",
+                new { userId = member.UserId, role = "ScrumMaster" })).StatusCode);
+    }
+
+    /// <summary>A role is what membership means, not a way to join.</summary>
+    [Fact]
+    public async Task ATeamRoleCannotBeGrantedToSomebodyOutsideTheTeam()
+    {
+        var workspace = await Workspace.CreateAsync(factory);
+        var outsider = await workspace.AddOrganizationMemberAsync(factory);
+
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await workspace.Owner.PostRaw($"/api/teams/{workspace.TeamId}/roles",
+                new { userId = outsider.UserId, role = "Tester" })).StatusCode);
+    }
+
+    /// <summary>
     /// A contributor cannot pull work back out of the QA lane either.
     /// </summary>
     /// <remarks>

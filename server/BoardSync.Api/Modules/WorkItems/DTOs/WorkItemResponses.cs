@@ -1,3 +1,4 @@
+using BoardSync.Api.Modules.Rbac.Models;
 using BoardSync.Api.Modules.WorkItems.Models;
 
 namespace BoardSync.Api.Modules.WorkItems.DTOs;
@@ -67,10 +68,41 @@ public record WorkItemCommentResponse(
     DateTime UpdatedAt
 );
 
+/// <summary>One recorded change to a work item.</summary>
+/// <remarks>
+/// <para>
+/// <b><see cref="ActorType"/> is the point of this record, not decoration.</b> The board moves
+/// itself from git, so a client rendering history has to be able to say <em>"GitHub moved this to
+/// Awaiting QA"</em> rather than attributing an automated transition to whichever person the
+/// installation happens to be keyed to. Without it the product's central claim is invisible in the
+/// one place it is most legible.
+/// </para>
+/// <para>
+/// <see cref="AttributedToUserId"/> is the human the git event was traced back to — the commit
+/// author, matched by email — and is null when no match was possible. It is attribution, not
+/// authorship: the integration made the change.
+/// </para>
+/// </remarks>
+/// <param name="Id">The history row.</param>
+/// <param name="WorkItemId">The item it belongs to.</param>
+/// <param name="ChangedBy">
+/// The principal that made the change: a user id, or the git installation's id when
+/// <paramref name="ActorType"/> is <c>Integration</c>.
+/// </param>
+/// <param name="ActorType">Whether a person or an integration made this change.</param>
+/// <param name="AttributedToUserId">
+/// For integration changes: the person the git event was traced to, when one was found.
+/// </param>
+/// <param name="FieldName">What changed.</param>
+/// <param name="OldValue">What it was.</param>
+/// <param name="NewValue">What it became.</param>
+/// <param name="CreatedAt">When.</param>
 public record WorkItemHistoryResponse(
     Guid Id,
     Guid WorkItemId,
     Guid ChangedBy,
+    PrincipalType ActorType,
+    Guid? AttributedToUserId,
     string FieldName,
     string? OldValue,
     string? NewValue,

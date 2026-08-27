@@ -144,7 +144,9 @@ public class ProjectsController : ControllerBase
 
     /// <summary>
     /// Grant a user a role on this project, replacing any project-scope role they already hold.
-    /// Requires <c>project:member:manage</c>. Valid roles: ProjectAdmin, Contributor, Viewer.
+    /// Requires <c>project:member:manage</c>. Valid roles: ProjectAdmin, Tester, Contributor,
+    /// Viewer — whatever <see cref="RolePermissions.GrantableToUsersAt"/> permits, which is the
+    /// list this endpoint validates against rather than a copy of it.
     /// </summary>
     /// <remarks>
     /// This is how a member of the organization gains access to a project's work items —
