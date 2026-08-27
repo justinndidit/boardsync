@@ -22,6 +22,12 @@ public class SprintRepository : ISprintRepository
     public Task<Sprint?> GetByIdAsync(Guid sprintId, CancellationToken ct = default) =>
         _context.Sprints.FirstOrDefaultAsync(s => s.Id == sprintId, ct);
 
+    public async Task LockSprintAsync(Guid sprintId, CancellationToken ct = default) =>
+        _ = await _context.Sprints
+            .FromSqlInterpolated($"SELECT * FROM plan.\"Sprints\" WHERE \"Id\" = {sprintId} FOR UPDATE")
+            .AsTracking()
+            .SingleOrDefaultAsync(ct);
+
     public Task<Sprint?> GetActiveForProjectAsync(Guid projectId, CancellationToken ct = default) =>
         _context.Sprints.FirstOrDefaultAsync(
             s => s.ProjectId == projectId && s.Status == SprintStatus.Active, ct);
@@ -120,6 +126,52 @@ public class SprintRepository : ISprintRepository
     public Task<bool> BacklogContainsAsync(Guid sprintId, Guid workItemId, CancellationToken ct = default) =>
         _context.SprintWorkItems.AnyAsync(
             sw => sw.SprintId == sprintId && sw.WorkItemId == workItemId, ct);
+
+    public async Task<IReadOnlyList<SprintWorkItem>> GetBacklogEntriesByIdsAsync(
+        Guid sprintId,
+        IReadOnlyCollection<Guid> workItemIds,
+        CancellationToken ct = default) =>
+        await _context.SprintWorkItems
+            .Where(sw => sw.SprintId == sprintId && workItemIds.Contains(sw.WorkItemId))
+            .ToListAsync(ct);
+
+    public Task<bool> RankExistsAsync(
+        Guid sprintId,
+        decimal rank,
+        Guid excludingWorkItemId,
+        CancellationToken ct = default) =>
+        _context.SprintWorkItems.AnyAsync(
+            sw => sw.SprintId == sprintId && sw.Rank == rank && sw.WorkItemId != excludingWorkItemId, ct);
+
+    public async Task ReorderRanksAsync(
+        Guid sprintId,
+        IReadOnlyList<Guid> workItemIds,
+        CancellationToken ct = default)
+    {
+        var ids = workItemIds.ToArray();
+        await _context.Database.ExecuteSqlInterpolatedAsync($"""
+            WITH ordered AS (
+                SELECT u."WorkItemId", u."Ordinality" - 1 AS "Position"
+                FROM unnest({ids}) WITH ORDINALITY AS u("WorkItemId", "Ordinality")
+            )
+            UPDATE plan."SprintWorkItems" sw
+            SET "Rank" = -ordered."Position" - 1,
+                "Position" = ordered."Position"
+            FROM ordered
+            WHERE sw."SprintId" = {sprintId} AND sw."WorkItemId" = ordered."WorkItemId";
+            """, ct);
+
+        await _context.Database.ExecuteSqlInterpolatedAsync($"""
+            WITH ordered AS (
+                SELECT u."WorkItemId", u."Ordinality" - 1 AS "Position"
+                FROM unnest({ids}) WITH ORDINALITY AS u("WorkItemId", "Ordinality")
+            )
+            UPDATE plan."SprintWorkItems" sw
+            SET "Rank" = (ordered."Position" + 1) * 1024
+            FROM ordered
+            WHERE sw."SprintId" = {sprintId} AND sw."WorkItemId" = ordered."WorkItemId";
+            """, ct);
+    }
 
     public Task<bool> HasBacklogEntriesAsync(Guid sprintId, CancellationToken ct = default) =>
         _context.SprintWorkItems.AnyAsync(sw => sw.SprintId == sprintId, ct);

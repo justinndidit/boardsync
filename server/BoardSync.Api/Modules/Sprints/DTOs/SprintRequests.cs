@@ -1,5 +1,6 @@
 using BoardSync.Api.Modules.Sprints.Models;
 using System.ComponentModel.DataAnnotations;
+using BoardSync.Api.Modules.WorkItems.Models;
 
 namespace BoardSync.Api.Modules.Sprints.DTOs;
 
@@ -62,6 +63,15 @@ public class MoveSprintWorkItemRequest
     public Guid? AfterWorkItemId { get; init; }
 
     /// <summary>Place the item immediately before this work item ID. Null = move to the bottom.</summary>
+    public Guid? BeforeWorkItemId { get; init; }
+}
+
+/// <summary>Atomic state and sprint-order movement.</summary>
+public class MoveWorkItemCommandRequest
+{
+    public WorkItemState State { get; init; }
+    public long? ExpectedVersion { get; init; }
+    public Guid? AfterWorkItemId { get; init; }
     public Guid? BeforeWorkItemId { get; init; }
 }
 

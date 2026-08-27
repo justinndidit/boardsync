@@ -1,4 +1,5 @@
 using BoardSync.Api.Modules.Sprints.Models;
+using BoardSync.Api.Modules.WorkItems.Models;
 using BoardSync.Api.Shared.Kernel.Events;
 
 namespace BoardSync.Api.Modules.Sprints.Events;
@@ -61,6 +62,19 @@ public record SprintWorkItemRemoved(
     Guid WorkItemId,
     string WorkItemTitle,
     Guid RemovedByUserId
+) : DomainEvent;
+
+public record WorkItemRankChange(Guid WorkItemId, decimal Rank);
+
+public record WorkItemMoved(
+    Guid WorkItemId,
+    Guid ProjectId,
+    Guid SprintId,
+    WorkItemState State,
+    decimal Rank,
+    long Version,
+    Guid ChangedByUserId,
+    IReadOnlyList<WorkItemRankChange> RankChanges
 ) : DomainEvent;
 
 /// <summary>

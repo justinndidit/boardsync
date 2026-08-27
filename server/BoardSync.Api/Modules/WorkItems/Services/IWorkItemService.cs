@@ -22,6 +22,13 @@ public interface IWorkItemService
         Guid updatedBy,
         long? expectedVersion = null,
         CancellationToken ct = default);
+    Task<(WorkItem Item, WorkItemState OldState)> StageStateTransitionAsync(
+        Guid workItemId,
+        WorkItemState newState,
+        Guid updatedBy,
+        long? expectedVersion = null,
+        CancellationToken ct = default,
+        bool allowSameState = false);
     Task DeleteAsync(Guid workItemId, Guid deletedBy, CancellationToken ct = default);
 
     // ── Comments ──────────────────────────────────────────────────────────────

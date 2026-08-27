@@ -384,13 +384,13 @@ public class BoardSyncDbContext : DbContext
             entity.ToTable("SprintWorkItems", "plan");
             entity.HasKey(sw => sw.Id);
             entity.HasIndex(sw => new { sw.SprintId, sw.WorkItemId }).IsUnique();
+            entity.HasIndex(sw => new { sw.SprintId, sw.Rank }).IsUnique();
             entity.HasIndex(sw => sw.WorkItemId);
 
             // Backlog and board reads want one sprint's entries already in display order. Rank is
             // the sort key now; the Position index stays for the legacy column while anything still
             // reads it.
             entity.HasIndex(sw => new { sw.SprintId, sw.Position });
-            entity.HasIndex(sw => new { sw.SprintId, sw.Rank });
         });
 
         modelBuilder.Entity<Board>(entity =>

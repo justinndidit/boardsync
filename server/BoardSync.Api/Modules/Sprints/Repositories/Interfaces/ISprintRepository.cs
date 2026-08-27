@@ -25,6 +25,7 @@ public interface ISprintRepository
 
     /// <summary>Sprint by ID, tracked for mutation, or null.</summary>
     Task<Sprint?> GetByIdAsync(Guid sprintId, CancellationToken ct = default);
+    Task LockSprintAsync(Guid sprintId, CancellationToken ct = default);
 
     /// <summary>The project's currently active sprint, or null when it has none.</summary>
     Task<Sprint?> GetActiveForProjectAsync(Guid ProjectId, CancellationToken ct = default);
@@ -105,6 +106,13 @@ public interface ISprintRepository
         Guid? beforeWorkItemId,
         Guid? afterWorkItemId,
         CancellationToken ct = default);
+
+    Task<IReadOnlyList<SprintWorkItem>> GetBacklogEntriesByIdsAsync(
+        Guid sprintId,
+        IReadOnlyCollection<Guid> workItemIds,
+        CancellationToken ct = default);
+    Task<bool> RankExistsAsync(Guid sprintId, decimal rank, Guid excludingWorkItemId, CancellationToken ct = default);
+    Task ReorderRanksAsync(Guid sprintId, IReadOnlyList<Guid> workItemIds, CancellationToken ct = default);
 
     /// <summary>Paginated backlog in display order, joined to the work items it points at.</summary>
     Task<(IReadOnlyList<SprintWorkItemResponse> Items, int TotalCount)> GetWorkItemsAsync(

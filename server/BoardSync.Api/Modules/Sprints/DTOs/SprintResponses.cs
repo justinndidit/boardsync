@@ -59,6 +59,12 @@ public record SprintWorkItemResponse(
 /// </param>
 public record MoveSprintWorkItemResponse(Guid WorkItemId, decimal Rank);
 
+public record MoveWorkItemCommandResponse(
+    Guid WorkItemId,
+    WorkItemState State,
+    decimal Rank,
+    long Version);
+
 /// <summary>Summary returned after closing a sprint.</summary>
 public record CloseSprintResponse(
     SprintResponse Sprint,

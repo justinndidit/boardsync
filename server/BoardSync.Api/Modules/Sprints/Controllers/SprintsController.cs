@@ -257,6 +257,34 @@ public class SprintsController : ControllerBase
             true, "Work item moved.", new MoveSprintWorkItemResponse(workItemId, rank)));
     }
 
+    /// <summary>Atomically move a sprint work item to a state and rank position.</summary>
+    /// <remarks>
+    /// <para>Use <c>afterWorkItemId</c> for the item immediately above the destination and
+    /// <c>beforeWorkItemId</c> for the item immediately below it. Omit one for the top or bottom.
+    /// Both may be null only when this is the sprint's only work item; otherwise the request is
+    /// rejected because no unique destination rank can be inferred.</para>
+    /// <para>The returned state, rank, and version are authoritative. A stale version or a rank
+    /// collision returns a conflict and rolls back the entire command.</para>
+    /// </remarks>
+    [HttpPatch("api/sprints/{sprintId:guid}/workitems/{workItemId:guid}/move-with-state")]
+    [RequirePermission(Permissions.WorkItemWrite, From = "workItemId")]
+    [ProducesResponseType(typeof(ApiResponse<MoveWorkItemCommandResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> MoveWorkItemWithState(
+        Guid sprintId,
+        Guid workItemId,
+        [FromBody] MoveWorkItemCommandRequest request,
+        CancellationToken ct)
+    {
+        var result = await _sprintService.MoveWorkItemWithStateAsync(
+            sprintId, workItemId, request, _currentUser.UserId, ct);
+        return Ok(new ApiResponse<MoveWorkItemCommandResponse>(true, "Work item moved.", result));
+    }
+
     /// <summary>
     /// Reorder the whole sprint backlog. Requires <c>sprint:order</c>.
     /// </summary>

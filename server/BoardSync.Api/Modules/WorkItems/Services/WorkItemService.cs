@@ -284,27 +284,45 @@ public class WorkItemService : IWorkItemService
         long? expectedVersion = null,
         CancellationToken ct = default)
     {
-        var item = await GetWorkItemOrThrowAsync(workItemId, ct);
+        var staged = await StageStateTransitionAsync(workItemId, newState, updatedBy, expectedVersion, ct);
+        var item = staged.Item;
 
-        ExpectVersion(item, expectedVersion);
-
-        if (item.State == newState)
-            throw new BusinessRuleException($"Work item is already in state '{newState}'.");
-
-        ValidateStateTransition(item.State, newState);
-        await AuthorizeTransitionAsync(item, newState, updatedBy, ct);
-
-        var oldState = item.State;
-        AddHistory(item, updatedBy, "State", oldState.ToString(), newState.ToString());
-
-        item.State = newState;
-        item.UpdatedAt = DateTime.UtcNow;
-
-        _eventBus.Enqueue(new WorkItemStateChanged(item.Id, item.ProjectId, oldState, newState, updatedBy));
+        _eventBus.Enqueue(new WorkItemStateChanged(item.Id, item.ProjectId, staged.OldState, newState, updatedBy));
 
         await SaveDetectingConflictsAsync(workItemId, ct);
 
         return await MapToResponseAsync(workItemId, ct);
+    }
+
+    public async Task<(WorkItem Item, WorkItemState OldState)> StageStateTransitionAsync(
+        Guid workItemId,
+        WorkItemState newState,
+        Guid updatedBy,
+        long? expectedVersion = null,
+        CancellationToken ct = default,
+        bool allowSameState = false)
+    {
+        var item = await GetWorkItemOrThrowAsync(workItemId, ct);
+
+        ExpectVersion(item, expectedVersion);
+
+        if (item.State == newState && !allowSameState)
+            throw new BusinessRuleException($"Work item is already in state '{newState}'.");
+
+        if (item.State != newState)
+        {
+            ValidateStateTransition(item.State, newState);
+            await AuthorizeTransitionAsync(item, newState, updatedBy, ct);
+        }
+
+        var oldState = item.State;
+        if (oldState != newState)
+            AddHistory(item, updatedBy, "State", oldState.ToString(), newState.ToString());
+
+        item.State = newState;
+        item.UpdatedAt = DateTime.UtcNow;
+
+        return (item, oldState);
     }
 
     public async Task DeleteAsync(Guid workItemId, Guid deletedBy, CancellationToken ct = default)

@@ -10,6 +10,9 @@ using BoardSync.Api.Modules.Sprints.Models;
 using BoardSync.Api.Modules.Sprints.Repositories.Interfaces;
 using BoardSync.Api.Modules.WorkItems.Models;
 using BoardSync.Api.Modules.WorkItems.Repository;
+using BoardSync.Api.Modules.WorkItems.Services;
+using BoardSync.Api.Modules.Rbac.Models;
+using BoardSync.Api.Modules.Rbac.Services.Interfaces;
 using BoardSync.Api.Shared.Kernel;
 using BoardSync.Api.Shared.Kernel.Events;
 using BoardSync.Api.Shared.Kernel.Exceptions;
@@ -25,12 +28,16 @@ public class SprintService : ISprintService
     private readonly IBacklogSprintLink _backlog;
     private readonly ILogger<SprintService> _logger;
     private readonly BoardSyncDbContext _context;   // ← added field
+    private readonly IWorkItemService _workItemService;
+    private readonly IRbacService _rbac;
 
     // ── Constructor — fixed: removed duplicate IEventBus, added _context ──
     public SprintService(
         BoardSyncDbContext context,
         ISprintRepository repository,
         IWorkItemRepository workItems,
+        IWorkItemService workItemService,
+        IRbacService rbac,
         IEventBus eventBus,
         IBacklogSprintLink backlog,
         ILogger<SprintService> logger)
@@ -38,6 +45,8 @@ public class SprintService : ISprintService
         _context        = context;        // ← now properly assigned
         _repository     = repository;
         _workItems      = workItems;
+        _workItemService = workItemService;
+        _rbac = rbac;
         _eventBus       = eventBus;
         _backlog = backlog;
         _logger         = logger;
@@ -343,10 +352,124 @@ public class SprintService : ISprintService
         return entry.Rank;
     }
 
+    public async Task<MoveWorkItemCommandResponse> MoveWorkItemWithStateAsync(
+        Guid sprintId,
+        Guid workItemId,
+        MoveWorkItemCommandRequest request,
+        Guid changedBy,
+        CancellationToken ct = default)
+    {
+        var strategy = _context.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(
+            () => MoveWorkItemWithStateInTransactionAsync(sprintId, workItemId, request, changedBy, ct));
+    }
+
+    private async Task<MoveWorkItemCommandResponse> MoveWorkItemWithStateInTransactionAsync(
+        Guid sprintId,
+        Guid workItemId,
+        MoveWorkItemCommandRequest request,
+        Guid changedBy,
+        CancellationToken ct)
+    {
+        await using var transaction = await _context.Database.BeginTransactionAsync(ct);
+        await _repository.LockSprintAsync(sprintId, ct);
+        var sprint = await GetOrThrowAsync(sprintId, ct);
+        if (!await _rbac.HasPermissionAsync(
+            changedBy, Permissions.SprintOrder, RoleScope.Project, sprint.ProjectId, ct))
+            throw new ForbiddenException("You do not have permission to reorder this sprint.");
+
+        var entry = await _repository.GetBacklogEntryAsync(sprintId, workItemId, ct)
+            ?? throw new NotFoundException("SprintWorkItem", workItemId);
+
+        if (request.AfterWorkItemId is null && request.BeforeWorkItemId is null &&
+            (await _repository.GetBacklogEntriesAsync(sprintId, ct)).Any(item => item.WorkItemId != workItemId))
+            throw new BusinessRuleException(
+                "Both neighbours may be null only when the sprint contains no other work items.");
+
+        ValidateNeighbourIds(workItemId, request.AfterWorkItemId, request.BeforeWorkItemId);
+
+        var neighbourIds = new[] { request.AfterWorkItemId, request.BeforeWorkItemId }
+            .Where(id => id.HasValue).Select(id => id!.Value).Distinct().ToArray();
+        var neighbours = await _repository.GetBacklogEntriesByIdsAsync(sprintId, neighbourIds, ct);
+        if (neighbours.Count != neighbourIds.Length)
+            throw new NotFoundException("Sprint neighbour", neighbourIds.First(id => neighbours.All(n => n.WorkItemId != id)));
+
+        foreach (var neighbourId in neighbourIds)
+        {
+            var neighbour = await _workItems.GetActiveAsync(neighbourId, ct)
+                ?? throw new NotFoundException("WorkItem", neighbourId);
+            if (neighbour.ProjectId != sprint.ProjectId)
+                throw new NotFoundException("WorkItem", neighbourId);
+        }
+
+        var (before, after) = await _repository.GetNeighbourRanksAsync(
+            sprintId, request.AfterWorkItemId, request.BeforeWorkItemId, ct);
+        if (before.HasValue && after.HasValue && after.Value <= before.Value)
+            throw new BusinessRuleException("The requested neighbours do not define a valid insertion point.");
+
+        var originalRanks = new Dictionary<Guid, decimal>();
+        if (Ranking.NeedsRebalance(before, after))
+        {
+            foreach (var item in await _repository.GetBacklogEntriesAsync(sprintId, ct))
+                originalRanks[item.WorkItemId] = item.Rank;
+
+            await RebalanceAsync(sprintId, ct);
+            (before, after) = await _repository.GetNeighbourRanksAsync(
+                sprintId, request.AfterWorkItemId, request.BeforeWorkItemId, ct);
+        }
+
+        var staged = await _workItemService.StageStateTransitionAsync(
+            workItemId, request.State, changedBy, request.ExpectedVersion, ct, allowSameState: true);
+
+        entry.Rank = Ranking.Between(before, after);
+        while (await _repository.RankExistsAsync(sprintId, entry.Rank, workItemId, ct))
+            entry.Rank = after.HasValue
+                ? Ranking.Between(entry.Rank, after)
+                : entry.Rank + Ranking.Step;
+        entry.UpdatedAt = DateTime.UtcNow;
+
+        try
+        {
+            await _repository.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            throw new ConflictException(
+                "This work item was changed by someone else after you loaded it. Re-read it and apply your movement to the current version.");
+        }
+        catch (DbUpdateException exception) when (
+            exception.InnerException is Npgsql.PostgresException postgresException &&
+            postgresException.SqlState == "23505")
+        {
+            throw new ConflictException(
+                "Another movement claimed the requested rank. Re-read the sprint ordering and retry your movement.");
+        }
+
+        var rankChanges = originalRanks.Count == 0
+            ? [new WorkItemRankChange(workItemId, entry.Rank)]
+            : (await _repository.GetBacklogEntriesAsync(sprintId, ct))
+                .Where(item => !originalRanks.TryGetValue(item.WorkItemId, out var oldRank) || oldRank != item.Rank)
+                .Select(item => new WorkItemRankChange(item.WorkItemId, item.Rank)).ToList();
+
+        _eventBus.Enqueue(new WorkItemMoved(
+            workItemId, sprint.ProjectId, sprintId, staged.Item.State, entry.Rank,
+            staged.Item.Version, changedBy, rankChanges));
+        await _repository.SaveChangesAsync(ct);
+
+        await transaction.CommitAsync(ct);
+
+        return new MoveWorkItemCommandResponse(workItemId, staged.Item.State, entry.Rank, staged.Item.Version);
+    }
+
     private async Task RebalanceAsync(Guid sprintId, CancellationToken ct)
     {
         var entries = await _repository.GetBacklogEntriesAsync(sprintId, ct);
         var ordered = entries.OrderBy(e => e.Rank).ToList();
+
+        for (var i = 0; i < ordered.Count; i++)
+            ordered[i].Rank = -(i + 1);
+
+        await _repository.SaveChangesAsync(ct);
 
         for (var i = 0; i < ordered.Count; i++)
             ordered[i].Rank = Ranking.RankAt(i);
@@ -363,20 +486,21 @@ public class SprintService : ISprintService
         CancellationToken ct = default)
     {
         _ = await GetOrThrowAsync(sprintId, ct);
-
-        var entries = await _repository.GetBacklogEntriesAsync(sprintId, ct);
-
-        for (int i = 0; i < request.WorkItemIds.Count; i++)
+        var strategy = _context.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
         {
-            var entry = entries.FirstOrDefault(sw => sw.WorkItemId == request.WorkItemIds[i]);
-            if (entry is not null)
-            {
-                entry.Position = i;
-                entry.Rank     = Ranking.RankAt(i);
-            }
-        }
+            await using var transaction = await _context.Database.BeginTransactionAsync(ct);
+            await _repository.ReorderRanksAsync(sprintId, request.WorkItemIds, ct);
+            await transaction.CommitAsync(ct);
+        });
+    }
 
-        await _repository.SaveChangesAsync(ct);
+    private static void ValidateNeighbourIds(Guid workItemId, Guid? afterId, Guid? beforeId)
+    {
+        if (afterId == workItemId || beforeId == workItemId)
+            throw new BusinessRuleException("The moved work item cannot be used as its own neighbour.");
+        if (afterId.HasValue && beforeId.HasValue && afterId == beforeId)
+            throw new BusinessRuleException("The before and after neighbours must be different.");
     }
 
     // ── Sprint close-out ──────────────────────────────────────────────────────

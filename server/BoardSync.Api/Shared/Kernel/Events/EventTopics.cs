@@ -80,6 +80,7 @@ public static class EventTopics
         SprintDeleted e => [Topic.Organization(e.OrganizationId), Topic.Project(e.ProjectId), Topic.Sprint(e.SprintId)],
         SprintWorkItemAdded e => [Topic.Project(e.ProjectId), Topic.Sprint(e.SprintId)],
         SprintWorkItemRemoved e => [Topic.Project(e.ProjectId), Topic.Sprint(e.SprintId)],
+        WorkItemMoved e => [Topic.Project(e.ProjectId), Topic.Sprint(e.SprintId)],
         BoardChanged e => [Topic.Organization(e.OrganizationId), Topic.Project(e.ProjectId)],
 
         // An event nobody routes reaches nobody. That is a routing gap, not a silent success, so it

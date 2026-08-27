@@ -66,47 +66,42 @@ public sealed class BoardSyncApiFactory : WebApplicationFactory<Program>, IAsync
     {
         builder.UseEnvironment(Environments.Development);
 
-        // UseSetting, not ConfigureAppConfiguration.
-        //
-        // Program.cs uses top-level statements, so it reads builder.Configuration into locals while
-        // registering services — the JWT signing key among them. ConfigureAppConfiguration callbacks
-        // are applied after that point, so an override made there reaches DI but not those locals:
-        // TokenService would sign with the test key while the bearer handler validated against the
-        // one in appsettings.Development.json, and every authenticated request would 401 with
-        // "the signature key was not found". UseSetting lands in the configuration before the host
-        // builder constructs it, so both halves see the same value.
-        foreach (var (key, value) in new Dictionary<string, string?>
-            {
-                ["ConnectionStrings:DefaultConnection"] = _postgres.GetConnectionString(),
+        // Apply test settings through the host configuration so the top-level Program and all
+        // services use the Testcontainers database and matching authentication settings.
+        builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(
+            new Dictionary<string, string?>
+                {
+                    ["ConnectionStrings:DefaultConnection"] = _postgres.GetConnectionString(),
 
-                // Explicitly cleared rather than merely absent: appsettings.Development.json points
-                // at a developer's local Redis, and a test run must not reach for it.
-                ["ConnectionStrings:Redis"] = "",
+                    // Explicitly cleared rather than merely absent: appsettings.Development.json points
+                    // at a developer's local Redis, and a test run must not reach for it.
+                    ["ConnectionStrings:Redis"] = "",
 
-                // Applied on startup, so the schema under test is whatever the migrations produce —
-                // which also means a broken migration fails the suite rather than production.
-                ["Database:AutoMigrate"] = "true",
+                    // Applied on startup, so the schema under test is whatever the migrations produce —
+                    // which also means a broken migration fails the suite rather than production.
+                    ["Database:AutoMigrate"] = "true",
 
-                ["JwtSettings:Secret"] = "integration-tests-signing-key-at-least-32-chars",
-                ["JwtSettings:Issuer"] = "BoardSync.Api.Tests",
-                ["JwtSettings:Audience"] = "BoardSync.Client.Tests",
+                    ["JwtSettings:Secret"] = "integration-tests-signing-key-at-least-32-chars",
+                    ["JwtSettings:Issuer"] = "BoardSync.Api.Tests",
+                    ["JwtSettings:Audience"] = "BoardSync.Client.Tests",
 
-                // Off, or a test class making a few dozen calls trips the limiter and fails for a
-                // reason that has nothing to do with what it was checking.
-                ["RateLimiting:Enabled"] = "false",
+                    // Off, or a test class making a few dozen calls trips the limiter and fails for a
+                    // reason that has nothing to do with what it was checking.
+                    ["RateLimiting:Enabled"] = "false",
 
-                // Registration would otherwise leave every account inactive and unable to sign in.
-                ["SecuritySettings:RequireEmailConfirmation"] = "false",
+                    // Registration would otherwise leave every account inactive and unable to sign in.
+                    ["SecuritySettings:RequireEmailConfirmation"] = "false",
 
-                // Drained aggressively so a latency assertion measures the NOTIFY path rather than
-                // the polling fallback. The default 5s would let a broken wake-up look fine.
-                ["Outbox:PollIntervalSeconds"] = "30",
+                    // Drained aggressively so a latency assertion measures the NOTIFY path rather than
+                    // the polling fallback. The default 5s would let a broken wake-up look fine.
+                    ["Outbox:PollIntervalSeconds"] = "30",
 
-                ["Telemetry:OtlpEndpoint"] = ""
-            })
-        {
-            builder.UseSetting(key, value);
-        }
+                    ["Telemetry:OtlpEndpoint"] = ""
+            }));
+
+        builder.UseSetting("JwtSettings:Secret", "integration-tests-signing-key-at-least-32-chars");
+        builder.UseSetting("JwtSettings:Issuer", "BoardSync.Api.Tests");
+        builder.UseSetting("JwtSettings:Audience", "BoardSync.Client.Tests");
 
         // Warnings and worse. Information-level EF logging prints every statement, which buries an
         // actual failure in thousands of lines of SQL.

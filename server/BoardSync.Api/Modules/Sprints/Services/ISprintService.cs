@@ -37,6 +37,13 @@ public interface ISprintService
         MoveSprintWorkItemRequest request,
         CancellationToken ct = default);
 
+    Task<MoveWorkItemCommandResponse> MoveWorkItemWithStateAsync(
+        Guid sprintId,
+        Guid workItemId,
+        MoveWorkItemCommandRequest request,
+        Guid changedBy,
+        CancellationToken ct = default);
+
     Task ReorderWorkItemsAsync(Guid sprintId, ReorderSprintWorkItemsRequest request, CancellationToken ct = default);
 
     /// <summary>
