@@ -13,7 +13,7 @@ public sealed class WorkItemMovementTests(BoardSyncApiFactory factory)
         var workspace = await Workspace.CreateAsync(factory);
         var sprint = await workspace.Owner.Post<Sprint>(
             $"/api/projects/{workspace.ProjectId}/sprints",
-            new { goal = "movement", startDate = DateTime.UtcNow.Date.AddDays(-1), endDate = DateTime.UtcNow.Date.AddDays(6) });
+            new { goal = "movement", startDate = DateTime.UtcNow.Date, endDate = DateTime.UtcNow.Date.AddDays(7) });
         var first = await workspace.AddWorkItemAsync("first");
         var moved = await workspace.AddWorkItemAsync("moved");
 
@@ -37,7 +37,7 @@ public sealed class WorkItemMovementTests(BoardSyncApiFactory factory)
         var workspace = await Workspace.CreateAsync(factory);
         var sprint = await workspace.Owner.Post<Sprint>(
             $"/api/projects/{workspace.ProjectId}/sprints",
-            new { goal = "movement", startDate = DateTime.UtcNow.Date.AddDays(-1), endDate = DateTime.UtcNow.Date.AddDays(6) });
+            new { goal = "movement", startDate = DateTime.UtcNow.Date, endDate = DateTime.UtcNow.Date.AddDays(7) });
         var item = await workspace.AddWorkItemAsync("stale movement");
         await workspace.Owner.Post($"/api/sprints/{sprint.Id}/workitems", new { workItemId = item });
         var current = await workspace.Owner.Get<WorkItem>($"/api/workitems/{item}");
@@ -57,7 +57,7 @@ public sealed class WorkItemMovementTests(BoardSyncApiFactory factory)
         var workspace = await Workspace.CreateAsync(factory);
         var sprint = await workspace.Owner.Post<Sprint>(
             $"/api/projects/{workspace.ProjectId}/sprints",
-            new { goal = "movement", startDate = DateTime.UtcNow.Date.AddDays(-1), endDate = DateTime.UtcNow.Date.AddDays(6) });
+            new { goal = "movement", startDate = DateTime.UtcNow.Date, endDate = DateTime.UtcNow.Date.AddDays(7) });
         var item = await workspace.AddWorkItemAsync("invalid placement");
         await workspace.Owner.Post($"/api/sprints/{sprint.Id}/workitems", new { workItemId = item });
         var current = await workspace.Owner.Get<WorkItem>($"/api/workitems/{item}");
@@ -150,7 +150,7 @@ public sealed class WorkItemMovementTests(BoardSyncApiFactory factory)
 
     private static async Task<Sprint> CreateSprint(Workspace workspace) =>
         await workspace.Owner.Post<Sprint>($"/api/projects/{workspace.ProjectId}/sprints",
-            new { goal = "movement", startDate = DateTime.UtcNow.Date.AddDays(-1), endDate = DateTime.UtcNow.Date.AddDays(6) });
+            new { goal = "movement", startDate = DateTime.UtcNow.Date, endDate = DateTime.UtcNow.Date.AddDays(7) });
 
     private static async Task<Guid> AddToSprint(Workspace workspace, Guid sprintId, string title)
     {

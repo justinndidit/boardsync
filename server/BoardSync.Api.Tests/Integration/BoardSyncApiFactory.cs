@@ -99,16 +99,48 @@ public sealed class BoardSyncApiFactory : WebApplicationFactory<Program>, IAsync
                     ["Telemetry:OtlpEndpoint"] = ""
             }));
 
-        builder.UseSetting("JwtSettings:Secret", "integration-tests-signing-key-at-least-32-chars");
+    // UseSetting for the same keys, duplicating the callback above.
+    //
+    // With top-level statements, Program.cs reads some values into locals while registering
+    // services — GetConnectionString("Redis") among them — from host-configuration-backed
+    // builder.Configuration. A ConfigureAppConfiguration override added on the IWebHostBuilder
+    // does not reliably shadow appsettings.Development.json for those locals: the suite then
+    // dials the developer's own Redis (:7001) whenever their compose stack happens to be up,
+    // and dies in RedisConnectionException whenever it is not — every test fails at host start
+    // before any assertion runs. UseSetting lands in the configuration before the host builder
+    // constructs it, so both halves see the same value — the same mechanism the JwtSettings
+    // entries below already depend on.
+    foreach (var (key, value) in new Dictionary<string, string?>
+             {
+                 ["ConnectionStrings:DefaultConnection"] = _postgres.GetConnectionString(),
+                 ["ConnectionStrings:Redis"] = "",
+                 ["Database:AutoMigrate"] = "true",
+                 ["JwtSettings:Secret"] = "integration-tests-signing-key-at-least-32-chars",
+                 ["JwtSettings:Issuer"] = "BoardSync.Api.Tests",
+                 ["JwtSettings:Audience"] = "BoardSync.Client.Tests",
+                 ["RateLimiting:Enabled"] = "false",
+                 ["SecuritySettings:RequireEmailConfirmation"] = "false",
+                 ["Outbox:PollIntervalSeconds"] = "30",
+                 ["Telemetry:OtlpEndpoint"] = ""
+             })
+    {
+        builder.UseSetting(key, value);
+    }
+
+    builder.UseSetting("JwtSettings:Secret", "integration-tests-signing-key-at-least-32-chars");
         builder.UseSetting("JwtSettings:Issuer", "BoardSync.Api.Tests");
         builder.UseSetting("JwtSettings:Audience", "BoardSync.Client.Tests");
 
-        // Warnings and worse. Information-level EF logging prints every statement, which buries an
-        // actual failure in thousands of lines of SQL.
+        // Errors and worse. Information-level EF logging prints every statement, which buries an
+        // actual failure in thousands of lines of SQL — but services deliberately swallow
+        // exceptions into generic 400s (see UserService.CreateAsync), so dropping everything
+        // below Error makes the real cause of those responses invisible. Keep a console writer
+        // pinned to Error so an infrastructure fault names itself.
         builder.ConfigureLogging(logging =>
         {
             logging.ClearProviders();
-            logging.SetMinimumLevel(LogLevel.Warning);
+            logging.AddConsole();
+            logging.SetMinimumLevel(LogLevel.Error);
         });
     }
 }

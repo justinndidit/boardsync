@@ -41,7 +41,7 @@ public sealed class TestApi
         var email = $"user-{Guid.NewGuid():N}@boardsync.test";
         const string password = "T3st!Password";
 
-        var registered = await http.PostAsJsonAsync("/api/auth/register", new
+        var registered = await http.PostAsJsonAsync("api/auth/register", new
         {
             email,
             password,
@@ -51,7 +51,10 @@ public sealed class TestApi
             displayName = "Test User"
         });
 
-        registered.EnsureSuccessStatusCode();
+        // Through AssertSuccess rather than EnsureSuccessStatusCode: a 400 whose body explains
+        // which rule broke (password policy, duplicate email, DB failure) is the difference
+        // between diagnosing a fixture problem and guessing at one.
+        await AssertSuccess(registered, "POST", "api/auth/register");
 
         var login = await http.PostAsJsonAsync("/api/auth/login", new { email, password });
         login.EnsureSuccessStatusCode();
