@@ -6,8 +6,13 @@ namespace BoardSync.Api.Modules.Sprints.Services;
 
 public interface ISprintService
 {
-    Task<SprintResponse> CreateAsync(Guid projectId, CreateSprintRequest request, Guid createdBy, CancellationToken ct = default);
+    /// <summary>Creates a sprint for a team.</summary>
+    Task<SprintResponse> CreateAsync(Guid teamId, CreateSprintRequest request, Guid createdBy, CancellationToken ct = default);
     Task<SprintResponse> GetByIdAsync(Guid sprintId, CancellationToken ct = default);
+    /// <summary>A team's sprints, newest first.</summary>
+    Task<PagedResult<SprintSummaryResponse>> GetForTeamAsync(Guid teamId, PaginationQuery pagination, CancellationToken ct = default);
+
+    /// <summary>The sprints of the team that builds a project.</summary>
     Task<PagedResult<SprintSummaryResponse>> GetForProjectAsync(Guid projectId, PaginationQuery pagination, CancellationToken ct = default);
     Task<SprintResponse?> GetActiveForProjectAsync(Guid projectId, CancellationToken ct = default);
     Task<SprintResponse> UpdateAsync(Guid sprintId, UpdateSprintRequest request, Guid updatedBy, CancellationToken ct = default);

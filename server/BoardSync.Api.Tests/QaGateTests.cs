@@ -173,12 +173,14 @@ public class QaGateTests
         var scrumMaster = Snapshot(teams: [(Team, RoleType.ScrumMaster)]);
         var productOwner = Snapshot(teams: [(Team, RoleType.ProductOwner)]);
 
-        Assert.True(AccessEvaluator.GrantsAtProject(
-            scrumMaster, Permissions.SprintManage, Project, Location));
+        // Sprint authority is at team scope; certification is about the work, so it stays a
+        // project question.
+        Assert.True(AccessEvaluator.GrantsAtTeam(
+            scrumMaster, Permissions.SprintManage, Team, Org));
         Assert.False(CanVerify(scrumMaster));
 
-        Assert.True(AccessEvaluator.GrantsAtProject(
-            productOwner, Permissions.SprintManage, Project, Location));
+        Assert.True(AccessEvaluator.GrantsAtTeam(
+            productOwner, Permissions.SprintManage, Team, Org));
         Assert.True(CanVerify(productOwner));
     }
 

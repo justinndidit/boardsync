@@ -38,7 +38,7 @@ public partial class ActivityEventHandlers :
 
         await RecordAsync(e, scope.Value.OrganizationId, ActivityEntityType.WorkItem, e.WorkItemId,
             e.Title, ActivityVerb.Created, e.CreatedByUserId, ct,
-            projectId: e.ProjectId, fieldName: "Type", newValue: e.Type.ToString());
+             fieldName: "Type", newValue: e.Type.ToString());
     }
 
     public async Task HandleAsync(WorkItemUpdated e, CancellationToken ct = default)
@@ -48,7 +48,7 @@ public partial class ActivityEventHandlers :
 
         await RecordAsync(e, scope.Value.OrganizationId, ActivityEntityType.WorkItem, e.WorkItemId,
             await WorkItemTitleAsync(e.WorkItemId, ct), ActivityVerb.Updated, e.ChangedByUserId, ct,
-            projectId: e.ProjectId, fieldName: e.FieldName, oldValue: e.OldValue, newValue: e.NewValue);
+             fieldName: e.FieldName, oldValue: e.OldValue, newValue: e.NewValue);
     }
 
     public async Task HandleAsync(WorkItemStateChanged e, CancellationToken ct = default)
@@ -58,7 +58,7 @@ public partial class ActivityEventHandlers :
 
         await RecordAsync(e, scope.Value.OrganizationId, ActivityEntityType.WorkItem, e.WorkItemId,
             await WorkItemTitleAsync(e.WorkItemId, ct), ActivityVerb.StateChanged, e.ChangedByUserId, ct,
-            projectId: e.ProjectId, fieldName: "State",
+             fieldName: "State",
             oldValue: e.OldState.ToString(), newValue: e.NewState.ToString());
     }
 
@@ -69,7 +69,7 @@ public partial class ActivityEventHandlers :
 
         await RecordAsync(e, scope.Value.OrganizationId, ActivityEntityType.WorkItem, e.WorkItemId,
             await WorkItemTitleAsync(e.WorkItemId, ct), ActivityVerb.Assigned, e.ChangedByUserId, ct,
-            projectId: e.ProjectId, fieldName: "Assignee",
+             fieldName: "Assignee",
             oldValue: e.PreviousAssigneeId is { } prev ? await UserNameAsync(prev, ct) : null,
             newValue: e.NewAssigneeId is { } next ? await UserNameAsync(next, ct) : null);
     }
@@ -95,7 +95,7 @@ public partial class ActivityEventHandlers :
         // comment id travels in EntityId so the client can deep-link to it.
         await RecordAsync(e, scope.Value.OrganizationId, ActivityEntityType.Comment, e.CommentId,
             await WorkItemTitleAsync(e.WorkItemId, ct), ActivityVerb.Commented, e.AuthorId, ct,
-            projectId: e.ProjectId, newValue: body);
+             newValue: body);
     }
 
     public async Task HandleAsync(WorkItemLinked e, CancellationToken ct = default)
@@ -113,38 +113,43 @@ public partial class ActivityEventHandlers :
     }
 
     // ── Sprints and boards ───────────────────────────────────────────────────
+    //
+    // Sprint activity carries no `projectId`. A sprint belongs to a team and its work may span
+    // several of that team's projects, so attributing the whole sprint to one of them would put it
+    // on that project's feed and hide it from the others. It reaches people through the
+    // organization feed and the sprint's own entity id.
 
     public Task HandleAsync(SprintCreated e, CancellationToken ct = default) =>
         RecordAsync(e, e.OrganizationId, ActivityEntityType.Sprint, e.SprintId,
-            e.Name, ActivityVerb.Created, e.CreatedByUserId, ct, projectId: e.ProjectId);
+            e.Name, ActivityVerb.Created, e.CreatedByUserId, ct);
 
     public Task HandleAsync(SprintUpdated e, CancellationToken ct = default) =>
         RecordAsync(e, e.OrganizationId, ActivityEntityType.Sprint, e.SprintId,
-            e.Name, ActivityVerb.Updated, e.UpdatedByUserId, ct, projectId: e.ProjectId,
+            e.Name, ActivityVerb.Updated, e.UpdatedByUserId, ct,
             fieldName: e.FieldName, oldValue: e.OldValue, newValue: e.NewValue);
 
     public Task HandleAsync(SprintStatusChanged e, CancellationToken ct = default) =>
         RecordAsync(e, e.OrganizationId, ActivityEntityType.Sprint, e.SprintId,
-            e.Name, ActivityVerb.StateChanged, e.ChangedByUserId, ct, projectId: e.ProjectId,
+            e.Name, ActivityVerb.StateChanged, e.ChangedByUserId, ct,
             fieldName: "Status", oldValue: e.OldStatus.ToString(), newValue: e.NewStatus.ToString());
 
     public Task HandleAsync(SprintDeleted e, CancellationToken ct = default) =>
         RecordAsync(e, e.OrganizationId, ActivityEntityType.Sprint, e.SprintId,
-            e.Name, ActivityVerb.Deleted, e.DeletedByUserId, ct, projectId: e.ProjectId);
+            e.Name, ActivityVerb.Deleted, e.DeletedByUserId, ct);
 
     public Task HandleAsync(SprintWorkItemAdded e, CancellationToken ct = default) =>
         RecordAsync(e, e.OrganizationId, ActivityEntityType.Sprint, e.SprintId,
-            e.SprintName, ActivityVerb.Updated, e.AddedByUserId, ct, projectId: e.ProjectId,
+            e.SprintName, ActivityVerb.Updated, e.AddedByUserId, ct,
             fieldName: "Work item added", newValue: e.WorkItemTitle);
 
     public Task HandleAsync(SprintWorkItemRemoved e, CancellationToken ct = default) =>
         RecordAsync(e, e.OrganizationId, ActivityEntityType.Sprint, e.SprintId,
-            e.SprintName, ActivityVerb.Updated, e.RemovedByUserId, ct, projectId: e.ProjectId,
+            e.SprintName, ActivityVerb.Updated, e.RemovedByUserId, ct,
             fieldName: "Work item removed", oldValue: e.WorkItemTitle);
 
     public Task HandleAsync(BoardChanged e, CancellationToken ct = default) =>
         RecordAsync(e, e.OrganizationId, ActivityEntityType.Board, e.BoardId,
-            e.BoardName, ActivityVerb.Updated, e.ChangedByUserId, ct, projectId: e.ProjectId,
+            e.BoardName, ActivityVerb.Updated, e.ChangedByUserId, ct,
             fieldName: e.Change, oldValue: e.OldValue, newValue: e.NewValue);
 
     // ── Lookups ──────────────────────────────────────────────────────────────

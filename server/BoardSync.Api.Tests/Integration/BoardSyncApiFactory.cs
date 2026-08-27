@@ -64,7 +64,15 @@ public sealed class BoardSyncApiFactory : WebApplicationFactory<Program>, IAsync
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        builder.UseEnvironment(Environments.Development);
+        /*
+         * "Testing", not Development.
+         *
+         * A migration that fails is swallowed in Development and the app starts on a half-applied
+         * schema — which surfaced once as twenty unrelated integration failures all reporting
+         * "a database error occurred". Testing fails fast instead: a run against a schema that did
+         * not build is not a run.
+         */
+        builder.UseEnvironment("Testing");
 
         // UseSetting, not ConfigureAppConfiguration.
         //

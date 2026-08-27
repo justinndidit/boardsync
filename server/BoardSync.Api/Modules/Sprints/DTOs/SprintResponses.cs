@@ -16,7 +16,15 @@ public enum IncompleteItemsDestination
 /// <summary>Full sprint detail including velocity metrics.</summary>
 public record SprintResponse(
     Guid Id,
-    Guid ProjectId,
+
+    /// <summary>
+    /// The team the sprint belongs to.
+    /// </summary>
+    /// <remarks>
+    /// Was <c>ProjectId</c>. A sprint is the team's and its work may span several of the team's
+    /// projects — see <c>docs/adr-001-team-sprints.md</c>.
+    /// </remarks>
+    Guid TeamId,
     int Number,
     string? Goal,
     DateTime StartDate,

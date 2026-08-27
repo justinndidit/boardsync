@@ -349,12 +349,13 @@ public class BoardSyncDbContext : DbContext
         {
             entity.ToTable("Sprints", "plan");
             entity.HasKey(s => s.Id);
-            entity.HasIndex(s => s.ProjectId);
-            entity.HasIndex(s => new { s.ProjectId, s.Number }).IsUnique();
+            entity.HasIndex(s => s.TeamId);
+            entity.HasIndex(s => new { s.TeamId, s.Number }).IsUnique();
             entity.HasIndex(s => s.Status);
 
             // "The active sprint for this project" runs on every board render.
-            entity.HasIndex(s => new { s.ProjectId, s.Status });
+            // Answers "the team's active sprint", which every board load asks.
+            entity.HasIndex(s => new { s.TeamId, s.Status });
 
             entity.Property(s => s.Goal).HasMaxLength(500);
             entity.Property(s => s.Status)
@@ -373,9 +374,9 @@ public class BoardSyncDbContext : DbContext
             // ProjectId named something that was not a project would resolve to a scope nobody holds
             // and deny everyone, which is exactly the failure the team → project rename produced.
             // Cascade because a sprint has no meaning once its project is gone.
-            entity.HasOne<Project>()
+            entity.HasOne<Team>()
                 .WithMany()
-                .HasForeignKey(s => s.ProjectId)
+                .HasForeignKey(s => s.TeamId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

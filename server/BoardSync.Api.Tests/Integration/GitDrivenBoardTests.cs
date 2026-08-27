@@ -456,7 +456,7 @@ public class GitDrivenBoardTests(BoardSyncApiFactory factory)
         var itemId = await c.Workspace.AddWorkItemAsync("needs a reference");
 
         var sprint = await c.Workspace.Owner.Post<Created>(
-            $"/api/projects/{c.Workspace.ProjectId}/sprints",
+            $"/api/teams/{c.Workspace.TeamId}/sprints",
             new
             {
                 goal = "reference on cards",

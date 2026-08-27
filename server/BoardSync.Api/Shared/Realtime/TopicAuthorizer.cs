@@ -78,11 +78,10 @@ public class TopicAuthorizer : ITopicAuthorizer
 
         if (sprint is null) return false;
 
-        // sprint:read, not project:read — the same permission the equivalent GET asks for. They are
-        // not the same question: a project Viewer holds both today, but keeping the socket on the
-        // weaker of the two would let a future project role read sprints over the wire that it
-        // could not read over HTTP.
+        // sprint:read at **team** scope — the same permission and the same scope the equivalent GET
+        // asks for. A sprint belongs to a team, so a project role no longer answers this question;
+        // resolving it against a project would have been asking the wrong scope entirely.
         return await _rbac.HasPermissionAsync(
-            userId, Permissions.SprintRead, RoleScope.Project, sprint.ProjectId, ct);
+            userId, Permissions.SprintRead, RoleScope.Team, sprint.TeamId, ct);
     }
 }
