@@ -291,6 +291,20 @@ builder.Services.AddScoped<IJobHandler<ProcessGitDelivery>, ProcessGitDeliveryHa
 // blur than a comment would.
 builder.Services.AddScoped<IReportingService, ReportingService>();
 
+/*
+ * Intelligence narrates over what Reporting computed and computes nothing itself — see
+ * build_context.md §8.3. The narrator is a singleton because it holds one HTTP client; the service
+ * around it is scoped because it reads the report through the request's DbContext.
+ */
+builder.Services.AddSingleton<BoardSync.Api.Modules.Intelligence.Services.INarrator,
+    BoardSync.Api.Modules.Intelligence.Services.ClaudeNarrator>();
+builder.Services.AddSingleton<BoardSync.Api.Modules.Intelligence.Services.ITokenBudget,
+    BoardSync.Api.Modules.Intelligence.Services.InMemoryTokenBudget>();
+builder.Services.AddScoped<BoardSync.Api.Modules.Intelligence.Services.ISprintOrganizationLookup,
+    BoardSync.Api.Modules.Intelligence.Services.SprintOrganizationLookup>();
+builder.Services.AddScoped<BoardSync.Api.Modules.Intelligence.Services.INarrativeService,
+    BoardSync.Api.Modules.Intelligence.Services.NarrativeService>();
+
 // Activity Module — subscribes to the other modules' domain events
 builder.Services.AddActivityModule();
 
