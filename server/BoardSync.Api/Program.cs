@@ -223,6 +223,10 @@ builder.Services.AddScoped<IScopeResolver, BoardColumnScopeResolver>();
 
 // A git installation is administered by the organization it belongs to.
 builder.Services.AddScoped<IScopeResolver, InstallationScopeResolver>();
+
+// A proposal resolves to the project its work would land in — see ProposalScopeResolver.
+builder.Services.AddScoped<IScopeResolver,
+    BoardSync.Api.Modules.Intelligence.ProposalScopeResolver>();
 builder.Services.AddScoped<ScopeResolverRegistry>();
 builder.Services.AddScoped<PermissionAuthorizationFilter>();
 
@@ -304,6 +308,21 @@ builder.Services.AddScoped<BoardSync.Api.Modules.Intelligence.Services.ISprintOr
     BoardSync.Api.Modules.Intelligence.Services.SprintOrganizationLookup>();
 builder.Services.AddScoped<BoardSync.Api.Modules.Intelligence.Services.INarrativeService,
     BoardSync.Api.Modules.Intelligence.Services.NarrativeService>();
+
+/*
+ * Decomposition — the other half of §8.2, and the one that can write to the board.
+ *
+ * The decomposer is a singleton for the same reason the narrator is: it holds one HTTP client. The
+ * proposal service is scoped because acceptance runs through the request's DbContext and its
+ * transaction. The handler runs in the job worker's own scope.
+ */
+builder.Services.AddSingleton<BoardSync.Api.Modules.Intelligence.Services.IDecomposer,
+    BoardSync.Api.Modules.Intelligence.Services.ClaudeDecomposer>();
+builder.Services.AddScoped<BoardSync.Api.Modules.Intelligence.Services.IProposalService,
+    BoardSync.Api.Modules.Intelligence.Services.ProposalService>();
+builder.Services.AddScoped<
+    IJobHandler<BoardSync.Api.Modules.Intelligence.Jobs.DecomposePrd>,
+    BoardSync.Api.Modules.Intelligence.Jobs.DecomposePrdHandler>();
 
 // Activity Module — subscribes to the other modules' domain events
 builder.Services.AddActivityModule();

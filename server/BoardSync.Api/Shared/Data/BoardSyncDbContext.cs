@@ -63,6 +63,8 @@ public class BoardSyncDbContext : DbContext
     public DbSet<WebhookDelivery> WebhookDeliveries { get; set; } = null!;
 
     // ── Shared kernel ─────────────────────────────────────────────────────────
+    public DbSet<BoardSync.Api.Modules.Intelligence.Models.Proposal> Proposals { get; set; } = null!;
+
     public DbSet<OutboxMessage> OutboxMessages { get; set; } = null!;
     public DbSet<Job> Jobs { get; set; } = null!;
 
@@ -678,6 +680,45 @@ public class BoardSyncDbContext : DbContext
             entity.HasIndex(j => new { j.Priority, j.Sequence })
                 .HasFilter("\"CompletedAt\" IS NULL AND \"DeadAt\" IS NULL")
                 .HasDatabaseName("IX_Jobs_Runnable");
+        });
+
+        // ----------------------------------------------------------------
+        // Intelligence module
+        // ----------------------------------------------------------------
+
+        modelBuilder.Entity<BoardSync.Api.Modules.Intelligence.Models.Proposal>(entity =>
+        {
+            entity.ToTable("Proposals", "intel");
+            entity.HasKey(p => p.Id);
+
+            // Stored by name, so inserting a status in the middle is safe.
+            entity.Property(p => p.Status)
+                .HasConversion<string>()
+                .HasMaxLength(20)
+                .IsRequired();
+
+            /*
+             * The draft as jsonb, not as rows.
+             *
+             * It is a suggestion rather than domain data — nothing refers to it, and modelling it
+             * as a shadow work item tree would mean every query over work items learning to
+             * exclude it. jsonb rather than text so it can be queried if that is ever wanted.
+             */
+            entity.Property(p => p.DraftJson).HasColumnType("jsonb");
+
+            entity.Property(p => p.SourceText).IsRequired();
+            entity.Property(p => p.FailureReason).HasMaxLength(2000);
+
+            // The list a project's proposals page asks for: this project's, newest first.
+            entity.HasIndex(p => new { p.ProjectId, p.CreatedAt })
+                .HasDatabaseName("IX_Proposals_Project");
+
+            // Cascade from the project. A proposal for a deleted project is a draft of work that
+            // can never be created.
+            entity.HasOne<Project>()
+                .WithMany()
+                .HasForeignKey(p => p.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         // ----------------------------------------------------------------

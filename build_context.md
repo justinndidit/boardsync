@@ -947,7 +947,7 @@ New → Active → InReview → Resolved with nobody touching the board. It stop
 
 *Exit: an Azure DevOps shop can adopt BoardSync. QA gets told when something needs testing.*
 
-### Phase E — Intelligence · **the metrics layer is shipped; the narrative layer is not**
+### Phase E — Intelligence · **metrics, narrative and decomposition shipped; CFD outstanding**
 
 - [x] Deterministic metrics — burndown, velocity, cycle time, and the merge-to-certification gap.
       **Shipped as `Modules/Reporting`, not `Modules/Intelligence`.** §8.3's argument is that a model
@@ -955,8 +955,25 @@ New → Active → InReview → Resolved with nobody touching the board. It stop
       putting the computed figures in a module named for AI would blur that boundary before the AI
       exists. Reporting computes, Intelligence will narrate over it, and the module structure is what
       keeps the two from merging later.
-- [ ] `Modules/Intelligence`, proposal model, acceptance flow, budget enforcement.
-- [ ] PRD decomposition with structured outputs.
+- [x] `Modules/Intelligence`, proposal model, acceptance flow, budget enforcement — see
+      `docs/adr-002-proposals.md`. A decomposition lands as a `Proposal` with no authority; accepting
+      it calls the same `WorkItemService.CreateAsync` a person clicking "New work item" calls.
+      Selecting a node carries its ancestors (a story cannot be created under a feature that was
+      not) and does **not** carry its descendants (accepting an epic must not silently create forty
+      tasks nobody read). Acceptance runs in one transaction, because `CreateAsync` saves per item
+      and a failure partway leaves half a plan on the board.
+- [x] PRD decomposition with structured outputs — `POST /api/projects/{id}/intelligence/decompose`,
+      `202` with a proposal id to poll, run as a job because it is tens of seconds of model time.
+      `DecompositionGuard` checks the tree before a human sees it: the nesting rule, a 150-node
+      review cap, title and estimate limits, duplicate siblings. **The schema cannot express the
+      nesting rule** — structured output constrains the JSON shape and has no opinion about whether
+      a Task may sit under an Epic, so the prompt asks and the guard enforces.
+
+      **Unexercised against the real API** — no key in the build environment. 22 tests cover the
+      guard and the selection rule against a fake. Prompt caching and streaming are both specified
+      in §8.2 and both unimplemented: the system prompt is a constant so the prefix is stable, but no
+      `cache_control` breakpoint is set, and §8.2's `Messages.Stream(...)` is not this SDK version's
+      API (it is `CreateStreaming`).
 - [x] Narrative report layer — `Modules/Intelligence`, `GET /api/sprints/{id}/report/narrative`.
       Receives a `SprintReport`, computes nothing, and is **checked afterwards** rather than
       trusted: `NarrativeGuard` verifies every figure in the prose appears in the report it was
