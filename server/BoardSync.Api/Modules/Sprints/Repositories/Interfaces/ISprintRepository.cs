@@ -27,18 +27,47 @@ public interface ISprintRepository
     Task<Sprint?> GetByIdAsync(Guid sprintId, CancellationToken ct = default);
     Task LockSprintAsync(Guid sprintId, CancellationToken ct = default);
 
-    /// <summary>The project's currently active sprint, or null when it has none.</summary>
-    Task<Sprint?> GetActiveForProjectAsync(Guid ProjectId, CancellationToken ct = default);
+    /// <summary>The team's active sprint, or null. At most one exists.</summary>
+    Task<Sprint?> GetActiveForTeamAsync(Guid teamId, CancellationToken ct = default);
 
-    /// <summary>Paginated sprint summaries for a project, newest sprint number first.</summary>
-    Task<(IReadOnlyList<SprintSummaryResponse> Items, int TotalCount)> GetForProjectAsync(
-        Guid ProjectId,
+    /// <summary>
+    /// The active sprint of the team that owns a project.
+    /// </summary>
+    /// <remarks>
+    /// A convenience for the board, which asks "what is this project's current sprint" on every
+    /// load. Resolving the team client-side first would be a round trip for something one join
+    /// answers.
+    /// </remarks>
+    Task<Sprint?> GetActiveForProjectAsync(Guid projectId, CancellationToken ct = default);
+
+    /// <summary>Paginated sprint summaries for a team, newest sprint number first.</summary>
+    Task<(IReadOnlyList<SprintSummaryResponse> Items, int TotalCount)> GetForTeamAsync(
+        Guid teamId,
         int skip,
         int take,
         CancellationToken ct = default);
 
     /// <summary>Whether an active project with this ID exists.</summary>
     Task<bool> ProjectExistsAsync(Guid ProjectId, CancellationToken ct = default);
+
+    /// <summary>Whether an active team exists, without loading it.</summary>
+    Task<bool> TeamExistsAsync(Guid teamId, CancellationToken ct = default);
+
+    /// <summary>The organization a team belongs to, or null when the team does not exist.</summary>
+    Task<Guid?> GetOrganizationIdForTeamAsync(Guid teamId, CancellationToken ct = default);
+
+    /// <summary>The team a project is assigned to, or null when the project does not exist.</summary>
+    Task<Guid?> GetTeamIdForProjectAsync(Guid projectId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Whether a project is one this team serves.
+    /// </summary>
+    /// <remarks>
+    /// The boundary for what may go in a sprint. A sprint holds work from any project its team is
+    /// assigned to, and nothing else — which is what stops a team member naming a work item id from
+    /// another organization and reading it back off their own board.
+    /// </remarks>
+    Task<bool> TeamServesProjectAsync(Guid teamId, Guid projectId, CancellationToken ct = default);
 
     /// <summary>
     /// The project a project is assigned to, or null if the project does not exist.
@@ -54,7 +83,7 @@ public interface ISprintRepository
     /// Completed sprints are excluded — history is allowed to overlap, only live plans are not.
     /// </summary>
     Task<bool> HasOverlappingSprintAsync(
-        Guid ProjectId,
+        Guid teamId,
         DateTime startDate,
         DateTime endDate,
         CancellationToken ct = default);
@@ -63,10 +92,10 @@ public interface ISprintRepository
     /// Whether the project has an active sprint other than <paramref name="excludingSprintId"/>.
     /// Guards the one-active-sprint-per-project rule when starting a sprint.
     /// </summary>
-    Task<bool> HasAnotherActiveSprintAsync(Guid projectId, Guid excludingSprintId, CancellationToken ct = default);
+    Task<bool> HasAnotherActiveSprintAsync(Guid teamId, Guid excludingSprintId, CancellationToken ct = default);
 
     /// <summary>Next sprint number for a project. Numbers are sequential per project, starting at 1.</summary>
-    Task<int> GetNextNumberAsync(Guid projectId, CancellationToken ct = default);
+    Task<int> GetNextNumberAsync(Guid teamId, CancellationToken ct = default);
 
     /// <summary>
     /// The organization owning a sprint's project, or null if the project is gone. Sprints hang off a

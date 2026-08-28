@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
+using NpgsqlTypes;
 
 #nullable disable
 
@@ -319,6 +320,66 @@ namespace BoardSync.Api.Shared.Data.Migrations
                         .HasDatabaseName("IX_WebhookDeliveries_Provider_ProviderDeliveryId");
 
                     b.ToTable("WebhookDeliveries", "git");
+                });
+
+            modelBuilder.Entity("BoardSync.Api.Modules.Intelligence.Models.Proposal", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("AcceptedCount")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("DecidedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DecidedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("DraftJson")
+                        .HasColumnType("jsonb");
+
+                    b.Property<string>("FailureReason")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SourceText")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<Guid>("TeamId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("TokensSpent")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId", "CreatedAt")
+                        .HasDatabaseName("IX_Proposals_Project");
+
+                    b.ToTable("Proposals", "intel");
                 });
 
             modelBuilder.Entity("BoardSync.Api.Modules.Notifications.Models.Notification", b =>
@@ -807,9 +868,6 @@ namespace BoardSync.Api.Shared.Data.Migrations
                     b.Property<int>("Number")
                         .HasColumnType("integer");
 
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uuid");
-
                     b.Property<DateTime>("StartDate")
                         .HasColumnType("timestamp with time zone");
 
@@ -818,19 +876,22 @@ namespace BoardSync.Api.Shared.Data.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
 
+                    b.Property<Guid>("TeamId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ProjectId");
-
                     b.HasIndex("Status");
 
-                    b.HasIndex("ProjectId", "Number")
+                    b.HasIndex("TeamId");
+
+                    b.HasIndex("TeamId", "Number")
                         .IsUnique();
 
-                    b.HasIndex("ProjectId", "Status");
+                    b.HasIndex("TeamId", "Status");
 
                     b.ToTable("Sprints", "plan");
                 });
@@ -913,6 +974,12 @@ namespace BoardSync.Api.Shared.Data.Migrations
                     b.Property<Guid>("ProjectId")
                         .HasColumnType("uuid");
 
+                    b.Property<NpgsqlTsVector>("SearchVector")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("tsvector")
+                        .HasAnnotation("Npgsql:TsVectorConfig", "english")
+                        .HasAnnotation("Npgsql:TsVectorProperties", new[] { "Title", "Description" });
+
                     b.Property<string>("State")
                         .IsRequired()
                         .HasMaxLength(20)
@@ -952,6 +1019,10 @@ namespace BoardSync.Api.Shared.Data.Migrations
                     b.HasIndex("ParentId");
 
                     b.HasIndex("ProjectId");
+
+                    b.HasIndex("SearchVector");
+
+                    NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("SearchVector"), "GIN");
 
                     b.HasIndex("State");
 
@@ -1422,6 +1493,15 @@ namespace BoardSync.Api.Shared.Data.Migrations
                     b.Navigation("Installation");
                 });
 
+            modelBuilder.Entity("BoardSync.Api.Modules.Intelligence.Models.Proposal", b =>
+                {
+                    b.HasOne("BoardSync.Api.Modules.OrgProject.Domain.Models.Project", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("BoardSync.Api.Modules.OrgProject.Domain.Models.OrganizationMembership", b =>
                 {
                     b.HasOne("BoardSync.Api.Modules.OrgProject.Domain.Models.Organization", "Organization")
@@ -1512,9 +1592,9 @@ namespace BoardSync.Api.Shared.Data.Migrations
 
             modelBuilder.Entity("BoardSync.Api.Modules.Sprints.Models.Sprint", b =>
                 {
-                    b.HasOne("BoardSync.Api.Modules.OrgProject.Domain.Models.Project", null)
+                    b.HasOne("BoardSync.Api.Modules.OrgProject.Domain.Models.Team", null)
                         .WithMany()
-                        .HasForeignKey("ProjectId")
+                        .HasForeignKey("TeamId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

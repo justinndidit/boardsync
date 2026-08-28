@@ -23,14 +23,33 @@ public enum SprintStatus
 }
 
 /// <summary>
-/// A time-boxed iteration scoped to a project.
+/// A time-boxed iteration belonging to a team.
 /// </summary>
+/// <remarks>
+/// <para>
+/// <b>The team's, not a project's</b> — see <c>docs/adr-001-team-sprints.md</c>. A team may serve
+/// several projects, and a sprint may contain work from any of them. When sprints were per-project
+/// a team on three projects ran three concurrent sprints, which meant three burndowns and three
+/// velocity charts that could not be added together, describing nothing anybody has.
+/// </para>
+/// <para>
+/// The permission model had already conceded this: sprint authority is a team appointment — Scrum
+/// Master, Product Owner — that reached projects through the team → project edge. The authority was
+/// team-shaped while the object was not.
+/// </para>
+/// </remarks>
 public class Sprint : BaseEntity
 {
-    /// <summary>The project this sprint belongs to.</summary>
-    public Guid ProjectId { get; set; }
+    /// <summary>The team this sprint belongs to.</summary>
+    public Guid TeamId { get; set; }
 
-    /// <summary>Auto-incremented sprint number within the project (Sprint 1, Sprint 2 …).</summary>
+    /// <summary>
+    /// Auto-incremented within the team (Sprint 1, Sprint 2 …).
+    /// </summary>
+    /// <remarks>
+    /// Per team, not per project. Two projects served by one team used to have their own Sprint 1,
+    /// which is how the migration came to need a renumbering pass.
+    /// </remarks>
     public int Number { get; set; }
 
     /// <summary>Optional sprint goal / focus statement shown on the board header.</summary>

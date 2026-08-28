@@ -22,6 +22,10 @@ public class SprintRepository : ISprintRepository
     public Task<Sprint?> GetByIdAsync(Guid sprintId, CancellationToken ct = default) =>
         _context.Sprints.FirstOrDefaultAsync(s => s.Id == sprintId, ct);
 
+    public Task<Sprint?> GetActiveForTeamAsync(Guid teamId, CancellationToken ct = default) =>
+        _context.Sprints.FirstOrDefaultAsync(
+            s => s.TeamId == teamId && s.Status == SprintStatus.Active, ct);
+
     public async Task LockSprintAsync(Guid sprintId, CancellationToken ct = default) =>
         _ = await _context.Sprints
             .FromSqlInterpolated($"SELECT * FROM plan.\"Sprints\" WHERE \"Id\" = {sprintId} FOR UPDATE")
@@ -29,16 +33,19 @@ public class SprintRepository : ISprintRepository
             .SingleOrDefaultAsync(ct);
 
     public Task<Sprint?> GetActiveForProjectAsync(Guid projectId, CancellationToken ct = default) =>
-        _context.Sprints.FirstOrDefaultAsync(
-            s => s.ProjectId == projectId && s.Status == SprintStatus.Active, ct);
+        _context.Sprints
+            .Where(s => s.Status == SprintStatus.Active)
+            .Join(_context.Projects.Where(p => p.Id == projectId),
+                s => s.TeamId, p => p.AssignedTeamId, (s, _) => s)
+            .FirstOrDefaultAsync(ct);
 
-    public async Task<(IReadOnlyList<SprintSummaryResponse> Items, int TotalCount)> GetForProjectAsync(
-        Guid projectId,
+    public async Task<(IReadOnlyList<SprintSummaryResponse> Items, int TotalCount)> GetForTeamAsync(
+        Guid teamId,
         int skip,
         int take,
         CancellationToken ct = default)
     {
-        var query = _context.Sprints.Where(s => s.ProjectId == projectId);
+        var query = _context.Sprints.Where(s => s.TeamId == teamId);
 
         var total = await query.CountAsync(ct);
 
@@ -64,6 +71,20 @@ public class SprintRepository : ISprintRepository
     public Task<bool> ProjectExistsAsync(Guid projectId, CancellationToken ct = default) =>
         _context.Projects.AnyAsync(t => t.Id == projectId && t.IsActive, ct);
 
+    public Task<bool> TeamExistsAsync(Guid teamId, CancellationToken ct = default) =>
+        _context.Teams.AnyAsync(t => t.Id == teamId && t.IsActive, ct);
+
+    public Task<bool> TeamServesProjectAsync(
+        Guid teamId, Guid projectId, CancellationToken ct = default) =>
+        _context.Projects.AnyAsync(
+            p => p.Id == projectId && p.AssignedTeamId == teamId && p.IsActive, ct);
+
+    public Task<Guid?> GetTeamIdForProjectAsync(Guid projectId, CancellationToken ct = default) =>
+        _context.Projects
+            .Where(p => p.Id == projectId)
+            .Select(p => (Guid?)p.AssignedTeamId)
+            .FirstOrDefaultAsync(ct);
+
     public Task<Guid?> GetOrganizationIdForProjectAsync(
     Guid projectId,
     CancellationToken ct = default) =>
@@ -73,28 +94,28 @@ public class SprintRepository : ISprintRepository
         .FirstOrDefaultAsync(ct);
 
     public Task<bool> HasOverlappingSprintAsync(
-        Guid projectId,
+        Guid teamId,
         DateTime startDate,
         DateTime endDate,
         CancellationToken ct = default) =>
         _context.Sprints.AnyAsync(s =>
-            s.ProjectId == projectId
+            s.TeamId == teamId
             && s.Status != SprintStatus.Completed
             && s.StartDate < endDate
             && s.EndDate > startDate, ct);
 
     public Task<bool> HasAnotherActiveSprintAsync(
-        Guid projectId,
+        Guid teamId,
         Guid excludingSprintId,
         CancellationToken ct = default) =>
         _context.Sprints.AnyAsync(s =>
-            s.ProjectId == projectId
+            s.TeamId == teamId
             && s.Status == SprintStatus.Active
             && s.Id != excludingSprintId, ct);
 
-    public async Task<int> GetNextNumberAsync(Guid projectId, CancellationToken ct = default) =>
+    public async Task<int> GetNextNumberAsync(Guid teamId, CancellationToken ct = default) =>
         (await _context.Sprints
-            .Where(s => s.ProjectId == projectId)
+            .Where(s => s.TeamId == teamId)
             .MaxAsync(s => (int?)s.Number, ct) ?? 0) + 1;
 
     public Task<Guid?> GetOrganizationIdForTeamAsync(Guid teamId, CancellationToken ct = default) =>

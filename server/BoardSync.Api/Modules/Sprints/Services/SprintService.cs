@@ -69,23 +69,17 @@ public class SprintService : ISprintService
         Guid createdBy,
         CancellationToken ct = default)
     {
-        if (!await _repository.ProjectExistsAsync(teamId, ct))
+        if (!await _repository.TeamExistsAsync(teamId, ct))
             throw new NotFoundException("Team", teamId);
 
-         if (!await _repository.ProjectExistsAsync(teamId, ct))
-         throw new NotFoundException("Team", teamId);
-
-         ValidateDates(request.StartDate, request.EndDate);
-
-        if (await _repository.HasOverlappingSprintAsync(teamId, request.StartDate, request.EndDate, ct))
-         throw new ConflictException("Sprint dates overlap with an existing sprint for this team.");
+        ValidateDates(request.StartDate, request.EndDate);
 
         if (await _repository.HasOverlappingSprintAsync(teamId, request.StartDate, request.EndDate, ct))
             throw new ConflictException("Sprint dates overlap with an existing sprint for this team.");
 
         var sprint = new Sprint
         {
-            ProjectId    = teamId,
+            TeamId    = teamId,
             Number    = await _repository.GetNextNumberAsync(teamId, ct),
             Goal      = request.Goal?.Trim(),
             StartDate = DateTime.SpecifyKind(request.StartDate.Date, DateTimeKind.Utc),
@@ -97,12 +91,12 @@ public class SprintService : ISprintService
         _repository.Add(sprint);
 
         await EnqueueAsync(sprint, orgId => new SprintCreated(
-            sprint.Id, sprint.ProjectId, orgId, SprintName(sprint), createdBy), ct);
+            sprint.Id, sprint.TeamId, orgId, SprintName(sprint), createdBy), ct);
 
         await _repository.SaveChangesAsync(ct);
 
-        _logger.LogInformation("Sprint {Number} created for project {ProjectId} by {UserId}",
-            sprint.Number, sprint.ProjectId, createdBy);
+        _logger.LogInformation("Sprint {Number} created for team {TeamId} by {UserId}",
+            sprint.Number, sprint.TeamId, createdBy);
 
         return await BuildResponseAsync(sprint.Id, ct);
     }
@@ -115,15 +109,27 @@ public class SprintService : ISprintService
         return await BuildResponseAsync(sprintId, ct);
     }
 
+    public async Task<PagedResult<SprintSummaryResponse>> GetForTeamAsync(
+        Guid teamId,
+        PaginationQuery pagination,
+        CancellationToken ct = default)
+    {
+        var (items, total) = await _repository.GetForTeamAsync(
+            teamId, pagination.Skip, pagination.PageSize, ct);
+
+        return new PagedResult<SprintSummaryResponse>(items, total, pagination.Page, pagination.PageSize);
+    }
+
+    /// <summary>The sprints of the team that builds a project.</summary>
     public async Task<PagedResult<SprintSummaryResponse>> GetForProjectAsync(
         Guid projectId,
         PaginationQuery pagination,
         CancellationToken ct = default)
     {
-        var (items, total) = await _repository.GetForProjectAsync(
-            projectId, pagination.Skip, pagination.PageSize, ct);
+        var teamId = await _repository.GetTeamIdForProjectAsync(projectId, ct)
+            ?? throw new NotFoundException("Project", projectId);
 
-        return new PagedResult<SprintSummaryResponse>(items, total, pagination.Page, pagination.PageSize);
+        return await GetForTeamAsync(teamId, pagination, ct);
     }
 
     public async Task<SprintResponse?> GetActiveForProjectAsync(
@@ -169,7 +175,7 @@ public class SprintService : ISprintService
         foreach (var (field, oldValue, newValue) in changes)
         {
             await EnqueueAsync(sprint, orgId => new SprintUpdated(
-                sprint.Id, sprint.ProjectId, orgId, SprintName(sprint),
+                sprint.Id, sprint.TeamId, orgId, SprintName(sprint),
                 field, oldValue, newValue, updatedBy), ct);
         }
 
@@ -188,7 +194,7 @@ public class SprintService : ISprintService
         ValidateTransition(sprint.Status, newStatus);
 
         if (newStatus == SprintStatus.Active
-            && await _repository.HasAnotherActiveSprintAsync(sprint.ProjectId, sprintId, ct))
+            && await _repository.HasAnotherActiveSprintAsync(sprint.TeamId, sprintId, ct))
         {
             throw new ConflictException(
                 "Another sprint is already active for this team. Complete it before starting a new one.");
@@ -199,7 +205,7 @@ public class SprintService : ISprintService
         sprint.UpdatedAt = DateTime.UtcNow;
 
         await EnqueueAsync(sprint, orgId => new SprintStatusChanged(
-            sprint.Id, sprint.ProjectId, orgId, SprintName(sprint),
+            sprint.Id, sprint.TeamId, orgId, SprintName(sprint),
             oldStatus, newStatus, updatedBy), ct);
 
         await _repository.SaveChangesAsync(ct);
@@ -226,7 +232,7 @@ public class SprintService : ISprintService
         _repository.Remove(sprint);
 
         await EnqueueAsync(sprint, orgId => new SprintDeleted(
-            sprint.Id, sprint.ProjectId, orgId, SprintName(sprint), deletedBy), ct);
+            sprint.Id, sprint.TeamId, orgId, SprintName(sprint), deletedBy), ct);
 
         await _repository.SaveChangesAsync(ct);
 
@@ -264,15 +270,17 @@ public class SprintService : ISprintService
         var workItem = await _workItems.GetActiveAsync(request.WorkItemId, ct)
             ?? throw new NotFoundException("WorkItem", request.WorkItemId);
 
-        // The caller was authorized against the *sprint's* project; nothing so far has authorized
-        // the *work item*. Without this check any contributor could name any work item id in the
-        // system — including one in another organization — and read its title, assignee and points
-        // back off their own backlog and board. The sprint's project is the boundary: a sprint
-        // belongs to exactly one project, so an item from any other project does not belong in it.
+        // The caller was authorized against the *sprint's team*; nothing so far has authorized the
+        // *work item*. Without this check any team member could name any work item id in the system
+        // — including one in another organization — and read its title, assignee and points back
+        // off their own board.
+        //
+        // The boundary is now the team's projects rather than one project: a sprint may hold work
+        // from anything the team serves, and nothing else. See docs/adr-001-team-sprints.md.
         //
         // Reported as not-found rather than forbidden on purpose. The caller cannot see this work
         // item, and answering "forbidden" would confirm the id names something real.
-        if (workItem.ProjectId != sprint.ProjectId)
+        if (!await _repository.TeamServesProjectAsync(sprint.TeamId, workItem.ProjectId, ct))
             throw new NotFoundException("WorkItem", request.WorkItemId);
 
         if (await _repository.BacklogContainsAsync(sprintId, request.WorkItemId, ct))
@@ -293,7 +301,7 @@ public class SprintService : ISprintService
         _repository.AddBacklogEntry(entry);
 
         await EnqueueAsync(sprint, orgId => new SprintWorkItemAdded(
-            sprint.Id, sprint.ProjectId, orgId, SprintName(sprint),
+            sprint.Id, sprint.TeamId, orgId, SprintName(sprint),
             workItem.Id, workItem.Title, addedBy), ct);
 
         await _repository.SaveChangesAsync(ct);
@@ -326,7 +334,7 @@ public class SprintService : ISprintService
         _repository.RemoveBacklogEntry(entry);
 
         await EnqueueAsync(sprint, orgId => new SprintWorkItemRemoved(
-            sprint.Id, sprint.ProjectId, orgId, SprintName(sprint),
+            sprint.Id, sprint.TeamId, orgId, SprintName(sprint),
             workItemId, title, removedBy), ct);
 
         await _repository.SaveChangesAsync(ct);
@@ -397,7 +405,7 @@ public class SprintService : ISprintService
         await _repository.LockSprintAsync(sprintId, ct);
         var sprint = await GetOrThrowAsync(sprintId, ct);
         if (!await _rbac.HasPermissionAsync(
-            changedBy, Permissions.SprintOrder, RoleScope.Project, sprint.ProjectId, ct))
+            changedBy, Permissions.SprintOrder, RoleScope.Project, sprint.TeamId, ct))
             throw new ForbiddenException("You do not have permission to reorder this sprint.");
 
         var entry = await _repository.GetBacklogEntryAsync(sprintId, workItemId, ct)
@@ -420,7 +428,7 @@ public class SprintService : ISprintService
         {
             var neighbour = await _workItems.GetActiveAsync(neighbourId, ct)
                 ?? throw new NotFoundException("WorkItem", neighbourId);
-            if (neighbour.ProjectId != sprint.ProjectId)
+            if (neighbour.ProjectId != sprint.TeamId)
                 throw new NotFoundException("WorkItem", neighbourId);
         }
 
@@ -474,7 +482,7 @@ public class SprintService : ISprintService
                 .Select(item => new WorkItemRankChange(item.WorkItemId, item.Rank)).ToList();
 
         _eventBus.Enqueue(new WorkItemMoved(
-            workItemId, sprint.ProjectId, sprintId, staged.Item.State, entry.Rank,
+            workItemId, sprint.TeamId, sprintId, staged.Item.State, entry.Rank,
             staged.Item.Version, changedBy, rankChanges));
         await _repository.SaveChangesAsync(ct);
 
@@ -621,7 +629,7 @@ public class SprintService : ISprintService
         sprint.UpdatedAt = DateTime.UtcNow;
 
         await EnqueueAsync(sprint, orgId => new SprintStatusChanged(
-            sprint.Id, sprint.ProjectId, orgId, SprintName(sprint),
+            sprint.Id, sprint.TeamId, orgId, SprintName(sprint),
             SprintStatus.Active, SprintStatus.Completed, closedBy), ct);
 
         await _repository.SaveChangesAsync(ct);
@@ -649,7 +657,7 @@ public class SprintService : ISprintService
         Func<Guid, TEvent> build,
         CancellationToken ct) where TEvent : IDomainEvent
     {
-        var orgId = await _repository.GetOrganizationIdForProjectAsync(sprint.ProjectId, ct);
+        var orgId = await _repository.GetOrganizationIdForTeamAsync(sprint.TeamId, ct);
         if (orgId is null) return;
         _eventBus.Enqueue(build(orgId.Value));
     }
@@ -678,7 +686,7 @@ public class SprintService : ISprintService
         var progress = await _repository.GetProgressAsync(sprintId, ct);
 
         return new SprintResponse(
-            sprint.Id, sprint.ProjectId, sprint.Number, sprint.Goal,
+            sprint.Id, sprint.TeamId, sprint.Number, sprint.Goal,
             sprint.StartDate, sprint.EndDate, sprint.Status,
             progress.TotalItems, progress.CompletedItems,
             progress.TotalPoints, progress.CompletedPoints,

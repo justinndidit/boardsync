@@ -2,6 +2,11 @@ using BoardSync.Api.Modules.Sprints.Models;
 using BoardSync.Api.Modules.WorkItems.Models;
 using BoardSync.Api.Shared.Kernel.Events;
 
+/*
+ * Sprint events carry the owning **team**, not a project — a sprint belongs to a team and its work
+ * may span several of that team's projects. See docs/adr-001-team-sprints.md.
+ */
+
 namespace BoardSync.Api.Modules.Sprints.Events;
 
 // Sprints and boards both hang off a project. Both carry OrganizationId for the same reason the
@@ -9,7 +14,7 @@ namespace BoardSync.Api.Modules.Sprints.Events;
 
 public record SprintCreated(
     Guid SprintId,
-    Guid ProjectId,
+    Guid TeamId,
     Guid OrganizationId,
     string Name,
     Guid CreatedByUserId
@@ -17,7 +22,7 @@ public record SprintCreated(
 
 public record SprintUpdated(
     Guid SprintId,
-    Guid ProjectId,
+    Guid TeamId,
     Guid OrganizationId,
     string Name,
     string FieldName,
@@ -28,7 +33,7 @@ public record SprintUpdated(
 
 public record SprintStatusChanged(
     Guid SprintId,
-    Guid ProjectId,
+    Guid TeamId,
     Guid OrganizationId,
     string Name,
     SprintStatus OldStatus,
@@ -38,7 +43,7 @@ public record SprintStatusChanged(
 
 public record SprintDeleted(
     Guid SprintId,
-    Guid ProjectId,
+    Guid TeamId,
     Guid OrganizationId,
     string Name,
     Guid DeletedByUserId
@@ -46,7 +51,7 @@ public record SprintDeleted(
 
 public record SprintWorkItemAdded(
     Guid SprintId,
-    Guid ProjectId,
+    Guid TeamId,
     Guid OrganizationId,
     string SprintName,
     Guid WorkItemId,
@@ -56,7 +61,7 @@ public record SprintWorkItemAdded(
 
 public record SprintWorkItemRemoved(
     Guid SprintId,
-    Guid ProjectId,
+    Guid TeamId,
     Guid OrganizationId,
     string SprintName,
     Guid WorkItemId,
@@ -83,6 +88,8 @@ public record WorkItemMoved(
 /// </summary>
 public record BoardChanged(
     Guid BoardId,
+
+    // A board belongs to a project, unlike a sprint — so this stays a project id.
     Guid ProjectId,
     Guid OrganizationId,
     string BoardName,

@@ -117,29 +117,36 @@ public class AccessEvaluatorTests
     // ── Positions are peers, not ranks ────────────────────────────────────────
 
     /// <summary>
-    /// Sprints belong to projects, so a Scrum Master reaches them through the team → project edge.
-    /// Running the sprint travels down that edge: the appointment is the authority, and which
-    /// project a given sprint sits in is not a second thing to be granted.
+    /// A Scrum Master runs their team's sprint, at team scope.
     /// </summary>
+    /// <remarks>
+    /// The sprint is the team's — see <c>docs/adr-001-team-sprints.md</c> — so the authority sits
+    /// where the appointment does. It used to be a project permission reached through the team →
+    /// project edge, which was the same authority arriving by the long way round.
+    /// </remarks>
     [Fact]
-    public void ScrumMasterRunsSprintsOnTheirTeamsProjects()
+    public void ScrumMasterRunsTheirTeamsSprint()
     {
         var snapshot = Snapshot(teams: [(Team, RoleType.ScrumMaster)]);
 
-        Assert.True(AccessEvaluator.GrantsAtProject(snapshot, Permissions.SprintRead, Project, Location));
-        Assert.True(AccessEvaluator.GrantsAtProject(snapshot, Permissions.SprintOrder, Project, Location));
-        Assert.True(AccessEvaluator.GrantsAtProject(snapshot, Permissions.SprintManage, Project, Location));
-        Assert.True(AccessEvaluator.GrantsAtProject(snapshot, Permissions.SprintScope, Project, Location));
+        Assert.True(AccessEvaluator.GrantsAtTeam(snapshot, Permissions.SprintRead, Team, Org));
+        Assert.True(AccessEvaluator.GrantsAtTeam(snapshot, Permissions.SprintOrder, Team, Org));
+        Assert.True(AccessEvaluator.GrantsAtTeam(snapshot, Permissions.SprintManage, Team, Org));
+        Assert.True(AccessEvaluator.GrantsAtTeam(snapshot, Permissions.SprintScope, Team, Org));
 
+        // Running the sprint is not running the team.
         Assert.False(AccessEvaluator.GrantsAtTeam(snapshot, Permissions.TeamMemberManage, Team, Org));
         Assert.False(AccessEvaluator.GrantsAtTeam(snapshot, Permissions.TeamRoleAssign, Team, Org));
+
+        // And no sprint authority leaks onto the projects themselves any more.
+        Assert.False(AccessEvaluator.GrantsAtProject(snapshot, Permissions.SprintManage, Project, Location));
     }
 
     /// <summary>
-    /// The boundary that makes the rule above safe to hold. Sprint authority reaches the team's
-    /// projects; project administration does not. A team can serve many projects, so an appointment
-    /// that carried <c>project:admin</c> would hand its holder every sibling project at once — which
-    /// is the escalation the flat edge exists to prevent.
+    /// The boundary that makes the rule above safe to hold. Running the team's sprint carries
+    /// contribution onto its projects and nothing administrative. A team can serve many projects,
+    /// so an appointment that carried <c>project:admin</c> would hand its holder every sibling
+    /// project at once — the escalation the flat edge exists to prevent.
     /// </summary>
     [Theory]
     [InlineData(RoleType.ScrumMaster)]
@@ -148,7 +155,8 @@ public class AccessEvaluatorTests
     {
         var snapshot = Snapshot(teams: [(Team, position)]);
 
-        Assert.True(AccessEvaluator.GrantsAtProject(snapshot, Permissions.SprintManage, Project, Location));
+        Assert.True(AccessEvaluator.GrantsAtTeam(snapshot, Permissions.SprintManage, Team, Org));
+        Assert.True(AccessEvaluator.GrantsAtProject(snapshot, Permissions.WorkItemWrite, Project, Location));
 
         Assert.False(AccessEvaluator.GrantsAtProject(snapshot, Permissions.ProjectAdmin, Project, Location));
         Assert.False(AccessEvaluator.GrantsAtProject(snapshot, Permissions.ProjectMemberManage, Project, Location));
@@ -157,30 +165,42 @@ public class AccessEvaluatorTests
     }
 
     /// <summary>
-    /// Sprint authority follows the team, so it reaches only the projects that team serves — not a
-    /// project belonging to some other team in the same organization.
+    /// Sprint authority follows the team, so it reaches only that team's sprint — not the sprint of
+    /// some other team in the same organization.
     /// </summary>
     [Fact]
-    public void ScrumMasterOfOneTeamRunsNothingOnAnotherTeamsProject()
+    public void ScrumMasterOfOneTeamRunsNothingOnAnotherTeamsSprint()
     {
         var snapshot = Snapshot(teams: [(Team, RoleType.ScrumMaster)]);
+
+        Assert.False(AccessEvaluator.GrantsAtTeam(snapshot, Permissions.SprintManage, OtherTeam, Org));
+        Assert.False(AccessEvaluator.GrantsAtTeam(snapshot, Permissions.SprintRead, OtherTeam, Org));
+
+        // Nor anything on a project belonging to that other team.
         var elsewhere = new ProjectLocation(Org, OtherTeam);
 
-        Assert.False(AccessEvaluator.GrantsAtProject(snapshot, Permissions.SprintManage, Project, elsewhere));
-        Assert.False(AccessEvaluator.GrantsAtProject(snapshot, Permissions.SprintRead, Project, elsewhere));
+        Assert.False(AccessEvaluator.GrantsAtProject(snapshot, Permissions.WorkItemWrite, Project, elsewhere));
     }
 
     /// <summary>
-    /// Sprint authority is a project grant. This is the route a Scrum Master takes to actually run
-    /// a sprint: ProjectAdmin on the project in question, not an appointment on the team.
+    /// Administering a project does not run the team's sprint.
     /// </summary>
+    /// <remarks>
+    /// It used to: sprint authority was a project permission, so <c>ProjectAdmin</c> carried it.
+    /// A sprint now belongs to a team and may span several of its projects, so administering one of
+    /// them cannot confer authority over a cadence the other projects share. A project admin who
+    /// also runs the sprint holds Scrum Master on the owning team.
+    /// </remarks>
     [Fact]
-    public void ProjectAdminRunsTheSprintAndSetsItsScope()
+    public void ProjectAdminDoesNotRunTheTeamsSprint()
     {
         var snapshot = Snapshot(projects: [(Project, RoleType.ProjectAdmin)]);
 
-        Assert.True(AccessEvaluator.GrantsAtProject(snapshot, Permissions.SprintManage, Project, Location));
-        Assert.True(AccessEvaluator.GrantsAtProject(snapshot, Permissions.SprintScope, Project, Location));
+        Assert.False(AccessEvaluator.GrantsAtTeam(snapshot, Permissions.SprintManage, Team, Org));
+        Assert.False(AccessEvaluator.GrantsAtTeam(snapshot, Permissions.SprintScope, Team, Org));
+
+        // What they do administer is the project itself.
+        Assert.True(AccessEvaluator.GrantsAtProject(snapshot, Permissions.ProjectAdmin, Project, Location));
     }
 
     [Fact]
@@ -193,17 +213,39 @@ public class AccessEvaluatorTests
     }
 
     /// <summary>
-    /// Ordering the sprint travels down the team → project edge; deciding what it commits to does
-    /// not. The asymmetry is the point: execution is the team's, commitment is the project's.
+    /// Being on the team lets you arrange its sprint; it does not let you decide what the sprint
+    /// commits to. The asymmetry is the point: execution is everyone's, commitment is the Scrum
+    /// Master's and the Product Owner's.
     /// </summary>
     [Fact]
     public void PlainTeamMemberOrdersTheSprintButDoesNotSetItsScope()
     {
         var snapshot = Snapshot(teams: [(Team, RoleType.TeamMember)]);
 
-        Assert.True(AccessEvaluator.GrantsAtProject(snapshot, Permissions.SprintOrder, Project, Location));
-        Assert.False(AccessEvaluator.GrantsAtProject(snapshot, Permissions.SprintScope, Project, Location));
-        Assert.False(AccessEvaluator.GrantsAtProject(snapshot, Permissions.SprintManage, Project, Location));
+        Assert.True(AccessEvaluator.GrantsAtTeam(snapshot, Permissions.SprintRead, Team, Org));
+        Assert.True(AccessEvaluator.GrantsAtTeam(snapshot, Permissions.SprintOrder, Team, Org));
+        Assert.False(AccessEvaluator.GrantsAtTeam(snapshot, Permissions.SprintScope, Team, Org));
+        Assert.False(AccessEvaluator.GrantsAtTeam(snapshot, Permissions.SprintManage, Team, Org));
+    }
+
+    /// <summary>
+    /// A project grant carries no sprint access at all.
+    /// </summary>
+    /// <remarks>
+    /// The consequence of the move that is easiest to get wrong. Someone contributing to a project
+    /// without being on the owning team keeps the board, the backlog and the work items — every one
+    /// of them project-scope — and does not see the team's plan for it.
+    /// </remarks>
+    [Fact]
+    public void AProjectContributorSeesNoSprint()
+    {
+        var snapshot = Snapshot(projects: [(Project, RoleType.Contributor)]);
+
+        Assert.True(AccessEvaluator.GrantsAtProject(snapshot, Permissions.WorkItemWrite, Project, Location));
+        Assert.True(AccessEvaluator.GrantsAtProject(snapshot, Permissions.BoardRead, Project, Location));
+
+        Assert.False(AccessEvaluator.GrantsAtTeam(snapshot, Permissions.SprintRead, Team, Org));
+        Assert.False(AccessEvaluator.GrantsAtTeam(snapshot, Permissions.SprintOrder, Team, Org));
     }
 
     /// <summary>
@@ -217,7 +259,9 @@ public class AccessEvaluatorTests
 
         Assert.True(AccessEvaluator.GrantsAtTeam(snapshot, Permissions.TeamManage, Team, Org));
         Assert.True(AccessEvaluator.GrantsAtTeam(snapshot, Permissions.TeamRoleAssign, Team, Org));
-        Assert.True(AccessEvaluator.GrantsAtProject(snapshot, Permissions.SprintOrder, Project, Location));
+
+        // From the Scrum Master half, which a Team Lead does not carry.
+        Assert.True(AccessEvaluator.GrantsAtTeam(snapshot, Permissions.SprintManage, Team, Org));
     }
 
     // ── Absent scope tree ─────────────────────────────────────────────────────

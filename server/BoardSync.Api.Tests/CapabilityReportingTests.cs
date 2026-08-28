@@ -139,26 +139,35 @@ public class CapabilityReportingTests
     }
 
     /// <summary>
-    /// A Scrum Master's project capabilities include running the sprint and exclude administering the
-    /// project.
+    /// A Scrum Master reports sprint authority on their <em>team</em>, and contribution without
+    /// administration on the team's projects.
     /// </summary>
     /// <remarks>
-    /// The case a client cannot possibly derive on its own, and the one a UI most needs right: sprint
-    /// controls enabled, project settings not, on a project the user holds no role on at all.
+    /// The case a client cannot possibly derive on its own, and the one a UI most needs right —
+    /// and it now spans two scopes, because the sprint belongs to the team while the work belongs
+    /// to the projects. A client asking only about the project would see no sprint controls and
+    /// conclude, wrongly, that this person cannot run anything.
     /// </remarks>
     [Fact]
-    public void ScrumMasterReportsSprintAuthorityButNotProjectAdministration()
+    public void ScrumMasterReportsSprintAuthorityOnTheTeamAndContributionOnItsProjects()
     {
-        var reported = AccessEvaluator.PermissionsAtProject(
-            Snapshot(teams: [(Team, RoleType.ScrumMaster)]), Project, Location);
+        var snapshot = Snapshot(teams: [(Team, RoleType.ScrumMaster)]);
 
-        Assert.Contains(Permissions.SprintManage, reported);
-        Assert.Contains(Permissions.SprintScope, reported);
-        Assert.Contains(Permissions.WorkItemWrite, reported);
+        var onTeam = AccessEvaluator.PermissionsAtTeam(snapshot, Team, Org);
 
-        Assert.DoesNotContain(Permissions.ProjectAdmin, reported);
-        Assert.DoesNotContain(Permissions.BoardConfigure, reported);
-        Assert.DoesNotContain(Permissions.ProjectMemberManage, reported);
+        Assert.Contains(Permissions.SprintManage, onTeam);
+        Assert.Contains(Permissions.SprintScope, onTeam);
+
+        var onProject = AccessEvaluator.PermissionsAtProject(snapshot, Project, Location);
+
+        Assert.Contains(Permissions.WorkItemWrite, onProject);
+
+        // Sprint authority does not appear on the project, because the sprint is not the project's.
+        Assert.DoesNotContain(Permissions.SprintManage, onProject);
+
+        Assert.DoesNotContain(Permissions.ProjectAdmin, onProject);
+        Assert.DoesNotContain(Permissions.BoardConfigure, onProject);
+        Assert.DoesNotContain(Permissions.ProjectMemberManage, onProject);
     }
 
     /// <summary>

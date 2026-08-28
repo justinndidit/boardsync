@@ -89,9 +89,15 @@ public static class DatabaseExtensions
         {
             logger.LogError(ex, "An error occurred while migrating the database");
 
-            // Fail fast in production: an instance serving traffic against a schema it could not
-            // migrate is worse than one that never starts.
-            if (app.Environment.IsProduction())
+            // Fail fast anywhere the schema is expected to be authoritative.
+            //
+            // Production is obvious: an instance serving traffic against a schema it could not
+            // migrate is worse than one that never starts. Testing was added after a broken
+            // migration was swallowed here and surfaced instead as twenty unrelated integration
+            // failures reporting "a database error occurred" — the schema was half applied, and
+            // nothing said so. A test run on a schema that did not build is not a test run.
+            if (app.Environment.IsProduction()
+                || app.Environment.IsEnvironment("Testing"))
             {
                 throw;
             }

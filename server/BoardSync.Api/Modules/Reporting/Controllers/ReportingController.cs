@@ -69,15 +69,43 @@ public class ReportingController : ControllerBase
     /// Completed sprints only — an in-flight sprint's completed points are a partial number, and
     /// charting it makes the newest bar look like a collapse to anybody who opens the page mid-sprint.
     /// </remarks>
+    [HttpGet("api/teams/{teamId:guid}/reports/velocity")]
+    [RequirePermission(Permissions.TeamRead, From = "teamId")]
+    [ProducesResponseType(typeof(ApiResponse<VelocityReport>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetTeamVelocity(
+        Guid teamId, [FromQuery] int sprints = 6, CancellationToken ct = default)
+    {
+        var report = await _reporting.GetTeamVelocityAsync(teamId, sprints, ct);
+
+        return Ok(new ApiResponse<VelocityReport>(true, "Velocity retrieved.", report));
+    }
+
+    /// <summary>
+    /// Velocity for the team that builds this project. Requires <c>project:read</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The same figures as the team route, reached from a project. Kept because it is the question
+    /// somebody on a project page is actually asking — "how fast does the team building this move"
+    /// — and making every client resolve the owning team first would be a round trip for something
+    /// one join answers.
+    /// </para>
+    /// <para>
+    /// <b>It is not a per-project velocity.</b> A sprint spans the team's projects, so there is no
+    /// such number; this is the team's, labelled honestly by the client.
+    /// </para>
+    /// </remarks>
     [HttpGet("api/projects/{projectId:guid}/reports/velocity")]
     [RequirePermission(Permissions.ProjectRead, From = "projectId")]
     [ProducesResponseType(typeof(ApiResponse<VelocityReport>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> GetVelocity(
+    public async Task<IActionResult> GetVelocityForProject(
         Guid projectId, [FromQuery] int sprints = 6, CancellationToken ct = default)
     {
-        var report = await _reporting.GetVelocityAsync(projectId, sprints, ct);
+        var report = await _reporting.GetVelocityForProjectAsync(projectId, sprints, ct);
 
         return Ok(new ApiResponse<VelocityReport>(true, "Velocity retrieved.", report));
     }

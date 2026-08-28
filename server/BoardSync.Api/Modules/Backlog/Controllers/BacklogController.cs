@@ -188,18 +188,20 @@ public class BacklogController : ControllerBase
 
         var sprint = await _sprintService.GetByIdAsync(sprintId, ct);
 
+        // Team scope: the sprint is the team's, and so is the authority to change what it commits
+        // to. The project check above still stands — moving an item needs write on its project.
         if (await _rbac.HasPermissionAsync(
-                _currentUser.UserId, Permissions.SprintScope, RoleScope.Project, sprint.ProjectId, ct))
+                _currentUser.UserId, Permissions.SprintScope, RoleScope.Team, sprint.TeamId, ct))
             return;
 
-        // Same split the endpoint filter applies: a caller who cannot even see this sprint's project
+        // Same split the endpoint filter applies: a caller who cannot even see this sprint's team
         // gets the answer they would get for a sprint that does not exist, so the status code does
         // not confirm one belonging to somebody else is real.
         if (!await _rbac.HasPermissionAsync(
-                _currentUser.UserId, Permissions.SprintRead, RoleScope.Project, sprint.ProjectId, ct))
+                _currentUser.UserId, Permissions.SprintRead, RoleScope.Team, sprint.TeamId, ct))
             throw new NotFoundException("Sprint", sprintId);
 
         throw new ForbiddenException(
-            "Changing what a sprint commits to requires project administration.");
+            "Changing what a sprint commits to is the Scrum Master's or Product Owner's.");
     }
 }
