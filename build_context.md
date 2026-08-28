@@ -912,7 +912,15 @@ New → Active → InReview → Resolved with nobody touching the board. It stop
 - [x] GitLab (shared token) and Azure DevOps (Service Hooks, Basic auth).
 - [x] Provider conformance test suite: one set of scenarios run against every adapter, which is what
       keeps three hosts that disagree about naming from putting three vocabularies into the domain.
-- [ ] Azure DevOps merge read-back (§7.3 control 3). ADO cannot sign payloads and raises
+- [ ] Azure DevOps merge read-back (§7.3 control 3). **Not the correctness bug this line implied** —
+      the adapter already gates on `status == "completed"` rather than the event name, and maps an
+      abandoned pull request to closed, so a speculative merge does not resolve anything. What is
+      outstanding is defence in depth: ADO cannot sign payloads, so a forged body claiming
+      completion is the residual risk, and reading the pull request back confirms it independently.
+      That needs outbound credentials per installation, which the model has no place for yet —
+      the same missing piece as backfill-on-link.
+
+      Original note: ADO cannot sign payloads and raises
       `git.pullrequest.merged` for its speculative conflict check, so `status: completed` is what the
       adapter trusts. Corroborating a merge against the REST API before it resolves anything is the
       remaining control, and it needs the same outbound provider clients as Phase C's backfill.
@@ -929,11 +937,17 @@ New → Active → InReview → Resolved with nobody touching the board. It stop
 - [ ] `@mentions` in comments. Deliberately deferred: matching a name or email in free text is
       ambiguous enough to want a real mention syntax and a picker, not a regex.
 - [ ] Email delivery. The bell is in-app only.
-- [ ] Audit finding 9: Postgres FTS for search.
+- [x] Audit finding 9: Postgres FTS for search. A generated `tsvector` over title and description
+      with a GIN index, ranked by `ts_rank`, replacing `LOWER(title) LIKE '%term%'` — which no index
+      could serve and which ordered by creation date, so the best match and the newest coincided
+      only by accident. **It also now matches the reference**: `BS-142`, `142`, and a bare number
+      below the minimum term length, because an exact number is an indexed lookup rather than the
+      prefix scan that minimum exists to prevent. Searching for the string every other surface
+      displays returned nothing before.
 
 *Exit: an Azure DevOps shop can adopt BoardSync. QA gets told when something needs testing.*
 
-### Phase E — Intelligence · **the metrics layer is shipped; the narrative layer is not**
+### Phase E — Intelligence · **metrics, narrative and decomposition shipped; CFD outstanding**
 
 - [x] Deterministic metrics — burndown, velocity, cycle time, and the merge-to-certification gap.
       **Shipped as `Modules/Reporting`, not `Modules/Intelligence`.** §8.3's argument is that a model
@@ -941,9 +955,36 @@ New → Active → InReview → Resolved with nobody touching the board. It stop
       putting the computed figures in a module named for AI would blur that boundary before the AI
       exists. Reporting computes, Intelligence will narrate over it, and the module structure is what
       keeps the two from merging later.
-- [ ] `Modules/Intelligence`, proposal model, acceptance flow, budget enforcement.
-- [ ] PRD decomposition with structured outputs.
-- [ ] Narrative report layer, which receives a `SprintReport` and is instructed to cite only its
+- [x] `Modules/Intelligence`, proposal model, acceptance flow, budget enforcement — see
+      `docs/adr-002-proposals.md`. A decomposition lands as a `Proposal` with no authority; accepting
+      it calls the same `WorkItemService.CreateAsync` a person clicking "New work item" calls.
+      Selecting a node carries its ancestors (a story cannot be created under a feature that was
+      not) and does **not** carry its descendants (accepting an epic must not silently create forty
+      tasks nobody read). Acceptance runs in one transaction, because `CreateAsync` saves per item
+      and a failure partway leaves half a plan on the board.
+- [x] PRD decomposition with structured outputs — `POST /api/projects/{id}/intelligence/decompose`,
+      `202` with a proposal id to poll, run as a job because it is tens of seconds of model time.
+      `DecompositionGuard` checks the tree before a human sees it: the nesting rule, a 150-node
+      review cap, title and estimate limits, duplicate siblings. **The schema cannot express the
+      nesting rule** — structured output constrains the JSON shape and has no opinion about whether
+      a Task may sit under an Epic, so the prompt asks and the guard enforces.
+
+      **Unexercised against the real API** — no key in the build environment. 22 tests cover the
+      guard and the selection rule against a fake. Prompt caching and streaming are both specified
+      in §8.2 and both unimplemented: the system prompt is a constant so the prefix is stable, but no
+      `cache_control` breakpoint is set, and §8.2's `Messages.Stream(...)` is not this SDK version's
+      API (it is `CreateStreaming`).
+- [x] Narrative report layer — `Modules/Intelligence`, `GET /api/sprints/{id}/report/narrative`.
+      Receives a `SprintReport`, computes nothing, and is **checked afterwards** rather than
+      trusted: `NarrativeGuard` verifies every figure in the prose appears in the report it was
+      handed, and prose that fails is withheld with the offending sentences returned. Structured
+      output, `claude-opus-5`, adaptive thinking at medium effort, a per-organization daily token
+      allowance checked *before* the call and charged whether or not the answer survives.
+
+      **Unexercised against the real API** — no key in the build environment. Everything except the
+      model call is tested against a fake: 12 tests on the guard, 7 on the rules around it.
+
+      Original note: Narrative report layer, which receives a `SprintReport` and is instructed to cite only its
       figures.
 - [ ] Cumulative flow diagram. Needs a state-count-per-day series, which the same history
       reconstruction can produce — deferred only for size.

@@ -73,13 +73,17 @@ public static class EventTopics
         ],
 
         // ── Sprints and boards ────────────────────────────────────────────────
-        SprintCreated e => [Topic.Organization(e.OrganizationId), Topic.Project(e.ProjectId), Topic.Sprint(e.SprintId)],
-        SprintUpdated e => [Topic.Organization(e.OrganizationId), Topic.Project(e.ProjectId), Topic.Sprint(e.SprintId)],
+        //
+        // Sprint events go to the **team** topic. A sprint belongs to a team and its work may span
+        // several of that team's projects, so there is no one project to broadcast on — and picking
+        // one would leave everybody watching the others silently stale.
+        SprintCreated e => [Topic.Organization(e.OrganizationId), Topic.Team(e.TeamId), Topic.Sprint(e.SprintId)],
+        SprintUpdated e => [Topic.Organization(e.OrganizationId), Topic.Team(e.TeamId), Topic.Sprint(e.SprintId)],
         SprintStatusChanged e =>
-            [Topic.Organization(e.OrganizationId), Topic.Project(e.ProjectId), Topic.Sprint(e.SprintId)],
-        SprintDeleted e => [Topic.Organization(e.OrganizationId), Topic.Project(e.ProjectId), Topic.Sprint(e.SprintId)],
-        SprintWorkItemAdded e => [Topic.Project(e.ProjectId), Topic.Sprint(e.SprintId)],
-        SprintWorkItemRemoved e => [Topic.Project(e.ProjectId), Topic.Sprint(e.SprintId)],
+            [Topic.Organization(e.OrganizationId), Topic.Team(e.TeamId), Topic.Sprint(e.SprintId)],
+        SprintDeleted e => [Topic.Organization(e.OrganizationId), Topic.Team(e.TeamId), Topic.Sprint(e.SprintId)],
+        SprintWorkItemAdded e => [Topic.Team(e.TeamId), Topic.Sprint(e.SprintId)],
+        SprintWorkItemRemoved e => [Topic.Team(e.TeamId), Topic.Sprint(e.SprintId)],
         BoardChanged e => [Topic.Organization(e.OrganizationId), Topic.Project(e.ProjectId)],
 
         // An event nobody routes reaches nobody. That is a routing gap, not a silent success, so it

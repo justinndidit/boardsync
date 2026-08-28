@@ -13,7 +13,11 @@ public interface IReportingService
 {
     Task<SprintReport> GetSprintReportAsync(Guid sprintId, CancellationToken ct = default);
 
-    Task<VelocityReport> GetVelocityAsync(
+    Task<VelocityReport> GetTeamVelocityAsync(
+        Guid teamId, int sprintCount, CancellationToken ct = default);
+
+    /// <summary>The velocity of the team that builds a project.</summary>
+    Task<VelocityReport> GetVelocityForProjectAsync(
         Guid projectId, int sprintCount, CancellationToken ct = default);
 }
 
@@ -100,22 +104,31 @@ public class ReportingService : IReportingService
         return new SprintReport(summary, burndown, Aggregate(timelines), untouched);
     }
 
-    public async Task<VelocityReport> GetVelocityAsync(
-        Guid projectId, int sprintCount, CancellationToken ct = default)
+    /// <summary>
+    /// Velocity for a team, across every project it serves.
+    /// </summary>
+    /// <remarks>
+    /// <b>A team measure, necessarily.</b> A sprint spans the team's projects, so its completed
+    /// points belong to the team rather than any one project — see
+    /// <c>docs/adr-001-team-sprints.md</c>. Asking per project would have to either double-count a
+    /// sprint across the projects it touched or attribute it to one of them arbitrarily.
+    /// </remarks>
+    public async Task<VelocityReport> GetTeamVelocityAsync(
+        Guid teamId, int sprintCount, CancellationToken ct = default)
     {
         var take = Math.Clamp(sprintCount, 1, MaxVelocitySprints);
 
         // Completed sprints only. An in-flight sprint's completed points are a partial number, and
         // charting it makes the last bar look like a collapse whenever somebody looks mid-sprint.
         var sprints = await _context.Sprints
-            .Where(s => s.ProjectId == projectId && s.Status == SprintStatus.Completed)
+            .Where(s => s.TeamId == teamId && s.Status == SprintStatus.Completed)
             .OrderByDescending(s => s.EndDate)
             .Take(take)
             .Select(s => new { s.Id, s.Number, s.EndDate })
             .ToListAsync(ct);
 
         if (sprints.Count == 0)
-            return new VelocityReport([], null, await ProjectCycleTimeAsync(projectId, ct));
+            return new VelocityReport([], null, await TeamCycleTimeAsync(teamId, ct));
 
         var sprintIds = sprints.Select(s => s.Id).ToList();
 
@@ -143,7 +156,19 @@ public class ReportingService : IReportingService
         return new VelocityReport(
             points,
             Math.Round(points.Average(p => (double)p.CompletedPoints), 2),
-            await ProjectCycleTimeAsync(projectId, ct));
+            await TeamCycleTimeAsync(teamId, ct));
+    }
+
+    public async Task<VelocityReport> GetVelocityForProjectAsync(
+        Guid projectId, int sprintCount, CancellationToken ct = default)
+    {
+        var teamId = await _context.Projects
+            .Where(p => p.Id == projectId)
+            .Select(p => (Guid?)p.AssignedTeamId)
+            .FirstOrDefaultAsync(ct)
+            ?? throw new NotFoundException("Project", projectId);
+
+        return await GetTeamVelocityAsync(teamId, sprintCount, ct);
     }
 
     // ── Computation ───────────────────────────────────────────────────────────
@@ -215,11 +240,20 @@ public class ReportingService : IReportingService
             MedianTotalHours: StateTimeline.Median(measured.Select(s => s.Total)));
     }
 
-    private async Task<CycleTimeMetrics> ProjectCycleTimeAsync(Guid projectId, CancellationToken ct)
+    /// <summary>
+    /// Cycle time across every project the team serves.
+    /// </summary>
+    /// <remarks>
+    /// Scoped to the team to match the velocity beside it. A per-project figure would answer a
+    /// different question from the sprints it sits next to, and two numbers on one page that mean
+    /// different things is how a report stops being trusted.
+    /// </remarks>
+    private async Task<CycleTimeMetrics> TeamCycleTimeAsync(Guid teamId, CancellationToken ct)
     {
         var closedItems = await _context.WorkItems
-            .Where(w => w.ProjectId == projectId && w.IsActive && w.State == WorkItemState.Closed)
-            .Select(w => w.Id)
+            .Where(w => w.IsActive && w.State == WorkItemState.Closed)
+            .Join(_context.Projects.Where(p => p.AssignedTeamId == teamId),
+                w => w.ProjectId, p => p.Id, (w, _) => w.Id)
             .ToListAsync(ct);
 
         return Aggregate(await LoadTimelinesAsync(closedItems, ct));

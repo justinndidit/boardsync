@@ -43,9 +43,30 @@ public class SprintsController : ControllerBase
 
     // ── Sprint CRUD ───────────────────────────────────────────────────────────
 
-    /// <summary>List all sprints for a project, newest first.</summary>
+    /// <summary>A team's sprints, newest first. Requires <c>sprint:read</c> on the team.</summary>
+    [HttpGet("api/teams/{teamId:guid}/sprints")]
+    [RequirePermission(Permissions.SprintRead, From = "teamId")]
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<SprintSummaryResponse>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetForTeam(
+        Guid teamId,
+        [FromQuery] PaginationQuery pagination,
+        CancellationToken ct)
+    {
+        var result = await _sprintService.GetForTeamAsync(teamId, pagination, ct);
+        return Ok(new ApiResponse<PagedResult<SprintSummaryResponse>>(true, "Sprints retrieved.", result));
+    }
+
+    /// <summary>
+    /// The sprints of the team that builds a project.
+    /// </summary>
+    /// <remarks>
+    /// A read-through to the team's sprints, kept because it is what a project page asks for. There
+    /// is no such thing as a project's own sprints — see <c>docs/adr-001-team-sprints.md</c>.
+    /// </remarks>
     [HttpGet("api/projects/{projectId:guid}/sprints")]
-    [RequirePermission(Permissions.SprintRead, From = "projectId")]
+    [RequirePermission(Permissions.ProjectRead, From = "projectId")]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<SprintSummaryResponse>>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -58,9 +79,15 @@ public class SprintsController : ControllerBase
         return Ok(new ApiResponse<PagedResult<SprintSummaryResponse>>(true, "Sprints retrieved.", result));
     }
 
-    /// <summary>Get the currently active sprint for a project. Returns null data if none is active.</summary>
+    /// <summary>
+    /// The active sprint of the team that builds a project. Null data when there is none.
+    /// </summary>
+    /// <remarks>
+    /// The board asks this on every load, so it stays a project route — resolving the team
+    /// client-side first would be a round trip for something one join answers.
+    /// </remarks>
     [HttpGet("api/projects/{projectId:guid}/sprints/active")]
-    [RequirePermission(Permissions.SprintRead, From = "projectId")]
+    [RequirePermission(Permissions.ProjectRead, From = "projectId")]
     [ProducesResponseType(typeof(ApiResponse<SprintResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -83,19 +110,26 @@ public class SprintsController : ControllerBase
         return Ok(new ApiResponse<SprintResponse>(true, "Sprint retrieved.", sprint));
     }
 
-    /// <summary>Create a new sprint for a project. Requires <c>sprint:manage</c>.</summary>
-    [HttpPost("api/projects/{projectId:guid}/sprints")]
-    [RequirePermission(Permissions.SprintManage, From = "projectId")]
+    /// <summary>
+    /// Create a sprint for a team. Requires <c>sprint:manage</c> on the team.
+    /// </summary>
+    /// <remarks>
+    /// A sprint is the team's, and may hold work from any project the team serves. There is no
+    /// project route for this: creating a sprint "for a project" would have to guess which team's
+    /// cadence it joined.
+    /// </remarks>
+    [HttpPost("api/teams/{teamId:guid}/sprints")]
+    [RequirePermission(Permissions.SprintManage, From = "teamId")]
     [ProducesResponseType(typeof(ApiResponse<SprintResponse>), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> Create(
-        Guid projectId,
+        Guid teamId,
         [FromBody] CreateSprintRequest request,
         CancellationToken ct)
     {
-        var sprint = await _sprintService.CreateAsync(projectId, request, _currentUser.UserId, ct);
+        var sprint = await _sprintService.CreateAsync(teamId, request, _currentUser.UserId, ct);
         return CreatedAtAction(nameof(GetById), new { sprintId = sprint.Id },
             new ApiResponse<SprintResponse>(true, "Sprint created.", sprint));
     }
@@ -207,7 +241,7 @@ public class SprintsController : ControllerBase
         CancellationToken ct)
     {
         var sprint = await _sprintService.GetByIdAsync(sprintId, ct);
-        await RequireSprintScopeAsync(sprint.ProjectId, sprintId, request.WorkItemId, ct);
+        await RequireSprintScopeAsync(sprint.TeamId, sprintId, request.WorkItemId, ct);
         var item = await _sprintService.AddWorkItemAsync(sprintId, request, _currentUser.UserId, ct);
         return StatusCode(StatusCodes.Status201Created,
             new ApiResponse<SprintWorkItemResponse>(true, "Work item added to sprint.", item));
@@ -226,7 +260,7 @@ public class SprintsController : ControllerBase
         CancellationToken ct)
     {
         var sprint = await _sprintService.GetByIdAsync(sprintId, ct);
-        await RequireSprintScopeAsync(sprint.ProjectId, sprintId, workItemId, ct);
+        await RequireSprintScopeAsync(sprint.TeamId, sprintId, workItemId, ct);
         await _sprintService.RemoveWorkItemAsync(sprintId, workItemId, _currentUser.UserId, ct);
         return NoContent();
     }
@@ -301,19 +335,27 @@ public class SprintsController : ControllerBase
     /// genuinely does change the commitment.
     /// </para>
     /// </remarks>
-    private async Task RequireSprintScopeAsync(Guid projectId, Guid sprintId, Guid workItemId, CancellationToken ct)
+    /// <summary>
+    /// Whether the caller may change what this sprint commits to.
+    /// </summary>
+    /// <remarks>
+    /// Asked at <b>team</b> scope, because the sprint is the team's. One exception survives the
+    /// move: anyone who may order the sprint may add an item that decomposes work already in it,
+    /// since breaking down committed work is not a scope change.
+    /// </remarks>
+    private async Task RequireSprintScopeAsync(Guid teamId, Guid sprintId, Guid workItemId, CancellationToken ct)
     {
         if (await _rbac.HasPermissionAsync(
-                _currentUser.UserId, Permissions.SprintScope, RoleScope.Project, projectId, ct))
+                _currentUser.UserId, Permissions.SprintScope, RoleScope.Team, teamId, ct))
             return;
 
         if (!await _rbac.HasPermissionAsync(
-                _currentUser.UserId, Permissions.SprintOrder, RoleScope.Project, projectId, ct))
+                _currentUser.UserId, Permissions.SprintOrder, RoleScope.Team, teamId, ct))
             throw new ForbiddenException();
 
         if (!await _sprintService.IsDecompositionOfSprintWorkAsync(sprintId, workItemId, ct))
             throw new ForbiddenException(
-                "Changing what a sprint commits to requires project administration. " +
-                "Breaking down work already in the sprint does not.");
+                "Changing what a sprint commits to is the Scrum Master's or Product Owner's. " +
+                "Breaking down work already in the sprint is not.");
     }
 }

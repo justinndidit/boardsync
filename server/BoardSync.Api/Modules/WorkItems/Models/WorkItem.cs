@@ -120,6 +120,22 @@ public class WorkItem : BaseEntity
     /// </remarks>
     public int Number { get; set; }
 
+    /// <summary>
+    /// Title and description, indexed for full-text search.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A generated column, computed by Postgres and never assigned here — writing to it would be
+    /// rejected, and there is no moment where it could go stale.
+    /// </para>
+    /// <para>
+    /// Search matched <c>LOWER(title) LIKE '%term%'</c> before this, which no index can serve: every
+    /// search read every work item the caller could see. It also ranked by creation date, so the
+    /// best match and the newest were the same answer only by chance.
+    /// </para>
+    /// </remarks>
+    public NpgsqlTypes.NpgsqlTsVector? SearchVector { get; private set; }
+
     /// <summary>Optional team scope (for board/sprint assignment).</summary>
     public Guid? TeamId { get; set; }
 

@@ -77,6 +77,23 @@ public class SearchRepository : ISearchRepository
             .ToListAsync(ct);
     }
 
+    /// <summary>
+    /// The numeric half of anything that looks like a work item reference.
+    /// </summary>
+    /// <remarks>
+    /// Accepts <c>BS-142</c>, <c>bs 142</c> and a bare <c>142</c>. Returns null for anything else,
+    /// which is the common case — most searches are words.
+    /// </remarks>
+    private static int? ParseReferenceNumber(string term)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(
+            term.Trim(), @"^(?:[A-Za-z][A-Za-z0-9]*[\s-]*)?(\d{1,9})$");
+
+        return match.Success && int.TryParse(match.Groups[1].Value, out var number)
+            ? number
+            : null;
+    }
+
     public async Task<IReadOnlyList<SearchHit>> SearchWorkItemsAsync(
         ProjectVisibility visibility,
         string term,
@@ -94,11 +111,38 @@ public class SearchRepository : ISearchRepository
             .Where(p => p.IsActive)
             .Select(p => p.Id);
 
+        /*
+         * Full-text search over the generated vector, plus an exact match on the reference.
+         *
+         * Three things this fixes. `LOWER(title) LIKE '%term%'` could use no index, so every search
+         * read every work item the caller could see. It ranked by creation date, so the best match
+         * and the newest coincided only by accident. And it did not match the reference at all —
+         * `BS-142` is the single most likely thing anybody types into this box, and it returned
+         * nothing.
+         *
+         * `:*` makes the last word a prefix, so results appear while somebody is still typing.
+         */
+        // The query *text*, built here; `ToTsQuery` itself is a stub that only means anything
+        // inside an expression tree, so it is called below rather than assigned to a variable.
+        var queryText = string.Join(" & ",
+            term.Split(' ', StringSplitOptions.RemoveEmptyEntries)) + ":*";
+
+        // The number out of a reference, so "BS-142" and "142" both find it. The key is compared
+        // separately, because it belongs to the project rather than the item.
+        var referenceNumber = ParseReferenceNumber(term);
+
         return await _context.WorkItems
-            .Where(w => visibleProjectIds.Contains(w.ProjectId)
-                        && w.IsActive
-                        && w.Title.ToLower().Contains(term))
-            .OrderByDescending(w => w.CreatedAt)
+            .Where(w => visibleProjectIds.Contains(w.ProjectId) && w.IsActive)
+            .Where(w => w.SearchVector!.Matches(
+                            EF.Functions.ToTsQuery("english", queryText))
+                        || (referenceNumber != null && w.Number == referenceNumber))
+            // An exact reference first: somebody who typed one knows what they want, and a
+            // relevance score cannot outrank knowing.
+            .OrderByDescending(w =>
+                referenceNumber != null && w.Number == referenceNumber)
+            .ThenByDescending(w => w.SearchVector!.Rank(
+                EF.Functions.ToTsQuery("english", queryText)))
+            .ThenByDescending(w => w.CreatedAt)
             .Take(take)
             .Select(w => new SearchHit(w.Id, w.Title, null))
             .ToListAsync(ct);

@@ -38,17 +38,20 @@ public class BoardRepository : IBoardRepository
 
     public async Task<BoardSprintContext?> GetSprintContextAsync(Guid projectId, CancellationToken ct = default)
     {
-        // The active sprint is a subquery of the project row, so the team and its sprint come back
-        // together rather than as a second round trip waiting on the first one's answer.
-        var context = await _context.Projects
-            .Where(p => p.Id == projectId)
-            .Select(p => new BoardSprintContext(
-                p.AssignedTeamId,
-                _context.Sprints
-                    .Where(s => s.ProjectId == p.Id && s.Status == SprintStatus.Active)
-                    .Select(s => (Guid?)s.Id)
-                    .FirstOrDefault()))
-            .FirstOrDefaultAsync(ct);
+        // The team's active sprint, not the project's — a sprint belongs to the team, and a board
+        // shows that sprint filtered to this project's work.
+        //
+        // An explicit left join rather than a correlated subquery in the projection: the subquery
+        // form has to reference the outer row's team from inside, which is one of the shapes EF
+        // declines to translate, and it fails at run time rather than at build.
+        var context = await (
+            from p in _context.Projects
+            where p.Id == projectId
+            join s in _context.Sprints.Where(x => x.Status == SprintStatus.Active)
+                on p.AssignedTeamId equals s.TeamId into active
+            from s in active.DefaultIfEmpty()
+            select new BoardSprintContext(p.AssignedTeamId, (Guid?)s.Id)
+        ).FirstOrDefaultAsync(ct);
 
         return context.Equals(default(BoardSprintContext)) ? null : context;
     }

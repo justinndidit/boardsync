@@ -56,7 +56,7 @@ public class ReportingTests(BoardSyncApiFactory factory)
     private static async Task<Sprint> SprintAsync(Workspace workspace, string goal = "ship it")
     {
         return await workspace.Owner.Post<Sprint>(
-            $"/api/projects/{workspace.ProjectId}/sprints",
+            $"/api/teams/{workspace.TeamId}/sprints",
             new
             {
                 goal,
@@ -298,7 +298,35 @@ public class ReportingTests(BoardSyncApiFactory factory)
     /// would make the people doing the work ask somebody else how it is going.
     /// </remarks>
     [Fact]
-    public async Task AnyoneWhoCanSeeTheProjectCanSeeItsReports()
+    public async Task AnyoneOnTheTeamCanSeeItsReports()
+    {
+        var workspace = await Workspace.CreateAsync(factory);
+        var sprint = await SprintAsync(workspace);
+        await ItemInSprintAsync(workspace, sprint.Id, "work", 5);
+
+        var member = await workspace.AddOrganizationMemberAsync(factory);
+        await workspace.Owner.Post($"/api/teams/{workspace.TeamId}/members",
+            new { userId = member.UserId });
+
+        var report = await member.Get<Report>($"/api/sprints/{sprint.Id}/report");
+        Assert.Equal(5, report.Summary.CommittedPoints);
+
+        var velocity = await member.Get<Velocity>(
+            $"/api/teams/{workspace.TeamId}/reports/velocity");
+        Assert.NotNull(velocity);
+    }
+
+    /// <summary>
+    /// A project role sees the project's velocity and not the team's sprint report.
+    /// </summary>
+    /// <remarks>
+    /// The consequence of sprints belonging to teams, asserted rather than left to be discovered.
+    /// Somebody contributing to a project without being on the owning team can ask how fast the
+    /// team building it moves — that is what the project velocity route answers — but a sprint
+    /// spans projects they may not be able to see, so its report is not theirs to read.
+    /// </remarks>
+    [Fact]
+    public async Task AProjectRoleSeesVelocityButNotTheTeamsSprintReport()
     {
         var workspace = await Workspace.CreateAsync(factory);
         var sprint = await SprintAsync(workspace);
@@ -308,12 +336,14 @@ public class ReportingTests(BoardSyncApiFactory factory)
         await workspace.Owner.Post($"/api/projects/{workspace.ProjectId}/roles",
             new { userId = viewer.UserId, role = "Viewer" });
 
-        var report = await viewer.Get<Report>($"/api/sprints/{sprint.Id}/report");
-        Assert.Equal(5, report.Summary.CommittedPoints);
-
         var velocity = await viewer.Get<Velocity>(
             $"/api/projects/{workspace.ProjectId}/reports/velocity");
         Assert.NotNull(velocity);
+
+        // 404, not 403: they cannot see the sprint's team, and the status must not confirm that a
+        // sprint with this id exists.
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await viewer.GetRaw($"/api/sprints/{sprint.Id}/report")).StatusCode);
     }
 
     /// <summary>Someone with no access to the project cannot read its numbers.</summary>
