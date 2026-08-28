@@ -1,3 +1,4 @@
+using BoardSync.Api.Modules.GitSync.Domain;
 using BoardSync.Api.Data;
 using BoardSync.Api.Modules.GitSync.Providers;
 using BoardSync.Api.Modules.Rbac.Models;
@@ -151,16 +152,31 @@ public class GitTransitionService : IGitTransitionService
             return new TransitionResult(bound.Reference.ToString(), from, from, "already there");
 
         // Invariant 1 — monotonic.
-        if (Rank(desired) < Rank(from))
+        if (TransitionPath.Rank(desired) < TransitionPath.Rank(from))
         {
             return new TransitionResult(bound.Reference.ToString(), from, from,
                 $"would move backwards from {from}");
         }
 
-        if (!WorkItemStateMachine.CanTransition(from, desired))
+        /*
+         * The route forward, which is not always one step.
+         *
+         * A pull request opening on an item still in New used to be refused outright — New reaches
+         * only Active in one hop — and because the refusal left the item in New, every later event
+         * for it failed the same way. The item was stranded permanently by one missed push: a
+         * branch pushed before the repository was linked, a work item created after the branch, or
+         * a delivery that failed while the integration had no grant.
+         *
+         * The monotonic invariant forbids moving *backwards*; it never said an event may not carry
+         * an item more than one state forward. An event saying "this is in review" is also evidence
+         * that it was started.
+         */
+        var path = TransitionPath.Forward(from, desired);
+
+        if (path.Count == 0)
         {
             return new TransitionResult(bound.Reference.ToString(), from, from,
-                $"{from} → {desired} is not a legal transition");
+                $"{from} → {desired} is not reachable");
         }
 
         // Invariant 2 — a human wins.
@@ -173,37 +189,66 @@ public class GitTransitionService : IGitTransitionService
         // Invariant 3 — the ceiling is a permission, not a rule here. Asking the evaluator rather
         // than assuming means a widened Integration role would be caught by the QA gate's own tests
         // rather than by this method silently allowing more.
-        var required = WorkItemStateMachine.RequiredPermission(from, desired);
+        /*
+         * Every hop is checked, not just the last one. Checking only the destination would let a
+         * walk pass through a transition the principal may not make — and the whole point of asking
+         * the evaluator rather than assuming is that a widened Integration role gets caught by the
+         * QA gate's own tests instead of silently allowing more.
+         *
+         * A refusal anywhere refuses the whole walk. A partial move would leave the item somewhere
+         * nobody's event described, with an outcome line that no longer matches where it landed.
+         */
+        var previous = from;
 
-        if (!await _rbac.HasPermissionAsync(installationId, required, RoleScope.Project, item.ProjectId, ct))
+        foreach (var step in path)
         {
-            _logger.LogWarning(
-                "Installation {InstallationId} may not move {Reference} from {From} to {To} ({Permission}).",
-                installationId, bound.Reference, from, desired, required);
+            var required = WorkItemStateMachine.RequiredPermission(previous, step);
 
-            return new TransitionResult(bound.Reference.ToString(), from, from,
-                $"the integration does not hold {required}");
+            if (!await _rbac.HasPermissionAsync(
+                    installationId, required, RoleScope.Project, item.ProjectId, ct))
+            {
+                _logger.LogWarning(
+                    "Installation {InstallationId} may not move {Reference} from {From} to {To} ({Permission}).",
+                    installationId, bound.Reference, previous, step, required);
+
+                return new TransitionResult(bound.Reference.ToString(), from, from,
+                    $"the integration does not hold {required}");
+            }
+
+            previous = step;
+        }
+
+        /*
+         * Nothing is written until every hop has been permitted, so a refusal halfway leaves the
+         * change tracker untouched rather than relying on the caller not to save.
+         */
+        previous = from;
+
+        foreach (var step in path)
+        {
+            _context.WorkItemHistory.Add(new WorkItemHistory
+            {
+                WorkItemId = item.Id,
+                ProjectId = item.ProjectId,
+                ChangedBy = installationId,
+                ActorType = PrincipalType.Integration,
+                AttributedToUserId = attributedTo,
+                FieldName = "State",
+                OldValue = previous.ToString(),
+                NewValue = step.ToString(),
+                CreatedBy = installationId
+            });
+
+            // Before the save, so the event and the change it describes commit together — the
+            // ordering that silently dropped every work item event when it was the other way round.
+            _eventBus.Enqueue(
+                new WorkItemStateChanged(item.Id, item.ProjectId, previous, step, installationId));
+
+            previous = step;
         }
 
         item.State = desired;
         item.UpdatedAt = DateTime.UtcNow;
-
-        _context.WorkItemHistory.Add(new WorkItemHistory
-        {
-            WorkItemId = item.Id,
-            ProjectId = item.ProjectId,
-            ChangedBy = installationId,
-            ActorType = PrincipalType.Integration,
-            AttributedToUserId = attributedTo,
-            FieldName = "State",
-            OldValue = from.ToString(),
-            NewValue = desired.ToString(),
-            CreatedBy = installationId
-        });
-
-        // Before the save, so the event and the change it describes commit together — the ordering
-        // that silently dropped every work item event when it was the other way round.
-        _eventBus.Enqueue(new WorkItemStateChanged(item.Id, item.ProjectId, from, desired, installationId));
 
         _logger.LogInformation(
             "{Reference} moved {From} → {To} by {Repository} ({Kind}).",
@@ -211,25 +256,6 @@ public class GitTransitionService : IGitTransitionService
 
         return new TransitionResult(bound.Reference.ToString(), from, desired, null);
     }
-
-    /// <summary>
-    /// Where a state sits in the workflow, for the monotonic check.
-    /// </summary>
-    /// <remarks>
-    /// A separate ordering from the enum's own values, and deliberately so — this is the one place
-    /// states are compared rather than matched, and burying that in the enum's numbering would make
-    /// it look like the numbers mean something everywhere else. They do not; only this method
-    /// orders them.
-    /// </remarks>
-    private static int Rank(WorkItemState state) => state switch
-    {
-        WorkItemState.New => 0,
-        WorkItemState.Active => 1,
-        WorkItemState.InReview => 2,
-        WorkItemState.Resolved => 3,
-        WorkItemState.Closed => 4,
-        _ => 0
-    };
 
     /// <summary>
     /// Whether a person changed this item's state after the moment the git event describes.
