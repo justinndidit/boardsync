@@ -185,6 +185,18 @@ public class WorkItemService : IWorkItemService
         TrackChange(item, updatedBy, "StoryPoints", item.StoryPoints?.ToString(), request.StoryPoints?.ToString());
         TrackChange(item, updatedBy, "TeamId", item.TeamId?.ToString(), request.TeamId?.ToString());
 
+        // Validated before anything is written, so a rejected move leaves the item exactly as it
+        // was rather than half-applied alongside a title that did save.
+        if (item.ParentId != request.ParentId)
+        {
+            await ValidateReparentAsync(item, request.ParentId, ct);
+
+            TrackChange(item, updatedBy, "ParentId",
+                item.ParentId?.ToString(), request.ParentId?.ToString());
+
+            item.ParentId = request.ParentId;
+        }
+
         var previousAssignee = item.AssigneeId;
 
         item.Title = request.Title.Trim();
@@ -708,6 +720,67 @@ public class WorkItemService : IWorkItemService
     /// Rejects a parent/child pairing the hierarchy does not allow.
     /// </summary>
     /// <remarks>See the note on <see cref="ValidateStateTransition"/> — same reason, same table.</remarks>
+    /// <summary>
+    /// Whether this item may be moved under that parent.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Three refusals, and the third is the one that is easy to forget. An item cannot be its own
+    /// parent; a parent must be a live item in the same project; and <b>a parent may not be one of
+    /// the item's own descendants</b> — moving an Epic under its own Story would build a ring that
+    /// no query walking the tree can leave, and the first thing to walk it would hang rather than
+    /// report anything a reader could act on.
+    /// </para>
+    /// <para>
+    /// The walk is bounded as well as terminated by the ring check. The hierarchy is four levels,
+    /// so anything deeper is data that should not exist, and a loop that trusts the data to be
+    /// shallow is one bad row away from spinning.
+    /// </para>
+    /// </remarks>
+    private async Task ValidateReparentAsync(
+        WorkItem item, Guid? parentId, CancellationToken ct)
+    {
+        if (parentId is not { } targetId) return;
+
+        if (targetId == item.Id)
+            throw new BusinessRuleException("A work item cannot be its own parent.");
+
+        var parent = await _repository.GetActiveInProjectAsync(targetId, item.ProjectId, ct)
+            ?? throw new NotFoundException("Parent work item", targetId);
+
+        ValidateHierarchy(parent.Type, item.Type);
+
+        // Walk up from the proposed parent. Meeting the item means the item is above it already,
+        // and attaching them would close the loop.
+        var ancestor = parent;
+
+        for (var depth = 0; depth < MaxHierarchyDepth; depth++)
+        {
+            if (ancestor.ParentId is not { } nextId) return;
+
+            if (nextId == item.Id)
+                throw new BusinessRuleException(
+                    $"'{parent.Title}' sits under this work item already, so it cannot also be its parent.");
+
+            ancestor = await _repository.GetActiveInProjectAsync(nextId, item.ProjectId, ct);
+
+            if (ancestor is null) return;
+        }
+
+        throw new BusinessRuleException(
+            "This work item's hierarchy is deeper than the workflow allows; move it nearer the top first.");
+    }
+
+    /// <summary>
+    /// How far up a parent chain is worth walking.
+    /// </summary>
+    /// <remarks>
+    /// The workflow allows Epic → Feature → Story → Task, so four hops reaches the root of anything
+    /// well-formed. The bound is here to stop a malformed chain spinning, not to enforce the shape —
+    /// <see cref="ValidateHierarchy"/> does that on the way in.
+    /// </remarks>
+    private const int MaxHierarchyDepth = 8;
+
     private static void ValidateHierarchy(WorkItemType parentType, WorkItemType childType)
     {
         if (WorkItemHierarchy.CanNest(parentType, childType)) return;

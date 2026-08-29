@@ -99,6 +99,24 @@ public class UpdateWorkItemRequest
 
     public Guid? TeamId { get; init; }
 
+    /// <summary>
+    /// The work item this one sits under, or null for none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This is a PUT, so omitting it clears the parent</b> — the same semantic
+    /// <see cref="TeamId"/> and <see cref="AssigneeId"/> already have here. A client that edits a
+    /// title must send the parent it read, or it will silently orphan the item. Use
+    /// <c>PATCH</c> when you want to change one field and say nothing about the rest.
+    /// </para>
+    /// <para>
+    /// Re-parenting was previously impossible: the parent could be chosen at creation and never
+    /// afterwards, so a wrong one could only be fixed by deleting the item and making another —
+    /// which takes a new number and leaves its history behind.
+    /// </para>
+    /// </remarks>
+    public Guid? ParentId { get; init; }
+
     [Range(0, 1000)]
     public int? StoryPoints { get; init; }
 

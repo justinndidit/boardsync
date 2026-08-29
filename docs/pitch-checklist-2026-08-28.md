@@ -47,10 +47,10 @@ The failure is silent by design — an unconfigured client is `null` and the end
 narrative rather than an error. That is the right behaviour in production and exactly the wrong
 behaviour ten minutes before a pitch, because nothing tells you the key did not arrive.
 
-- [ ] Add `ANTHROPIC_API_KEY=` to `.env.sample`
-- [ ] Add `Intelligence__AnthropicApiKey: ${ANTHROPIC_API_KEY}` to the `api` service in
+- [x] Add `ANTHROPIC_API_KEY=` to `.env.sample`
+- [x] Add `Intelligence__AnthropicApiKey: ${ANTHROPIC_API_KEY}` to the `api` service in
       `docker-compose.prod.yaml`
-- [ ] Log once at startup whether narration and decomposition are configured, the way Redis
+- [x] Log once at startup whether narration and decomposition are configured, the way Redis
       already announces its fallback. Silence is fine in production; silence is a trap in a demo.
 
 ### 0.2 Make one real model call
@@ -76,7 +76,7 @@ requires the provider to reach the API.
 - [ ] Register the webhook against a real throwaway repository and confirm a delivery lands in
       `GET /api/git/installations/{id}/deliveries`
 
-### 0.4 Seed data — there is none
+### 0.4 Seed data — **built 2026-08-28** (`scripts/seed_demo.sql`, `make seed-demo`)
 
 `scripts/init_db.sql` creates the database and two extensions. That is all. **There is no seed
 script anywhere in the repository**, so a fresh stack presents an empty board, and an empty board
@@ -87,14 +87,14 @@ reconstructs every metric from `WorkItemHistory`. **Seeding current states produ
 Burndown, velocity and cycle time all need backdated history rows, or the reports tab — one of the
 strongest parts of the pitch — shows three empty graphs.
 
-- [ ] Write a seed: one organization, one team, one project with a key, ~20 work items spread
+- [x] Write a seed: one organization, one team, one project with a key, ~20 work items spread
       across all five states
-- [ ] **Backdate `WorkItemHistory` rows** so burndown has a curve and cycle time has a median
-- [ ] Two or three closed sprints, so velocity has more than one bar
-- [ ] One active sprint mid-flight, so the live board has somewhere to move a card to
-- [ ] Several items sitting in `Resolved` — "Awaiting QA" is the number that makes the QA gate
+- [x] **Backdate `WorkItemHistory` rows** so burndown has a curve and cycle time has a median
+- [x] Two or three closed sprints, so velocity has more than one bar
+- [x] One active sprint mid-flight, so the live board has somewhere to move a card to
+- [x] Several items sitting in `Resolved` — "Awaiting QA" is the number that makes the QA gate
       argument concrete, and it needs items in it to be non-zero
-- [ ] Make it re-runnable, so a botched rehearsal costs one command and not a rebuild
+- [x] Make it re-runnable, so a botched rehearsal costs one command and not a rebuild
 
 ---
 
@@ -172,7 +172,7 @@ in Tier 4 is the first time anybody will find out.
       still two empty tabs out of five in the section you are pitching. Either build the CFD — it
       is computable from the same history reconstruction and was deferred only for size — or hide
       both tabs for the pitch and put them back after.
-- [ ] **Column reorder emits no domain event** (`BoardService.cs:156`, audit finding 16). If the
+- [x] **Column reorder emits no domain event** (`BoardService.cs:156`, audit finding 16). If the
       demo shows realtime by opening two browsers, dragging a column will not propagate. Either fix
       it — it is one `EnqueueAsync` call next to the ones already in that file — or do not drag a
       column on stage.
@@ -180,7 +180,7 @@ in Tier 4 is the first time anybody will find out.
       `WorkItemDrawer` (2003 lines) on `WorkItemsPage.tsx:1105`. The same object opens two
       different ways depending on which page you came from, which reads as unfinished to anyone
       clicking around unaccompanied.
-- [ ] **`POST /sprints/{id}/close` is dead** — the client closes via `PATCH /status`. Delete one.
+- [x] **`POST /sprints/{id}/close` is dead** — the client closes via `PATCH /status`. Delete one.
 
 Not for the pitch: the 46 lint errors. They are ~26 instances of one class
 (`react-hooks/set-state-in-effect`) across ~36 hand-rolled fetch hooks, and fixing them properly
@@ -235,11 +235,12 @@ person.** That is the largest remaining risk and it costs an afternoon to retire
 
 ## The order I would work in
 
-1. **Key plumbing and one real model call** (0.1, 0.2) — an hour, and it is the only thing in the
-   product whose outcome is genuinely unknown.
-2. **Seed data with backdated history** (0.4) — half a day, and every other demo beat renders
-   against it.
-3. **Tunnel and a real repository** (0.3) — an hour.
+1. ~~**Key plumbing**~~ (0.1) — **done.** **One real model call (0.2) is still open**, and it
+   remains the only thing in the product whose outcome is genuinely unknown.
+2. ~~**Seed data with backdated history**~~ (0.4) — **done 2026-08-28.** Velocity reads 21 / 24 / 28
+   across three completed sprints; median verification wait is 20h on 19 measured items.
+3. ~~**Tunnel and a real repository**~~ (0.3) — **done.** Deliveries arrive, verify, bind and move
+   work. The git-driven board is proven end to end.
 4. ~~**Intelligence UI** (1.1, 1.2)~~ — **done 2026-08-28**, and the reason it is no longer the
    long pole. It is unproven rather than unbuilt: step 1 is what proves it.
 5. **Hide or build the two empty report tabs; fix the reorder event** (Tier 2) — half a day.

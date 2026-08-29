@@ -5,6 +5,8 @@ using BoardSync.Api.Modules.Activity;
 using BoardSync.Api.Modules.Notifications;
 using BoardSync.Api.Modules.Search.Repositories;
 using BoardSync.Api.Modules.Search.Services;
+using BoardSync.Api.Modules.Backlog.Handlers;
+using BoardSync.Api.Modules.WorkItems.Events;
 using BoardSync.Api.Modules.Backlog.Repositories;
 using BoardSync.Api.Modules.Backlog.Services;
 using BoardSync.Api.Modules.OrgProject.Repositories.Implementations;
@@ -331,6 +333,13 @@ builder.Services.AddActivityModule();
 builder.Services.AddScoped<IBacklogRepository, BacklogRepository>();
 builder.Services.AddScoped<IBacklogSprintLink, BacklogSprintLink>();
 builder.Services.AddScoped<IBacklogService, BacklogService>();
+
+// Every new work item gets a backlog row, so "one row per work item" is true of the table rather
+// than only of its documentation. Registered against the closed interface, which is how the bus
+// resolves subscribers.
+builder.Services.AddScoped<BacklogEventHandlers>();
+builder.Services.AddScoped<IEventHandler<WorkItemCreated>>(
+    sp => sp.GetRequiredService<BacklogEventHandlers>());
 
 // Add HTTP Context Accessor
 builder.Services.AddHttpContextAccessor();
