@@ -433,8 +433,27 @@ before the feature existed, and cannot be wrong because a job did not run.
 | Overview | Committed, verified, awaiting QA, not started, plus cycle time |
 | Burndown | Points **and** items — unestimated work makes a flat points line and a falling item line |
 | Velocity | Completed sprints only; an in-flight sprint would look like a collapse |
+| | **Measured at the sprint boundary** — see below |
 | Cumulative Flow | **Not computed.** Says so rather than showing invented numbers |
 | Team Performance | **Not computed.** Same |
+
+### What "completed" means, and when it is counted
+
+**A sprint's completed points are the work closed on or before its end date** — not the work that is
+closed now. Both the summary and the burndown apply that same rule, so what the burndown shows as
+remaining at the end and what the summary shows as delivered add up to what the sprint committed.
+
+The consequence is deliberate: **a finished sprint's velocity never changes again.** Closing a stale
+item three weeks later counts toward nothing — it was committed to that sprint, and that sprint did
+not deliver it. Counting it would raise a past bar with no event to explain the change, and would
+flatter exactly the teams that habitually carry work over, which are the ones whose forecast should
+be least flattered.
+
+Active sprints are unaffected, because their end date is in the future.
+
+**Awaiting QA is the exception and stays a "right now" figure.** How much is sitting in the QA lane
+is a question about the present on a running sprint, and on a finished one it answers "what did this
+leave behind that is still waiting" — freezing it at the end date would answer neither.
 
 Medians rather than means throughout, because one item that sat in a backlog for three months
 drags an average somewhere nobody recognises — and a figure nobody recognises gets ignored.

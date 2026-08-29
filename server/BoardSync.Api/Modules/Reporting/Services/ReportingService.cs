@@ -67,7 +67,27 @@ public class ReportingService : IReportingService
         var timelines = await LoadTimelinesAsync(items.Select(i => i.Id), ct);
 
         var committedPoints = items.Sum(i => i.StoryPoints ?? 0);
-        var closed = items.Where(i => i.State == WorkItemState.Closed).ToList();
+
+        /*
+         * Delivered *by the time the sprint ended*, not "closed by now".
+         *
+         * This counted current state, and the burndown beside it has always counted closures
+         * against the day they happened — so on one page a reader could compute delivered points
+         * two ways and get two answers, with nothing saying which was which.
+         *
+         * It also meant a finished sprint's numbers kept moving: closing a stale item three weeks
+         * later silently raised a past sprint, and a chart that read 24 last week read 29 today with
+         * no event to explain it. Velocity is the one figure people forecast from, and forecasting
+         * from a number that includes work delivered outside the window flatters exactly the teams
+         * that habitually carry work over.
+         *
+         * Active sprints are unaffected: their end date is in the future, so "closed by then" and
+         * "closed now" are the same set.
+         */
+        var closed = items
+            .Where(i => DeliveredBy(
+                FirstEntry(timelines, i.Id, WorkItemState.Closed), sprint.EndDate))
+            .ToList();
 
         var summary = new SprintSummary(
             SprintId: sprint.Id,
@@ -81,8 +101,15 @@ public class ReportingService : IReportingService
             CommittedItems: items.Count,
             CompletedItems: closed.Count,
 
-            // Its own number because a sprint that looks behind may be finished work nobody has
-            // verified — which is a different problem with a different owner.
+            /*
+             * Its own number because a sprint that looks behind may be finished work nobody has
+             * verified — a different problem with a different owner.
+             *
+             * Deliberately still *current* state, unlike the two above. "How much is sitting in QA"
+             * is a question about now: on a running sprint that is exactly right, and on a finished
+             * one it answers "what did this sprint leave behind that is still waiting", which is
+             * also a live question. Freezing it at the end date would answer neither.
+             */
             AwaitingVerificationItems: items.Count(i => i.State == WorkItemState.Resolved));
 
         var closedAt = items.ToDictionary(
@@ -135,8 +162,19 @@ public class ReportingService : IReportingService
         var membership = await _context.SprintWorkItems
             .Where(sw => sprintIds.Contains(sw.SprintId))
             .Join(_context.WorkItems.Where(w => w.IsActive), sw => sw.WorkItemId, w => w.Id,
-                (sw, w) => new { sw.SprintId, w.State, w.StoryPoints })
+                (sw, w) => new { sw.SprintId, WorkItemId = w.Id, w.StoryPoints })
             .ToListAsync(ct);
+
+        /*
+         * One history read for every item across every charted sprint, rather than current state.
+         *
+         * The cost is the query the sprint report already makes; what it buys is that a completed
+         * sprint's bar never moves again. Counting `State == Closed` meant closing a stale item long
+         * afterwards raised a past sprint retroactively — and velocity is the figure teams plan
+         * from, so it is the one that must hold still.
+         */
+        var timelines = await LoadTimelinesAsync(
+            membership.Select(m => m.WorkItemId).Distinct(), ct);
 
         var points = sprints
             .Select(s =>
@@ -147,7 +185,9 @@ public class ReportingService : IReportingService
                     s.Id, s.Number, s.EndDate,
                     CommittedPoints: mine.Sum(m => m.StoryPoints ?? 0),
                     CompletedPoints: mine
-                        .Where(m => m.State == WorkItemState.Closed)
+                        .Where(m => DeliveredBy(
+                            FirstEntry(timelines, m.WorkItemId, WorkItemState.Closed),
+                            s.EndDate))
                         .Sum(m => m.StoryPoints ?? 0));
             })
             .OrderBy(p => p.EndDate)
@@ -211,6 +251,23 @@ public class ReportingService : IReportingService
 
         return timelines;
     }
+
+    /// <summary>
+    /// Whether a closure counts toward a sprint: it happened, and it happened by the sprint's end.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The same rule the burndown applies day by day, so a sprint's completed points and the point
+    /// its burndown lands on are the same number rather than two that usually agree.
+    /// </para>
+    /// <para>
+    /// <b>One bound, not two.</b> An item added to a sprint already closed still counts. A floor at
+    /// the start date would drop work legitimately finished on the first morning of a sprint it was
+    /// committed to, which is a worse answer than the rare oddity it would prevent.
+    /// </para>
+    /// </remarks>
+    private static bool DeliveredBy(DateTime? closedAt, DateTime sprintEnd) =>
+        closedAt is { } closed && closed <= sprintEnd;
 
     private static DateTime? FirstEntry(
         Dictionary<Guid, List<StateChange>> timelines, Guid workItemId, WorkItemState state)
