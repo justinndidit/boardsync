@@ -577,6 +577,38 @@ else
         "and the socket peer address is used as the client IP. Configure them if running behind a proxy.");
 }
 
+/*
+ * Whether a language model is configured, said once at startup.
+ *
+ * Both Intelligence services degrade to "not configured" rather than throwing — the right
+ * behaviour for a deployment that wants none, and a trap for one that wants one and mistyped the
+ * variable. The failure is otherwise invisible: the endpoints answer 200 with a reason, and the
+ * reports they narrate over are unaffected because nothing on them is generated.
+ */
+using (var scope = app.Services.CreateScope())
+{
+    var narrator = scope.ServiceProvider
+        .GetRequiredService<BoardSync.Api.Modules.Intelligence.Services.INarrator>();
+
+    var decomposer = scope.ServiceProvider
+        .GetRequiredService<BoardSync.Api.Modules.Intelligence.Services.IDecomposer>();
+
+    if (narrator.IsConfigured && decomposer.IsConfigured)
+    {
+        app.Logger.LogInformation(
+            "Intelligence: a language model is configured. Sprint narratives and PRD decomposition " +
+            "are available.");
+    }
+    else
+    {
+        app.Logger.LogInformation(
+            "Intelligence: no language model configured (narrator: {Narrator}, decomposer: {Decomposer}). " +
+            "Set Intelligence:AnthropicApiKey or ANTHROPIC_API_KEY to enable narratives and decomposition. " +
+            "Every computed figure on the reports page is unaffected.",
+            narrator.IsConfigured, decomposer.IsConfigured);
+    }
+}
+
 // Security and logging middleware (after forwarded headers)
 app.UseSecurityHeaders();
 app.UseRequestLogging();

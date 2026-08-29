@@ -146,8 +146,7 @@ public class BoardsController : ControllerBase
         [FromBody] ReorderBoardColumnsRequest request,
         CancellationToken ct)
     {
-        var board = await _boardService.GetByIdAsync(boardId, ct);
-        await _boardService.ReorderColumnsAsync(boardId, request, ct);
+        await _boardService.ReorderColumnsAsync(boardId, request, _currentUser.UserId, ct);
         return Ok(new ApiResponse(true, "Columns reordered."));
     }
 

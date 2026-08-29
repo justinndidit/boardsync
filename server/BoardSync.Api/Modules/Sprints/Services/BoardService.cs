@@ -153,21 +153,47 @@ public class BoardService : IBoardService
         await _repository.SaveChangesAsync(ct);
     }
 
+    /// <remarks>
+    /// <para>
+    /// Emits <c>BoardChanged</c> like every other mutation here. It did not, which was audit
+    /// finding 16 — and the omission stopped being cosmetic the moment boards started updating
+    /// live: reordering columns changed nothing for anyone else watching, and the board they were
+    /// looking at silently disagreed with the one the person dragging could see.
+    /// </para>
+    /// <para>
+    /// The event carries no old and new value. A reorder is a permutation of the whole row, not a
+    /// field moving between two states, and inventing a pair to fit the shape would put something
+    /// in the activity feed that reads like a change nobody made. The feed says the columns were
+    /// reordered; the board itself says how.
+    /// </para>
+    /// </remarks>
     public async Task ReorderColumnsAsync(
         Guid boardId,
         ReorderBoardColumnsRequest request,
+        Guid reorderedBy,
         CancellationToken ct = default)
     {
-        _ = await GetBoardOrThrowAsync(boardId, ct);
+        var board = await GetBoardOrThrowAsync(boardId, ct);
 
         var columns = await _repository.GetColumnsAsync(boardId, ct);
+
+        var moved = false;
 
         for (int i = 0; i < request.ColumnIds.Count; i++)
         {
             var col = columns.FirstOrDefault(c => c.Id == request.ColumnIds[i]);
-            if (col is not null)
-                col.Position = i;
+
+            if (col is null || col.Position == i) continue;
+
+            col.Position = i;
+            moved = true;
         }
+
+        // A request that names the order the board is already in is not a change, and publishing it
+        // would wake every subscriber to tell them nothing happened.
+        if (!moved) return;
+
+        await EnqueueAsync(board, "Columns reordered", null, null, reorderedBy, ct);
 
         await _repository.SaveChangesAsync(ct);
     }

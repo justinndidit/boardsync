@@ -63,6 +63,9 @@ services:
       EmailSettings__Username: ${SMTP_USERNAME}
       EmailSettings__Password: ${SMTP_PASSWORD}
       EmailSettings__BaseUrl: ${APP_BASE_URL}
+      # Optional. Empty means no model is configured: decomposition and narratives answer with a
+      # reason, and the reports they narrate over are unaffected because nothing there is generated.
+      Intelligence__AnthropicApiKey: ${ANTHROPIC_API_KEY:-}
     expose:
       - "8080"
     networks:
