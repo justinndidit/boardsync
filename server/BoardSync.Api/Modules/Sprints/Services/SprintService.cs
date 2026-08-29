@@ -297,6 +297,14 @@ public class SprintService : ISprintService
 
         await _repository.SaveChangesAsync(ct);
 
+        /*
+         * The backlog is "everything with no sprint", and this is one of two doors into a sprint.
+         * The other — the backlog's own move-to-sprint — already pointed the entry here; this one
+         * did not, so an item committed from a board stayed listed as unscheduled and could be
+         * planned into a second sprint by anybody reading the backlog.
+         */
+        await _backlog.AssignSprintAsync(sprint.Id, [workItem.Id], ct);
+
         // Read directly rather than through the project service: this module already holds the
         // context, and the key is one column on a row it has the id for.
         var projectKey = await _context.Projects
@@ -329,6 +337,10 @@ public class SprintService : ISprintService
             workItemId, title, removedBy), ct);
 
         await _repository.SaveChangesAsync(ct);
+
+        // And back out again — taking work out of a sprint returns it to the unscheduled backlog,
+        // at the rank it left, because the entry was kept rather than deleted.
+        await _backlog.ClearSprintAsync(sprintId, [workItemId], ct);
     }
 
     public async Task<PagedResult<SprintWorkItemResponse>> GetWorkItemsAsync(
@@ -456,8 +468,20 @@ public class SprintService : ISprintService
         {
             if (request.IncompleteItemsDestination == IncompleteItemsDestination.ReturnToBacklog)
             {
-                // Only the backlog entries this sprint held; an item that also sits in another
-                // sprint keeps that membership. The sprint-side rows are dropped below.
+                /*
+                 * The backlog entry is released; the SprintWorkItem row is deliberately kept.
+                 *
+                 * The comment here used to claim the sprint-side rows were dropped "below". They
+                 * are not, and they must not be: CommittedItems and CommittedPoints are counted
+                 * from sprint membership, so dropping the rows would rewrite the sprint's own
+                 * record. A sprint that committed to eight items and finished five would report
+                 * five committed and five completed — a hundred percent, every time, for every
+                 * team — and velocity would stop describing anything.
+                 *
+                 * Returning an item mid-sprint through the backlog module is a different act and
+                 * does remove the row: taking work out of a running sprint is a change of scope,
+                 * and the sprint should not be credited with having carried it.
+                 */
                 await _backlog.ClearSprintAsync(sprintId, incompleteIds, ct);
             }
             else

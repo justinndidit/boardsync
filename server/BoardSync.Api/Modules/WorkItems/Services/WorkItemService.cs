@@ -1,3 +1,4 @@
+using BoardSync.Api.Modules.Backlog.Services;
 using BoardSync.Api.Modules.OrgProject.Services.Interfaces;
 using BoardSync.Api.Modules.Rbac.Models;
 using BoardSync.Api.Modules.Rbac.Services.Interfaces;
@@ -36,6 +37,7 @@ public class WorkItemService : IWorkItemService
     private readonly ITeamService _teamService;
     private readonly IRbacService _rbac;
     private readonly IEventBus _eventBus;
+    private readonly IBacklogSprintLink _backlog;
     private readonly ILogger<WorkItemService> _logger;
 
     public WorkItemService(
@@ -44,6 +46,7 @@ public class WorkItemService : IWorkItemService
         ITeamService teamService,
         IRbacService rbac,
         IEventBus eventBus,
+        IBacklogSprintLink backlog,
         ILogger<WorkItemService> logger)
     {
         _repository = repository;
@@ -51,6 +54,7 @@ public class WorkItemService : IWorkItemService
         _teamService = teamService;
         _rbac = rbac;
         _eventBus = eventBus;
+        _backlog = backlog;
         _logger = logger;
     }
 
@@ -122,6 +126,13 @@ public class WorkItemService : IWorkItemService
         AddHistory(item, createdBy, "State", null, WorkItemState.New.ToString());
 
         _eventBus.Enqueue(new WorkItemCreated(item.Id, projectId, item.Type, item.Title, createdBy));
+
+        /*
+         * Every work item gets a backlog entry, which is what carries its rank. The narrow port
+         * rather than the whole BacklogService: this needs one row created, and depending on the
+         * service would close the loop WorkItems → Backlog → Sprints → WorkItems.
+         */
+        await _backlog.EnsureEntryAsync(projectId, item.Id, createdBy, ct);
 
         await _repository.SaveChangesAsync(ct);
 

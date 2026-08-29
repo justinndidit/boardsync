@@ -1,3 +1,5 @@
+using BoardSync.Api.Modules.Backlog.Models;
+using BoardSync.Api.Modules.Sprints.Domain;
 using BoardSync.Api.Modules.Backlog.Repositories;
 
 namespace BoardSync.Api.Modules.Backlog.Services;
@@ -34,6 +36,52 @@ public interface IBacklogSprintLink
         Guid sprintId,
         IReadOnlyCollection<Guid> workItemIds,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Points these entries at the sprint they have just joined, so they leave the unscheduled
+    /// backlog.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The backlog is "everything with no sprint", and there are two doors into a sprint:
+    /// <c>POST /projects/{id}/backlog/move-to-sprint</c>, which set this, and
+    /// <c>POST /sprints/{id}/workitems</c>, which did not. An item committed through the second
+    /// stayed listed as unscheduled — visible in the backlog and in the sprint at once, and
+    /// available to be planned into a second sprint by somebody reading the backlog.
+    /// </para>
+    /// <para>
+    /// Called directly rather than through an event: the backlog is usually read immediately after,
+    /// and eventual consistency here would show the item as still unscheduled for exactly as long
+    /// as it takes somebody to look.
+    /// </para>
+    /// </remarks>
+    /// <returns>How many entries were pointed at the sprint.</returns>
+    Task<int> AssignSprintAsync(
+        Guid sprintId,
+        IReadOnlyCollection<Guid> workItemIds,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Makes sure a work item has a backlog entry, appended at the end. Idempotent.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>BacklogItem</c> is "one row per work item", and the row is what carries the rank — kept
+    /// even while the item sits in a sprint, so an item returning to the backlog lands where it
+    /// left rather than at the bottom. An item that never had a row has no position to return to.
+    /// </para>
+    /// <para>
+    /// Called synchronously from creation rather than through a <c>WorkItemCreated</c> subscriber.
+    /// A subscriber is tidier for module boundaries and wrong here: creating an item and putting it
+    /// straight into a sprint is one gesture on a board, and the sprint write would arrive before
+    /// the outbox had made the row to point at.
+    /// </para>
+    /// </remarks>
+    Task EnsureEntryAsync(
+        Guid projectId,
+        Guid workItemId,
+        Guid addedBy,
+        CancellationToken ct = default);
 }
 
 /// <inheritdoc />
@@ -57,6 +105,44 @@ public class BacklogSprintLink : IBacklogSprintLink
 
         foreach (var entry in entries)
             entry.SprintId = null;
+
+        await _repository.SaveChangesAsync(ct);
+
+        return entries.Count;
+    }
+
+    public async Task EnsureEntryAsync(
+        Guid projectId,
+        Guid workItemId,
+        Guid addedBy,
+        CancellationToken ct = default)
+    {
+        if (await _repository.GetEntryAsync(projectId, workItemId, ct) is not null) return;
+
+        _repository.Add(new BacklogItem
+        {
+            ProjectId = projectId,
+            WorkItemId = workItemId,
+            Rank = Ranking.Between(
+                await _repository.GetMaxRankAsync(projectId, ct), null),
+            CreatedBy = addedBy
+        });
+
+        await _repository.SaveChangesAsync(ct);
+    }
+
+    public async Task<int> AssignSprintAsync(
+        Guid sprintId,
+        IReadOnlyCollection<Guid> workItemIds,
+        CancellationToken ct = default)
+    {
+        if (workItemIds.Count == 0) return 0;
+
+        var entries =
+            await _repository.GetEntriesByWorkItemsAsync(workItemIds, ct);
+
+        foreach (var entry in entries)
+            entry.SprintId = sprintId;
 
         await _repository.SaveChangesAsync(ct);
 

@@ -89,6 +89,16 @@ public class BacklogRepository : IBacklogRepository
             .ToListAsync(ct);
     }
 
+    public async Task<IReadOnlyList<BacklogItem>> GetEntriesByWorkItemsAsync(
+        IReadOnlyCollection<Guid> workItemIds, CancellationToken ct = default)
+    {
+        if (workItemIds.Count == 0) return [];
+
+        return await _context.BacklogItems
+            .Where(b => workItemIds.Contains(b.WorkItemId))
+            .ToListAsync(ct);
+    }
+
     public async Task<IReadOnlyList<BacklogItem>> GetEntriesForSprintAsync(
         Guid sprintId, IReadOnlyCollection<Guid> workItemIds, CancellationToken ct = default)
     {
