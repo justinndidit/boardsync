@@ -43,13 +43,35 @@ public class NarrativeServiceTests
         public NarrationOutcome? Outcome { get; init; }
         public int Calls { get; private set; }
 
+        /// <summary>What the service handed over — asserted on where the prompt input matters.</summary>
+        public NarrativeInput? Received { get; private set; }
+
         public Task<NarrationOutcome?> NarrateAsync(
-            SprintReport report, CancellationToken ct = default)
+            NarrativeInput input, CancellationToken ct = default)
         {
             Calls++;
+            Received = input;
 
             return Task.FromResult(Outcome);
         }
+    }
+
+    /// <summary>
+    /// A sprint containing two items, one delivered and one not.
+    /// </summary>
+    /// <remarks>
+    /// Enough to tell a real reference from an invented one, which is all the grounding check
+    /// needs. The lookup itself is a query and belongs to the integration tests.
+    /// </remarks>
+    private sealed class FakeWork : ISprintWorkLookup
+    {
+        public SprintWork Work { get; init; } = new(
+            [new NarratedItem("PAY-11", "Refund endpoint", "Closed")],
+            [new NarratedItem("PAY-12", "Refund receipts", "InReview")]);
+
+        public Task<SprintWork> ForSprintAsync(
+            Guid sprintId, CancellationToken ct = default) =>
+            Task.FromResult(Work);
     }
 
     private sealed class FakeReporting : IReportingService
@@ -72,8 +94,9 @@ public class NarrativeServiceTests
     }
 
     private static NarrativeService Service(
-        INarrator narrator, ITokenBudget? budget = null) =>
+        INarrator narrator, ITokenBudget? budget = null, ISprintWorkLookup? work = null) =>
         new(new FakeReporting(),
+            work ?? new FakeWork(),
             narrator,
             budget ?? new InMemoryTokenBudget(
                 new ConfigurationBuilder().Build()),
@@ -106,7 +129,11 @@ public class NarrativeServiceTests
                 "34 of 40 points landed.",
                 "Two items are waiting on QA.",
                 ["Median wait for QA was 2.5 hours."],
-                TokensSpent: 900),
+                TokensSpent: 900,
+                Outcome: "The sprint met its goal.",
+                Shipped: ["PAY-11 — the refund endpoint is live."],
+                DidNotLand: ["PAY-12 did not land."],
+                WhereWorkIsSitting: ["PAY-12 is with QA."]),
         };
 
         var result = await Service(narrator).ForSprintAsync(Guid.NewGuid(), Org);
@@ -114,6 +141,92 @@ public class NarrativeServiceTests
         Assert.NotNull(result.Narrative);
         Assert.True(result.Narrative!.Grounded);
         Assert.Empty(result.Narrative.UnsupportedClaims);
+
+        // The sections survive the check rather than being dropped as unrecognised prose.
+        Assert.Equal("The sprint met its goal.", result.Narrative.Outcome);
+        Assert.Single(result.Narrative.Shipped!);
+    }
+
+    /// <summary>
+    /// The narrator is told what the sprint held, not left to infer it from the totals.
+    /// </summary>
+    /// <remarks>
+    /// A report that says "eight items landed" without naming one is the output the user rejected.
+    /// Naming them requires handing them over, so that they are handed over is worth a test.
+    /// </remarks>
+    [Fact]
+    public async Task TheSprintsWorkIsHandedToTheNarrator()
+    {
+        var narrator = new FakeNarrator
+        {
+            Outcome = new NarrationOutcome("fine", "fine", [], 10),
+        };
+
+        await Service(narrator).ForSprintAsync(Guid.NewGuid(), Org);
+
+        Assert.NotNull(narrator.Received);
+        Assert.Equal("PAY-11", Assert.Single(narrator.Received!.Delivered).Reference);
+        Assert.Equal("PAY-12", Assert.Single(narrator.Received.Unfinished).Reference);
+    }
+
+    /// <summary>
+    /// The failure a naming report adds: an item that does not exist.
+    /// </summary>
+    /// <remarks>
+    /// Worse than an invented figure. A reader can check a number against the table beside it, and
+    /// has no way at all to know that PAY-91 was never a work item — so it is held to the same rule
+    /// and the prose is withheld.
+    /// </remarks>
+    [Fact]
+    public async Task AnInventedWorkItemWithholdsTheProse()
+    {
+        var narrator = new FakeNarrator
+        {
+            Outcome = new NarrationOutcome(
+                "The sprint met its goal.",
+                "Refunds shipped.",
+                [],
+                TokensSpent: 900,
+                Outcome: "The sprint met its goal.",
+                Shipped: ["PAY-91 — the payout ledger is live."],
+                DidNotLand: [],
+                WhereWorkIsSitting: []),
+        };
+
+        var result = await Service(narrator).ForSprintAsync(Guid.NewGuid(), Org);
+
+        Assert.NotNull(result.Narrative);
+        Assert.False(result.Narrative!.Grounded);
+
+        Assert.Contains(
+            result.Narrative.UnsupportedClaims,
+            claim => claim.Contains("PAY-91"));
+    }
+
+    /// <summary>
+    /// A real item from another sprint is still not this sprint's work.
+    /// </summary>
+    /// <remarks>
+    /// The check is against what the model was given, not against every item that exists. This
+    /// report is about one sprint, and borrowing work from elsewhere misleads a reader as
+    /// effectively as inventing it.
+    /// </remarks>
+    [Fact]
+    public async Task AnItemFromAnotherSprintIsNotSupported()
+    {
+        var narrator = new FakeNarrator
+        {
+            Outcome = new NarrationOutcome(
+                "fine", "fine", [], 900,
+                Outcome: "PAY-40 landed.",
+                Shipped: [],
+                DidNotLand: [],
+                WhereWorkIsSitting: []),
+        };
+
+        var result = await Service(narrator).ForSprintAsync(Guid.NewGuid(), Org);
+
+        Assert.False(result.Narrative!.Grounded);
     }
 
     /// <summary>

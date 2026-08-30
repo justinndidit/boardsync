@@ -77,6 +77,27 @@ public interface IBacklogSprintLink
     /// the outbox had made the row to point at.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// Re-ranks entries the caller already owns into a given order, below everything else.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// For a decomposition acceptance, which produces a batch of items whose order carries meaning
+    /// — the model's delivery phases — but which has no claim on the top of a backlog somebody else
+    /// prioritised. <c>ReorderAsync</c> is the wrong tool: it takes a complete sequence and puts
+    /// everything named at the top, so passing it a PRD's output would push the team's existing
+    /// plan underneath work nobody has agreed to yet.
+    /// </para>
+    /// <para>
+    /// Ids that are not in this project's backlog are skipped rather than rejected. The caller is
+    /// stating a preference about order, not asserting the contents of the backlog.
+    /// </para>
+    /// </remarks>
+    Task RankBelowAsync(
+        Guid projectId,
+        IReadOnlyList<Guid> workItemIdsInOrder,
+        CancellationToken ct = default);
+
     Task EnsureEntryAsync(
         Guid projectId,
         Guid workItemId,
@@ -109,6 +130,39 @@ public class BacklogSprintLink : IBacklogSprintLink
         await _repository.SaveChangesAsync(ct);
 
         return entries.Count;
+    }
+
+    public async Task RankBelowAsync(
+        Guid projectId,
+        IReadOnlyList<Guid> workItemIdsInOrder,
+        CancellationToken ct = default)
+    {
+        if (workItemIdsInOrder.Count == 0) return;
+
+        var entries = await _repository.GetEntriesAsync(projectId, workItemIdsInOrder, ct);
+
+        if (entries.Count == 0) return;
+
+        var byWorkItem = entries.ToDictionary(entry => entry.WorkItemId);
+
+        /*
+         * Measured once, before anything moves.
+         *
+         * The items being ranked are themselves in the backlog and usually hold the current
+         * maximum — they were appended moments ago by `EnsureEntryAsync`. Reading the max inside
+         * the loop would chase their own new ranks upward.
+         */
+        var rank = await _repository.GetMaxRankAsync(projectId, ct);
+
+        foreach (var workItemId in workItemIdsInOrder)
+        {
+            if (!byWorkItem.TryGetValue(workItemId, out var entry)) continue;
+
+            entry.Rank = Ranking.Between(rank, null);
+            rank = entry.Rank;
+        }
+
+        await _repository.SaveChangesAsync(ct);
     }
 
     public async Task EnsureEntryAsync(

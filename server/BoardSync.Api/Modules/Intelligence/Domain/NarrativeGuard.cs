@@ -71,7 +71,15 @@ public static partial class NarrativeGuard
 
         foreach (var sentence in Sentences(narrative))
         {
-            foreach (Match match in Numbers().Matches(sentence))
+            /*
+             * Identifiers are not quantities. "PAY-11 shipped" contains no claim about eleven of
+             * anything, and reading it as one would flag every correctly-cited work item as an
+             * invented figure. References are checked separately, and by name, in
+             * `UnsupportedReferences`.
+             */
+            var quantities = References().Replace(sentence, " ");
+
+            foreach (Match match in Numbers().Matches(quantities))
             {
                 if (!double.TryParse(
                         match.Value.Replace(",", ""),
@@ -92,6 +100,56 @@ public static partial class NarrativeGuard
     }
 
     /// <summary>Whether a narrative states nothing the report does not.</summary>
+    /// <summary>
+    /// Work item references the prose named that were never handed to it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The narrator can name work now, which is what makes its reports readable and also what gives
+    /// it a second way to be wrong. A fabricated <c>PAY-91</c> is more damaging than a fabricated
+    /// number: a reader can check a figure against the table beside it, and has no way at all to
+    /// know that an item does not exist.
+    /// </para>
+    /// <para>
+    /// Matched case-insensitively on the whole reference, and only against what the model was given.
+    /// A reference that is real but belongs to another sprint is still unsupported here — this
+    /// report is about this sprint, and naming work from elsewhere would be as misleading as
+    /// inventing it.
+    /// </para>
+    /// </remarks>
+    public static IReadOnlyList<Unsupported> UnsupportedReferences(
+        string narrative,
+        IReadOnlyCollection<string> known)
+    {
+        if (string.IsNullOrWhiteSpace(narrative)) return [];
+
+        var allowed = new HashSet<string>(known, StringComparer.OrdinalIgnoreCase);
+
+        var findings = new List<Unsupported>();
+
+        foreach (var sentence in Sentences(narrative))
+        {
+            foreach (Match match in References().Matches(sentence))
+            {
+                if (allowed.Contains(match.Value)) continue;
+
+                findings.Add(new Unsupported(sentence.Trim(), match.Value));
+            }
+        }
+
+        return findings;
+    }
+
+    /// <summary>
+    /// A work item reference: a project key, a dash, a number.
+    /// </summary>
+    /// <remarks>
+    /// The same shape <c>WorkItemReference</c> parses out of branch names — two to ten leading
+    /// letters so it does not match a date or a version number.
+    /// </remarks>
+    [GeneratedRegex(@"\b[A-Za-z][A-Za-z0-9]{1,9}-\d+\b")]
+    private static partial Regex References();
+
     public static bool IsGrounded(
         string narrative,
         IReadOnlyCollection<double> supported) =>

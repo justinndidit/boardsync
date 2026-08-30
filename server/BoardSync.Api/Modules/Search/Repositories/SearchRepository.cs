@@ -1,3 +1,4 @@
+using BoardSync.Api.Modules.Search.Domain;
 using BoardSync.Api.Data;
 using BoardSync.Api.Modules.OrgProject.Domain.DTOs;
 using BoardSync.Api.Modules.Rbac.Models;
@@ -77,23 +78,6 @@ public class SearchRepository : ISearchRepository
             .ToListAsync(ct);
     }
 
-    /// <summary>
-    /// The numeric half of anything that looks like a work item reference.
-    /// </summary>
-    /// <remarks>
-    /// Accepts <c>BS-142</c>, <c>bs 142</c> and a bare <c>142</c>. Returns null for anything else,
-    /// which is the common case — most searches are words.
-    /// </remarks>
-    private static int? ParseReferenceNumber(string term)
-    {
-        var match = System.Text.RegularExpressions.Regex.Match(
-            term.Trim(), @"^(?:[A-Za-z][A-Za-z0-9]*[\s-]*)?(\d{1,9})$");
-
-        return match.Success && int.TryParse(match.Groups[1].Value, out var number)
-            ? number
-            : null;
-    }
-
     public async Task<IReadOnlyList<SearchHit>> SearchWorkItemsAsync(
         ProjectVisibility visibility,
         string term,
@@ -129,7 +113,7 @@ public class SearchRepository : ISearchRepository
 
         // The number out of a reference, so "BS-142" and "142" both find it. The key is compared
         // separately, because it belongs to the project rather than the item.
-        var referenceNumber = ParseReferenceNumber(term);
+        var referenceNumber = SearchTerm.ReferenceNumber(term);
 
         return await _context.WorkItems
             .Where(w => visibleProjectIds.Contains(w.ProjectId) && w.IsActive)

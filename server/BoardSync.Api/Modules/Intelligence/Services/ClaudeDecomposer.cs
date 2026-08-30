@@ -110,7 +110,7 @@ public sealed class ClaudeDecomposer : IDecomposer
             if (parsed?.Roots is null) return null;
 
             return new DecompositionOutcome(
-                new Decomposition(parsed.Roots, parsed.Notes ?? []),
+                new Decomposition(parsed.Roots, parsed.Notes ?? [], parsed.Phases ?? []),
                 (int)((response.Usage?.InputTokens ?? 0) + (response.Usage?.OutputTokens ?? 0)));
         }
         catch (Exception ex)
@@ -153,8 +153,24 @@ public sealed class ClaudeDecomposer : IDecomposer
                         ["type"] = "array",
                         ["items"] = new Dictionary<string, object> { ["type"] = "string" },
                     },
+                    ["phases"] = new Dictionary<string, object>
+                    {
+                        ["type"] = "array",
+                        ["items"] = new Dictionary<string, object>
+                        {
+                            ["type"] = "object",
+                            ["properties"] = new Dictionary<string, object>
+                            {
+                                ["name"] = new Dictionary<string, object> { ["type"] = "string" },
+                                ["rationale"] = new Dictionary<string, object> { ["type"] = "string" },
+                            },
+                            ["required"] = new[] { "name" },
+                            ["additionalProperties"] = false,
+                        },
+                    },
                 }),
-                ["required"] = JsonSerializer.SerializeToElement(new[] { "roots", "notes" }),
+                ["required"] = JsonSerializer.SerializeToElement(
+                    new[] { "roots", "notes", "phases" }),
                 ["additionalProperties"] = JsonSerializer.SerializeToElement(false),
             },
         };
@@ -178,6 +194,7 @@ public sealed class ClaudeDecomposer : IDecomposer
                 ["enum"] = Enum.GetNames<WorkItems.Models.WorkItemPriority>(),
             },
             ["storyPoints"] = new Dictionary<string, object> { ["type"] = "integer" },
+            ["phase"] = new Dictionary<string, object> { ["type"] = "integer" },
         };
 
         if (remainingDepth > 1)
@@ -200,5 +217,6 @@ public sealed class ClaudeDecomposer : IDecomposer
 
     private sealed record DecompositionShape(
         List<ProposedNode>? Roots,
-        List<string>? Notes);
+        List<string>? Notes,
+        List<ProposedPhase>? Phases);
 }

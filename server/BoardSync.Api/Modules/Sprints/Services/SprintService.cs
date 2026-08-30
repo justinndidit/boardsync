@@ -162,8 +162,18 @@ public class SprintService : ISprintService
     {
        var sprint = await GetOrThrowAsync(sprintId, ct);
 
-        if (sprint.Status != SprintStatus.Planning)
-           throw new BusinessRuleException("Only Planning sprints can be updated.");
+        /*
+         * A running sprint can be extended or cut short — that happens, and refusing it meant
+         * closing the sprint and making another, which loses its number and its record.
+         *
+         * Completed stays locked. Its dates are what every figure was measured against — completed
+         * points are counted at the end date — so moving them would rewrite past velocity with no
+         * event to explain the change.
+         */
+        if (sprint.Status == SprintStatus.Completed)
+            throw new BusinessRuleException(
+                "A completed sprint cannot be edited. Its dates are what its figures were measured "
+                + "against, and moving them would change what it reported having delivered.");
 
         // Editing, so the start is allowed to be in the past — it usually is.
         ValidateDates(request.StartDate, request.EndDate, mustBeFuture: false);

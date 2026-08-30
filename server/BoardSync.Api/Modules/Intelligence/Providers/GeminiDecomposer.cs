@@ -68,7 +68,7 @@ public class GeminiDecomposer : IDecomposer
             if (parsed?.Roots is null) return null;
 
             return new DecompositionOutcome(
-                new Decomposition(parsed.Roots, parsed.Notes ?? []),
+                new Decomposition(parsed.Roots, parsed.Notes ?? [], parsed.Phases ?? []),
                 produced.TokensSpent);
         }
         catch (Exception ex)
@@ -96,9 +96,24 @@ public class GeminiDecomposer : IDecomposer
                 ["type"] = "ARRAY",
                 ["items"] = new Dictionary<string, object> { ["type"] = "STRING" },
             },
+            ["phases"] = new Dictionary<string, object>
+            {
+                ["type"] = "ARRAY",
+                ["items"] = new Dictionary<string, object>
+                {
+                    ["type"] = "OBJECT",
+                    ["properties"] = new Dictionary<string, object>
+                    {
+                        ["name"] = new Dictionary<string, object> { ["type"] = "STRING" },
+                        ["rationale"] = new Dictionary<string, object> { ["type"] = "STRING" },
+                    },
+                    ["required"] = new[] { "name" },
+                    ["propertyOrdering"] = new[] { "name", "rationale" },
+                },
+            },
         },
-        required = new[] { "roots", "notes" },
-        propertyOrdering = new[] { "roots", "notes" },
+        required = new[] { "roots", "notes", "phases" },
+        propertyOrdering = new[] { "roots", "notes", "phases" },
     };
 
     /// <summary>One level of the tree, with <paramref name="remainingDepth"/> levels beneath it.</summary>
@@ -123,11 +138,12 @@ public class GeminiDecomposer : IDecomposer
                 ["enum"] = Enum.GetNames<WorkItemPriority>(),
             },
             ["storyPoints"] = new Dictionary<string, object> { ["type"] = "INTEGER" },
+            ["phase"] = new Dictionary<string, object> { ["type"] = "INTEGER" },
         };
 
         var order = new List<string>
         {
-            "title", "description", "type", "priority", "storyPoints",
+            "title", "description", "type", "priority", "storyPoints", "phase",
         };
 
         if (remainingDepth > 1)
@@ -158,5 +174,6 @@ public class GeminiDecomposer : IDecomposer
 
     private sealed record DecompositionShape(
         List<ProposedNode>? Roots,
-        List<string>? Notes);
+        List<string>? Notes,
+        List<ProposedPhase>? Phases);
 }

@@ -28,17 +28,20 @@ public interface INarrativeService
 public sealed class NarrativeService : INarrativeService
 {
     private readonly IReportingService _reporting;
+    private readonly ISprintWorkLookup _work;
     private readonly INarrator _narrator;
     private readonly ITokenBudget _budget;
     private readonly ILogger<NarrativeService> _logger;
 
     public NarrativeService(
         IReportingService reporting,
+        ISprintWorkLookup work,
         INarrator narrator,
         ITokenBudget budget,
         ILogger<NarrativeService> logger)
     {
         _reporting = reporting;
+        _work = work;
         _narrator = narrator;
         _budget = budget;
         _logger = logger;
@@ -65,7 +68,10 @@ public sealed class NarrativeService : INarrativeService
 
         var report = await _reporting.GetSprintReportAsync(sprintId, ct);
 
-        var outcome = await _narrator.NarrateAsync(report, ct);
+        var work = await _work.ForSprintAsync(sprintId, ct);
+
+        var outcome = await _narrator.NarrateAsync(
+            new NarrativeInput(report, work.Delivered, work.Unfinished), ct);
 
         if (outcome is not { } written)
         {
@@ -80,14 +86,27 @@ public sealed class NarrativeService : INarrativeService
 
         var supported = FiguresIn(report);
 
-        var prose = new[] { written.Headline, written.Summary }
+        // Every section, not just the three the report used to have. A figure invented in
+        // `shipped` is exactly as wrong as one invented in the summary.
+        var prose = new[] { written.Headline, written.Summary, written.Outcome }
             .Concat(written.Observations)
+            .Concat(written.Shipped ?? [])
+            .Concat(written.DidNotLand ?? [])
+            .Concat(written.WhereWorkIsSitting ?? [])
             .Where(s => !string.IsNullOrWhiteSpace(s))
             .ToList();
 
+        /*
+         * Two checks now, because the narrator can name work as well as count it.
+         *
+         * A fabricated reference is the more damaging of the two: a reader can check a number
+         * against the table beside it and has no way at all to know that PAY-91 does not exist.
+         */
         var unsupported = prose
             .SelectMany(sentence =>
                 NarrativeGuard.UnsupportedClaims(sentence, supported))
+            .Concat(prose.SelectMany(sentence =>
+                NarrativeGuard.UnsupportedReferences(sentence, work.References)))
             .ToList();
 
         if (unsupported.Count > 0)
@@ -98,7 +117,8 @@ public sealed class NarrativeService : INarrativeService
              * to tell that something was removed. Returning the reason keeps the failure visible.
              */
             _logger.LogWarning(
-                "Narrative for sprint {SprintId} cited {Count} figures not in its report: {Figures}",
+                "Narrative for sprint {SprintId} cited {Count} figure(s) or work item(s) it was "
+                + "not given: {Figures}",
                 sprintId,
                 unsupported.Count,
                 string.Join(", ", unsupported.Select(u => u.Figure)));
@@ -116,7 +136,11 @@ public sealed class NarrativeService : INarrativeService
             written.Summary,
             written.Observations,
             Grounded: true,
-            UnsupportedClaims: []));
+            UnsupportedClaims: [],
+            Outcome: written.Outcome,
+            Shipped: written.Shipped ?? [],
+            DidNotLand: written.DidNotLand ?? [],
+            WhereWorkIsSitting: written.WhereWorkIsSitting ?? []));
     }
 
     /// <summary>

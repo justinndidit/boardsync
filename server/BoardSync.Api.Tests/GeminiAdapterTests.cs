@@ -2,6 +2,7 @@ using System.Text.Json;
 
 using BoardSync.Api.Modules.Intelligence.Domain;
 using BoardSync.Api.Modules.Intelligence.Providers;
+using BoardSync.Api.Modules.Intelligence.Services;
 using BoardSync.Api.Modules.WorkItems.Domain;
 using BoardSync.Api.Modules.WorkItems.Models;
 
@@ -93,6 +94,93 @@ public class GeminiAdapterTests
         Assert.Contains(
             "Every number you write MUST appear in it",
             IntelligencePrompts.Narrator);
+    }
+
+    /// <summary>
+    /// Both narrators ask for every section the report renders.
+    /// </summary>
+    /// <remarks>
+    /// A field missing from one provider's schema is not an error anywhere — that provider returns
+    /// the section empty, the panel omits it, and the report is quietly shorter on Gemini than on
+    /// Claude with nothing to say so.
+    /// </remarks>
+    [Fact]
+    public void BothNarratorSchemasCarryEverySection()
+    {
+        var gemini = JsonSerializer.Serialize(
+            typeof(GeminiNarrator)
+                .GetField("Schema", System.Reflection.BindingFlags.NonPublic
+                    | System.Reflection.BindingFlags.Static)!
+                .GetValue(null),
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+        var claude = SerializeSchema(typeof(ClaudeNarrator));
+
+        foreach (var section in new[]
+                 {
+                     "headline", "summary", "observations",
+                     "outcome", "shipped", "didNotLand", "whereWorkIsSitting",
+                 })
+        {
+            Assert.Contains(section, gemini, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains(section, claude, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    /// <summary>
+    /// The narrator is told it may only name work it was given.
+    /// </summary>
+    /// <remarks>
+    /// The guard catches an invented reference and withholds the whole report. That is the right
+    /// failure, and a prompt that never asked would make it the common one.
+    /// </remarks>
+    [Fact]
+    public void TheNarratorIsToldNotToNameWorkItWasNotGiven()
+    {
+        Assert.Contains(
+            "Only name items that appear in the lists you were given",
+            IntelligencePrompts.Narrator);
+    }
+
+    /// <summary>
+    /// Both decomposers ask for the delivery plan, not just the tree.
+    /// </summary>
+    /// <remarks>
+    /// A schema missing <c>phases</c> fails silently: the guard repairs the absence into a single
+    /// phase, the acceptance offers one sprint holding everything, and the forecast still divides —
+    /// so the plan is simply gone on that provider with nothing to say so.
+    /// </remarks>
+    [Fact]
+    public void BothDecomposerSchemasAskForPhases()
+    {
+        foreach (var json in new[]
+                 {
+                     SerializeSchema(typeof(GeminiDecomposer)),
+                     SerializeSchema(typeof(ClaudeDecomposer)),
+                 })
+        {
+            Assert.Contains("phases", json, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("rationale", json, StringComparison.OrdinalIgnoreCase);
+
+            // And the per-node index, or nothing says which phase an item is in.
+            Assert.Contains("phase\"", json, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    /// <summary>
+    /// The decomposer is told not to state a duration.
+    /// </summary>
+    /// <remarks>
+    /// The forecast is arithmetic over measured velocity. A duration from the model would be a
+    /// number nobody can check, in front of people who plan against it — the same class of failure
+    /// <c>NarrativeGuard</c> withholds whole narratives for.
+    /// </remarks>
+    [Fact]
+    public void TheDecomposerIsToldNotToEstimateDuration()
+    {
+        Assert.Contains(
+            "Do not say how long any of this will take",
+            IntelligencePrompts.Decomposer);
     }
 
     [Fact]

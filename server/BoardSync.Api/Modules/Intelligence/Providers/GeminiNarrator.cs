@@ -1,3 +1,4 @@
+using BoardSync.Api.Modules.Intelligence.DTOs;
 using System.Text.Json;
 
 using BoardSync.Api.Modules.Intelligence.Domain;
@@ -43,7 +44,7 @@ public class GeminiNarrator : INarrator
     public bool IsConfigured => _client is not null;
 
     public async Task<NarrationOutcome?> NarrateAsync(
-        SprintReport report,
+        NarrativeInput input,
         CancellationToken ct = default)
     {
         if (_client is null) return null;
@@ -52,7 +53,8 @@ public class GeminiNarrator : INarrator
         {
             var answer = await _client.GenerateAsync(
                 IntelligencePrompts.Narrator,
-                $"Sprint report:\n{JsonSerializer.Serialize(report)}",
+                "Sprint:\n" + JsonSerializer.Serialize(
+                    input, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
                 Schema,
                 MaxTokens,
                 ct);
@@ -69,14 +71,18 @@ public class GeminiNarrator : INarrator
                 parsed.Headline ?? "",
                 parsed.Summary ?? "",
                 parsed.Observations ?? [],
-                written.TokensSpent);
+                written.TokensSpent,
+                parsed.Outcome ?? "",
+                parsed.Shipped ?? [],
+                parsed.DidNotLand ?? [],
+                parsed.WhereWorkIsSitting ?? []);
         }
         catch (Exception ex)
         {
             // "No narrative", not a failed request. The report is already computed and is the thing
             // the caller asked for; losing the prose is a degradation.
             _logger.LogWarning(ex,
-                "Narration failed for sprint {SprintId}", report.Summary.SprintId);
+                "Narration failed for sprint {SprintId}", input.Report.Summary.SprintId);
 
             return null;
         }
@@ -95,19 +101,33 @@ public class GeminiNarrator : INarrator
         properties = new
         {
             headline = new { type = "STRING" },
+            outcome = new { type = "STRING" },
             summary = new { type = "STRING" },
-            observations = new
-            {
-                type = "ARRAY",
-                items = new { type = "STRING" },
-            },
+            shipped = new { type = "ARRAY", items = new { type = "STRING" } },
+            didNotLand = new { type = "ARRAY", items = new { type = "STRING" } },
+            whereWorkIsSitting = new { type = "ARRAY", items = new { type = "STRING" } },
+            observations = new { type = "ARRAY", items = new { type = "STRING" } },
         },
-        required = new[] { "headline", "summary", "observations" },
-        propertyOrdering = new[] { "headline", "summary", "observations" },
+        required = new[]
+        {
+            "headline", "outcome", "summary",
+            "shipped", "didNotLand", "whereWorkIsSitting", "observations",
+        },
+
+        // The order a reader wants them: what happened, then what shipped, then what did not.
+        propertyOrdering = new[]
+        {
+            "headline", "outcome", "summary",
+            "shipped", "didNotLand", "whereWorkIsSitting", "observations",
+        },
     };
 
     private sealed record NarrativeShape(
         string? Headline,
         string? Summary,
-        List<string>? Observations);
+        string? Outcome,
+        List<string>? Observations,
+        List<string>? Shipped,
+        List<string>? DidNotLand,
+        List<string>? WhereWorkIsSitting);
 }

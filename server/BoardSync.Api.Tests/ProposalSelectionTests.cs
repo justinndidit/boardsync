@@ -149,4 +149,170 @@ public class ProposalSelectionTests
         // Refunds still hangs off Billing, not off the top level.
         Assert.Equal("n1", selected.Single(s => s.Node.Id == "n3").ParentId);
     }
+
+    /// <summary>
+    /// A sprint gets the leaves, not the whole chain.
+    /// </summary>
+    /// <remarks>
+    /// The epic, the feature and the story all carry the task's work. Putting them in the sprint
+    /// alongside it would commit the team to that work four times, and the burndown, the velocity
+    /// and the completion rate would all be wrong by the difference for as long as the record
+    /// stands.
+    /// </remarks>
+    [Fact]
+    public void OnlyTheLeavesOfAnAcceptedTreeAreScheduled()
+    {
+        var leaves = ProposalSelection.Leaves(
+            ProposalSelection.Resolve(Tree(), []));
+
+        Assert.Equal("Render the PDF", Assert.Single(leaves).Title);
+    }
+
+    /// <summary>
+    /// A partial acceptance is scheduled by what was taken, not by what the draft contained.
+    /// </summary>
+    /// <remarks>
+    /// Somebody who accepts the epic and none of its stories has chosen to schedule the epic — it
+    /// is the only thing there is to schedule, and leaving the sprint empty would be a worse answer
+    /// than an imperfectly-sized one.
+    /// </remarks>
+    [Fact]
+    public void ANodeWithNoAcceptedChildrenIsItselfALeaf()
+    {
+        var leaves = ProposalSelection.Leaves(
+            ProposalSelection.Resolve(Tree(), ["n1"]));
+
+        Assert.Equal("Billing", Assert.Single(leaves).Title);
+    }
+
+    /// <summary>Siblings are all leaves — the rule is about descent, not about count.</summary>
+    [Fact]
+    public void SiblingsAreAllScheduled()
+    {
+        var roots = DecompositionGuard.Check(new Decomposition(
+        [
+            new ProposedNode
+            {
+                Title = "Billing",
+                Type = WorkItemType.Epic,
+                Children =
+                [
+                    new ProposedNode { Title = "Invoices", Type = WorkItemType.Feature },
+                    new ProposedNode { Title = "Receipts", Type = WorkItemType.Feature },
+                ],
+            },
+        ], [])).Draft!.Roots;
+
+        var leaves = ProposalSelection.Leaves(ProposalSelection.Resolve(roots, []));
+
+        Assert.Equal(
+            ["Invoices", "Receipts"],
+            leaves.Select(node => node.Title).Order());
+    }
+
+    /// <summary>A tree whose leaves carry phases, through the guard so the ids are real.</summary>
+    private static IReadOnlyList<ProposedNode> Phased()
+    {
+        var draft = new Decomposition(
+        [
+            new ProposedNode
+            {
+                Title = "Billing",
+                Type = WorkItemType.Epic,
+                Children =
+                [
+                    new ProposedNode { Title = "Schema", Type = WorkItemType.Feature, Phase = 1 },
+                    new ProposedNode { Title = "Endpoints", Type = WorkItemType.Feature, Phase = 2 },
+                    new ProposedNode { Title = "Receipts", Type = WorkItemType.Feature, Phase = 2 },
+                    new ProposedNode { Title = "Hardening", Type = WorkItemType.Feature, Phase = 3 },
+                ],
+            },
+        ],
+        [],
+        [
+            new ProposedPhase { Name = "Foundations" },
+            new ProposedPhase { Name = "The API" },
+            new ProposedPhase { Name = "Polish" },
+        ]);
+
+        return DecompositionGuard.Check(draft).Draft!.Roots;
+    }
+
+    /// <summary>
+    /// Delivery order is phase first, then the order the model wrote the siblings in.
+    /// </summary>
+    /// <remarks>
+    /// This is what the backlog is ranked by, so the whole value of phasing rides on it being the
+    /// model's ordering rather than the tree's.
+    /// </remarks>
+    [Fact]
+    public void LeavesComeBackInDeliveryOrder()
+    {
+        var ordered = ProposalSelection.LeavesInDeliveryOrder(
+            ProposalSelection.Resolve(Phased(), []));
+
+        Assert.Equal(
+            ["Schema", "Endpoints", "Receipts", "Hardening"],
+            ordered.Select(node => node.Title));
+    }
+
+    /// <summary>
+    /// A first sprint holds one phase, not the whole plan.
+    /// </summary>
+    /// <remarks>
+    /// The correction this was built for: everything in one sprint destroys exactly the information
+    /// a decomposition exists to give — how the work spreads out over time.
+    /// </remarks>
+    [Fact]
+    public void OnlyTheFirstPhaseGoesIntoTheFirstSprint()
+    {
+        var first = ProposalSelection.FirstPhase(
+            ProposalSelection.Resolve(Phased(), []));
+
+        Assert.Equal(["Schema"], first.Select(node => node.Title));
+    }
+
+    /// <summary>
+    /// A phase with several items keeps all of them.
+    /// </summary>
+    /// <remarks>
+    /// Guards the `TakeWhile`: stopping at the first phase boundary must not mean stopping at the
+    /// first item.
+    /// </remarks>
+    [Fact]
+    public void AFirstPhaseWithSeveralItemsKeepsThemAll()
+    {
+        // Phase 1 dropped, so phase 2 — which holds two items — becomes the earliest accepted.
+        var roots = Phased();
+
+        var first = ProposalSelection.FirstPhase(
+            ProposalSelection.Resolve(roots, ["n1", "n3", "n4", "n5"]));
+
+        Assert.Equal(["Endpoints", "Receipts"], first.Select(node => node.Title));
+    }
+
+    /// <summary>
+    /// A reviewer who drops the first phase gets the earliest work they kept, not an empty sprint.
+    /// </summary>
+    [Fact]
+    public void TheFirstAcceptedPhaseIsUsedNotPhaseOne()
+    {
+        var first = ProposalSelection.FirstPhase(
+            ProposalSelection.Resolve(Phased(), ["n1", "n5"]));
+
+        Assert.Equal(["Hardening"], first.Select(node => node.Title));
+    }
+
+    /// <summary>An unphased draft is one phase, which is what a small document deserves.</summary>
+    [Fact]
+    public void ADraftWithNoPhasesIsASinglePhase()
+    {
+        var checkedDraft = DecompositionGuard.Check(
+            new Decomposition(Tree(), [], null));
+
+        Assert.Single(checkedDraft.Draft!.Phases!);
+
+        Assert.Single(ProposalSelection.FirstPhase(
+            ProposalSelection.Resolve(checkedDraft.Draft.Roots, [])));
+    }
 }

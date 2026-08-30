@@ -379,6 +379,8 @@ builder.Services.AddSingleton<BoardSync.Api.Modules.Intelligence.Services.IToken
     BoardSync.Api.Modules.Intelligence.Services.InMemoryTokenBudget>();
 builder.Services.AddScoped<BoardSync.Api.Modules.Intelligence.Services.ISprintOrganizationLookup,
     BoardSync.Api.Modules.Intelligence.Services.SprintOrganizationLookup>();
+builder.Services.AddScoped<BoardSync.Api.Modules.Intelligence.Services.ISprintWorkLookup,
+    BoardSync.Api.Modules.Intelligence.Services.SprintWorkLookup>();
 builder.Services.AddScoped<BoardSync.Api.Modules.Intelligence.Services.INarrativeService,
     BoardSync.Api.Modules.Intelligence.Services.NarrativeService>();
 

@@ -30,7 +30,27 @@ public static class IntelligencePrompts
     /// is the request and the guard is the guarantee.
     /// </remarks>
     public const string Narrator = """
-        You write short status notes about software sprints for the team that ran them.
+        You are writing the sprint section of a status report that goes to management. It must read
+        as an account of what happened, not as a list of numbers.
+
+        You are given the sprint's figures and the work items themselves. Name the work: a reader
+        wants to know what the team built, not only how many points it was.
+
+        Only name items that appear in the lists you were given, by their reference and title. Do
+        not invent, merge, rename, or infer work items. If the lists are empty, say so plainly.
+
+        outcome: one or two sentences on what the sprint set out to do and whether it did it. Use the
+        goal if there is one.
+
+        shipped: one line per delivered item worth reporting — reference, then what it does in
+        plain words. Group trivia rather than listing it. Empty if nothing landed.
+
+        didNotLand: one line per item that did not finish, saying where it stopped. Do not speculate
+        about why; you were not told.
+
+        whereWorkIsSitting: work finished and waiting to be tested is a QA queue, not slow
+        development; items never started are committed work nobody picked up. These have different
+        owners, so say which it is. Empty when neither applies.
 
         You are given a sprint report as JSON. Every number you write MUST appear in it.
         Do not calculate, estimate, extrapolate, or compare against anything not present
@@ -38,7 +58,8 @@ public static class IntelligencePrompts
         If something interesting would require a figure you were not given, leave it out.
 
         Prefer saying less. A sprint where nothing stands out should get an empty
-        observations list rather than filler.
+        observations list rather than filler, and a section with nothing in it should be empty
+        rather than padded.
 
         Two things are worth noticing when the figures show them, because they have
         different owners: work finished and waiting to be tested
@@ -87,5 +108,25 @@ public static class IntelligencePrompts
 
         Priority reflects what the document says about urgency, not your own view of what matters.
         Use Medium when it says nothing.
+
+        Then order the work into delivery phases, and put every leaf item — every Task, Bug, and any
+        User Story with no Tasks under it — into one of them with `phase`, counting from 1.
+
+        Phase by what has to be true before something else can start. Schema before the endpoints
+        that read it; authentication before the screens behind it; a thing before the thing that
+        reports on it. Where nothing forces an order, put the work that makes the product usable
+        first, and hardening, polish and edge cases last. Give each phase a short name and say in
+        `rationale` what makes it a phase — "the API cannot be built until this exists" is useful,
+        "the first phase of work" is not.
+
+        Between two and six phases. A single phase is fine for a document small enough to build in
+        one go, and if you find yourself writing more than six you are listing items, not phasing
+        them.
+
+        **Do not say how long any of this will take.** Not in a phase name, not in a rationale, not
+        anywhere. You do not know this team's throughput; it is measured from the sprints they have
+        already finished, and the schedule is worked out from that measurement and your ordering. A
+        duration from you would be a number nobody can check, presented to people who would plan
+        against it.
         """;
 }

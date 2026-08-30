@@ -1,14 +1,19 @@
 # Everything still outstanding
 
 **Date:** 2026-08-30 · **§1 closed the same day** — see below.
-**Excludes** the Anthropic API key and the first real model call — known, and yours to do.
+**Excludes** the first real model call — known, and yours to do. No longer excludes the Anthropic
+key: a Gemini adapter exists and `Intelligence:Provider` chooses between them.
 **Method:** verified against the code, the database and both test suites rather than recalled.
 Supersedes the inventory in `pitch-checklist-2026-08-28.md`, which has stale entries.
 
-**Where things stand:** 965 backend tests, 113 frontend, both builds green, 46 lint errors and 35
-build warnings (both unchanged baselines). Git-driven transitions, realtime boards, the sprint
-lifecycle, backlog planning, work item hierarchy and the cumulative flow diagram all work and are
-covered.
+**Where things stand:** 996 backend tests (856 of them run without Docker; the rest need
+Testcontainers), 120 frontend, both builds green, 28 build warnings (the baseline). Git-driven
+transitions, realtime boards, the sprint lifecycle, backlog planning, work item hierarchy and the
+cumulative flow diagram all work and are covered.
+
+**Since first written:** a Gemini adapter and provider choice, `.env` loaded at startup, the sprint
+report rewritten as something submittable, and decomposition acceptance able to create the sprint.
+See §5.
 
 ---
 
@@ -145,6 +150,53 @@ Each has a recorded reason in `build_context.md` §10. These are scope, not inco
   version's API. Safe because it runs in a background job, but a very large PRD could still hit the
   client timeout.
 - ~~No proposal list~~ — **done**, see §1.2.
+- ~~The report read as commentary, not a report~~ — **done.** The narrator is now handed the
+  sprint's delivered and unfinished items (capped at 40 each) and asked for an outcome, what
+  shipped, what did not land, and where the unfinished work is sitting — QA queue separated from
+  never-started, because those two have different owners. The panel renders the sections and has a
+  **Copy report** button, since the point of a draft is that it leaves the page.
+- ~~The grounding check only knew about numbers~~ — **done.** It now also checks every work item
+  reference against what the model was given. An invented `PAY-91` is worse than an invented
+  figure: a reader can check a number against the table beside it and cannot check an item they
+  have never seen. Identifiers are masked before the number check, or `PAY-11` would read as a
+  claim about eleven of something.
+- ~~Acceptance created work and scheduled nothing~~ — **done.** The review pane has an optional
+  "plan this into a new sprint" block with editable prefilled dates; the sprint is created in
+  **Planning**, never started — a plan a model drafted should not put itself into a team's current
+  work, which is the same reason acceptance exists. Only the *leaves* of the accepted tree go in:
+  an epic and its stories in one sprint would commit the team to the same work twice and every
+  figure downstream would be wrong by the difference.
+- ~~Acceptance failed outright with "Invalid operation"~~ — **fixed, and it had never worked.**
+  `AcceptAsync` opened its own transaction while the connection is configured with
+  `EnableRetryOnFailure`, and `NpgsqlRetryingExecutionStrategy` refuses to retry a user-initiated
+  transaction — it throws before a row is written. Every other transaction in the codebase already
+  wrapped itself in `CreateExecutionStrategy`; this one did not. It was invisible because no unit
+  test has a connection and the middleware reported it as a flat 400, which reads like a rejected
+  request rather than code that cannot run. Now covered two ways: `TransactionStrategyTests` fails
+  on any unwrapped `BeginTransactionAsync` in the API, and `ProposalAcceptanceTests` accepts a
+  planted proposal against the real database (all three fail without the fix).
+- ~~Acceptance jumbled the whole plan into one sprint~~ — **replaced.** Decomposition exists to
+  answer "how long until this is done", and collapsing a PRD into a single sprint destroyed exactly
+  that. The model now orders the work into **delivery phases** — what has to be true before
+  something else can start — and acceptance schedules only the first phase, ranking the rest in the
+  backlog in the suggested order. `DeliveryPlan` shows the phases with the model's rationale.
+- **The model sequences; arithmetic forecasts.** The prompt forbids stating a duration, and
+  `GeminiAdapterTests` asserts that clause is present. The projection is
+  `DeliveryForecast.Project(points, AverageCompletedPoints, …)` — measured velocity from closed
+  sprints — and it returns **null rather than a default** when a team has no history, because a
+  date built on a default is indistinguishable from a measured one to the person reading it. The
+  forecast lives in `utils/forecast.ts` — client-side, because the reviewer is its only consumer and
+  the figure has to move as boxes are ticked. **Sprint cadence is measured too**, as the median gap
+  between consecutive sprint end dates: cadence rather than sprint length, because a team running
+  two-week sprints a week apart delivers every three weeks. Where it cannot be measured the
+  projection says the cadence was assumed, since the date moves by a third between a two- and a
+  three-week team. The same figure prefills the sprint end date, which also used to assume 14 days.
+- ~~The destination was whatever project the route named~~ — **done.** `ProjectPicker` switches by
+  navigating, so `workitem:write` stays resolved from `projectId` in one place rather than being
+  re-checked against a body parameter.
+- **Still unverified: a real Gemini call.** Everything above is covered by unit tests against the
+  schemas and the guard, and none of that proves the model writes a good report. Needs the key and
+  a sprint with real history — yours to run.
 - **The remaining allowance is not visible to anybody.** `ITokenBudget.RemainingAsync` is called
   once, at `DecomposePrd.cs:97`, and only to write a log line — no endpoint returns it. So an
   organization can exhaust its daily budget with the only visible symptom being narratives that
@@ -153,7 +205,52 @@ Each has a recorded reason in `build_context.md` §10. These are scope, not inco
 
 ---
 
+### 5.1 Search read a random string as a work item number
+
+Found while chasing an intermittent `SearchTests.AnUnmatchedTermReturnsNothing` failure. Not a
+flaky test — a real defect that fired about six runs in a hundred.
+
+`ParseReferenceNumber` used `^(?:[A-Za-z][A-Za-z0-9]*[\s-]*)?(\d{1,9})$`. The prefix was
+unbounded and greedy, so:
+
+- **any long alphanumeric string ending in a digit parsed as a reference.** `zzz<guid>` ending in
+  `1` became "work item 1", and the search returned the first work item in every project the caller
+  could read. The test failed at exactly the rate a random GUID ends in `1`.
+- **the prefix ate the digits it was looking for.** `BS142` parsed as `2`, because `S14` went into
+  the prefix — a wrong answer that looks like a right one.
+
+The prefix is now bounded to ten characters (`ProjectKey.MaxLength`) and lazy, which fixes both.
+The parser moved to `Modules/Search/Domain/SearchTerm.cs` so it can be tested without a database;
+`SearchTermTests` pins the literal that produced the failure. Not merged with GitSync's
+`WorkItemReference` — that one requires a key and reads prose, and search has to accept a bare
+`142`.
+
+---
+
 ## 6. Frontend debt
+
+### 6.0 Errors — action failures now toast
+
+`react-toastify` was already mounted and used throughout the older features, but the newer screens
+had drifted to page-level `error` state. The rule now applied: **an action failure toasts; a load
+failure stays inline.** A failed action leaves the page intact and worth reading, so the message
+goes over the top of it near the click. A failed load leaves nothing, so it keeps its empty state
+and retry — a toast there fades and abandons the reader on a blank page.
+
+Two of these were real bugs rather than preference. On `WorkItemsPage` the error render is an early
+return, so a rejected title **blanked the whole board** and threw away the filters and selection,
+offering "try again" for a load that had already succeeded. On the decompose page the banner sat
+above a long proposal tree, so a failed accept put the reason off screen entirely — the button
+appeared to do nothing.
+
+`utils/notify.ts` holds the helpers (`notifyError`, `notifyApiError`, `notifySuccess`), and the
+container moved into `components/shared/Toasts.tsx` so it follows the theme; it was pinned to
+`light`, putting white cards over a dark board.
+
+Converted: intelligence (decompose, accept, reject), `SprintPage` (create, start, complete, edit),
+`WorkItemsPage` (create, update, state change, version conflict, bulk backlog add). Left inline
+by design: every load path — `useBoard`, `useBacklog`, `useGit`, `useProjectSprints`,
+`ProposalHistory`, and the sprint list.
 
 ### 6.1 Two `backlogService` exports
 
