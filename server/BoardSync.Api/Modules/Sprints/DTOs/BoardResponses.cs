@@ -12,6 +12,23 @@ namespace BoardSync.Api.Modules.Sprints.DTOs;
 /// </param>
 public record BoardCardResponse(
     Guid WorkItemId,
+
+    /// <summary>
+    /// Where this card sits in its sprint, as a fractional sort key.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Cards arrive ordered by it and a client should keep them that way. It is exposed so a live
+    /// update can place a card that has changed state into the right position in its new column,
+    /// rather than appending it to the bottom and disagreeing with the next read.
+    /// </para>
+    /// <para>
+    /// <b>Opaque.</b> Compare it; never compute with it. The values are fractional precisely so a
+    /// reorder can insert between two neighbours without rewriting every row.
+    /// </para>
+    /// </remarks>
+    decimal Rank,
+
     string Reference,
     string Title,
     WorkItemType Type,

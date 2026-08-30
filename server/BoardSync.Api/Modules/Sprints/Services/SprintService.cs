@@ -331,7 +331,7 @@ public class SprintService : ISprintService
         return new SprintWorkItemResponse(
             workItem.Id, $"{projectKey}-{workItem.Number}", workItem.Title, workItem.Type,
             workItem.State, workItem.Priority,
-            workItem.AssigneeId, workItem.StoryPoints, position);
+            workItem.AssigneeId, workItem.StoryPoints, position, entry.Rank);
     }
 
     public async Task RemoveWorkItemAsync(

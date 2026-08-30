@@ -76,6 +76,7 @@ public class BoardRepository : IBoardRepository
                 w => w.Id,
                 (sw, w) => new CardRow(
                     w.Id,
+                    sw.Rank,
                     w.Number,
                     w.Title,
                     w.Type,
@@ -92,14 +93,30 @@ public class BoardRepository : IBoardRepository
                         .ToList()))
             .ToListAsync(ct);
 
-        return [.. rows.Select(r => new BoardCardRow(
-            r.WorkItemId, $"{key}-{r.Number}", r.Title, r.Type, r.State,
+        /*
+         * Ordered, which it was not.
+         *
+         * There was no ordering here at all, so a column's cards came back in whatever order
+         * Postgres happened to produce — two people could see the same column differently, and a
+         * refetch could reshuffle it under one of them. `Rank` is the key the move and reorder
+         * endpoints maintain; `Position` is written only by the bulk reorder and is not the
+         * authority.
+         *
+         * Sorted after materialising rather than in SQL: the projection carries a correlated tag
+         * collection, and ordering across it does not translate. This is one sprint's cards, so the
+         * sort is over a list that is already in hand.
+         */
+        return [.. rows
+            .OrderBy(r => r.Rank)
+            .Select(r => new BoardCardRow(
+            r.WorkItemId, r.Rank, $"{key}-{r.Number}", r.Title, r.Type, r.State,
             r.Priority, r.AssigneeId, r.StoryPoints, r.Tags))];
     }
 
     /// <summary>The card as queried, before the project key is folded into a reference.</summary>
     private sealed record CardRow(
         Guid WorkItemId,
+        decimal Rank,
         int Number,
         string Title,
         WorkItems.Models.WorkItemType Type,

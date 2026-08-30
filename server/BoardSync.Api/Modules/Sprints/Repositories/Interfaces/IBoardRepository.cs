@@ -85,6 +85,10 @@ public readonly record struct BoardSprintContext(Guid TeamId, Guid? ActiveSprint
 /// </summary>
 public sealed record BoardCardRow(
     Guid WorkItemId,
+
+    /// <summary>The sprint sort key. Opaque — compare it, never compute with it.</summary>
+    decimal Rank,
+
     string Reference,
     string Title,
     WorkItems.Models.WorkItemType Type,
