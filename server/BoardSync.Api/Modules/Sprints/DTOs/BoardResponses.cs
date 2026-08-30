@@ -3,30 +3,23 @@ using BoardSync.Api.Modules.WorkItems.Models;
 namespace BoardSync.Api.Modules.Sprints.DTOs;
 
 /// <summary>A work item card displayed in a board column.</summary>
-/// <param name="Reference">
-/// The work item as people say it — <c>BS-142</c>.
+/// <remarks>
+/// <c>Reference</c> is the work item as people say it — <c>BS-142</c>. On the card because it is
+/// what a developer types into a branch name, and branch names are how work binds to git. A board
+/// that never shows it makes the whole integration something you have to go and look up somewhere
+/// else first.
 ///
-/// On the card because it is what a developer types into a branch name, and branch names are how
-/// work binds to git. A board that never shows it makes the whole integration something you have to
-/// go and look up somewhere else first.
-/// </param>
+/// <c>Rank</c> is where this card sits in its sprint, as a fractional sort key. Cards arrive
+/// ordered by it and a client should keep them that way — it is exposed so a live update can place
+/// a card that has changed state into the right position in its new column, rather than appending
+/// it and disagreeing with the next read.
+///
+/// <b>Opaque.</b> Compare it; never compute with it. The values are fractional precisely so a
+/// reorder can insert between two neighbours without rewriting every row.
+/// </remarks>
 public record BoardCardResponse(
     Guid WorkItemId,
 
-    /// <summary>
-    /// Where this card sits in its sprint, as a fractional sort key.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// Cards arrive ordered by it and a client should keep them that way. It is exposed so a live
-    /// update can place a card that has changed state into the right position in its new column,
-    /// rather than appending it to the bottom and disagreeing with the next read.
-    /// </para>
-    /// <para>
-    /// <b>Opaque.</b> Compare it; never compute with it. The values are fractional precisely so a
-    /// reorder can insert between two neighbours without rewriting every row.
-    /// </para>
-    /// </remarks>
     decimal Rank,
 
     string Reference,

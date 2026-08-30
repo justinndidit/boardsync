@@ -43,14 +43,35 @@ public class SprintService : ISprintService
         _logger         = logger;
     }
 
-    private static void ValidateDates(DateTime startDate, DateTime endDate)
-{
-    if (startDate.Date < DateTime.UtcNow.Date)
-        throw new BusinessRuleException("Sprint start date cannot be in the past.");
+    /// <summary>
+    /// Checks a sprint's window.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// End is compared as an <b>instant</b>: sprints carry a time of day now, so a team can end one
+    /// at five on a Friday rather than at midnight UTC, and comparing dates would have let a sprint
+    /// end before it started on the same day.
+    /// </para>
+    /// <para>
+    /// Start is compared against <b>the beginning of today</b>, not the current instant. "Not in the
+    /// past" has always meant "not a past day" here — a sprint that began at nine this morning is an
+    /// ordinary thing to record, and rejecting it would also make "start now" fail intermittently
+    /// as the request aged in flight.
+    /// </para>
+    /// <para>
+    /// <paramref name="mustBeFuture"/> is false when editing: an Active sprint's start is in the
+    /// past by definition, and requiring otherwise made a running sprint's end date uneditable.
+    /// </para>
+    /// </remarks>
+    private static void ValidateDates(
+        DateTime startDate, DateTime endDate, bool mustBeFuture = true)
+    {
+        if (mustBeFuture && startDate < DateTime.UtcNow.Date)
+            throw new BusinessRuleException("Sprint start cannot be before today.");
 
-    if (endDate <= startDate)
-        throw new BusinessRuleException("End date must be after start date.");
-}
+        if (endDate <= startDate)
+            throw new BusinessRuleException("A sprint must end after it starts.");
+    }
 
     // ── CRUD ──────────────────────────────────────────────────────────────────
 
@@ -73,8 +94,10 @@ public class SprintService : ISprintService
             TeamId    = teamId,
             Number    = await _repository.GetNextNumberAsync(teamId, ct),
             Goal      = request.Goal?.Trim(),
-            StartDate = DateTime.SpecifyKind(request.StartDate.Date, DateTimeKind.Utc),
-            EndDate   = DateTime.SpecifyKind(request.EndDate.Date, DateTimeKind.Utc),
+            // The whole instant, not the date. Truncating to midnight threw away the time a team
+            // chose and made every sprint end at 00:00 UTC, which is the middle of somebody's night.
+            StartDate = DateTime.SpecifyKind(request.StartDate.ToUniversalTime(), DateTimeKind.Utc),
+            EndDate   = DateTime.SpecifyKind(request.EndDate.ToUniversalTime(), DateTimeKind.Utc),
             Status    = SprintStatus.Planning,
             CreatedBy = createdBy
         };
@@ -142,14 +165,13 @@ public class SprintService : ISprintService
         if (sprint.Status != SprintStatus.Planning)
            throw new BusinessRuleException("Only Planning sprints can be updated.");
 
-         ValidateDates(request.StartDate, request.EndDate);
-        if (request.EndDate <= request.StartDate)
-            throw new BusinessRuleException("End date must be after start date.");
+        // Editing, so the start is allowed to be in the past — it usually is.
+        ValidateDates(request.StartDate, request.EndDate, mustBeFuture: false);
 
         var changes      = new List<(string Field, string? Old, string? New)>();
         var newGoal      = request.Goal?.Trim();
-        var newStartDate = DateTime.SpecifyKind(request.StartDate.Date, DateTimeKind.Utc);
-        var newEndDate   = DateTime.SpecifyKind(request.EndDate.Date, DateTimeKind.Utc);
+        var newStartDate = DateTime.SpecifyKind(request.StartDate.ToUniversalTime(), DateTimeKind.Utc);
+        var newEndDate   = DateTime.SpecifyKind(request.EndDate.ToUniversalTime(), DateTimeKind.Utc);
 
         if (sprint.Goal      != newGoal)
             changes.Add(("Goal",      sprint.Goal,                    newGoal));

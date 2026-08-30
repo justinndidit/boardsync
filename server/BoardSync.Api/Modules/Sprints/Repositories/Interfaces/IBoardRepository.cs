@@ -83,10 +83,10 @@ public readonly record struct BoardSprintContext(Guid TeamId, Guid? ActiveSprint
 /// A card as it comes out of the database. Enums stay typed the whole way through — stringifying
 /// them in SQL only to parse them back per card is work for nothing.
 /// </summary>
+/// <remarks><c>Rank</c> is the sprint sort key. Opaque — compare it, never compute with it.</remarks>
 public sealed record BoardCardRow(
     Guid WorkItemId,
 
-    /// <summary>The sprint sort key. Opaque — compare it, never compute with it.</summary>
     decimal Rank,
 
     string Reference,

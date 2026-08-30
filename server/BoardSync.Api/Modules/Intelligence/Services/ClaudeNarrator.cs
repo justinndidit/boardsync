@@ -1,3 +1,4 @@
+using BoardSync.Api.Modules.Intelligence.Domain;
 using System.Text.Json;
 
 using Anthropic;
@@ -76,28 +77,7 @@ public sealed class ClaudeNarrator : INarrator
                     Format = Schema(),
                 },
 
-                System = """
-                    You write short status notes about software sprints for the team that ran them.
-
-                    You are given a sprint report as JSON. Every number you write MUST appear in it.
-                    Do not calculate, estimate, extrapolate, or compare against anything not present
-                    — no trends, no "up from last sprint", no percentages you worked out yourself.
-                    If something interesting would require a figure you were not given, leave it out.
-
-                    Prefer saying less. A sprint where nothing stands out should get an empty
-                    observations list rather than filler.
-
-                    Two things are worth noticing when the figures show them, because they have
-                    different owners: work finished and waiting to be tested
-                    (awaitingVerificationItems, medianVerificationWaitHours) is a QA queue, not slow
-                    development; and items never started (itemsWithNoActivity) is committed work
-                    nobody picked up. Say which it is.
-
-                    A null median means there was not enough closed work to measure. It does not
-                    mean zero, and must never be written as one.
-
-                    Write plainly. No praise, no encouragement, no exclamation marks.
-                    """,
+                System = IntelligencePrompts.Narrator,
 
                 Messages =
                 [

@@ -1,3 +1,4 @@
+using BoardSync.Api.Modules.Sprints.Scheduling;
 using BoardSync.Api.Data;
 using BoardSync.Api.Extensions;
 using BoardSync.Api.Middleware;
@@ -301,8 +302,54 @@ builder.Services.AddScoped<IReportingService, ReportingService>();
  * build_context.md §8.3. The narrator is a singleton because it holds one HTTP client; the service
  * around it is scoped because it reads the report through the request's DbContext.
  */
-builder.Services.AddSingleton<BoardSync.Api.Modules.Intelligence.Services.INarrator,
-    BoardSync.Api.Modules.Intelligence.Services.ClaudeNarrator>();
+/*
+ * Which model, chosen by configuration.
+ *
+ * `Intelligence:Provider` is `Anthropic` (the default) or `Gemini`. Anything else is refused at
+ * startup rather than silently falling back — a typo that quietly disables the feature is the kind
+ * of thing found weeks later by somebody wondering why no narrative ever appears.
+ *
+ * Both adapters obey the same interfaces, take the same prompts from `IntelligencePrompts`, and are
+ * checked by the same guards afterwards. Swapping one for the other changes who writes the prose,
+ * not what is allowed through.
+ */
+var intelligenceProvider =
+    (builder.Configuration["Intelligence:Provider"] ?? "Anthropic").Trim();
+
+if (!string.Equals(intelligenceProvider, "Anthropic", StringComparison.OrdinalIgnoreCase)
+    && !string.Equals(intelligenceProvider, "Gemini", StringComparison.OrdinalIgnoreCase))
+{
+    throw new InvalidOperationException(
+        $"Intelligence:Provider is '{intelligenceProvider}'. Supported values are 'Anthropic' and "
+        + "'Gemini'.");
+}
+
+var useGemini = string.Equals(
+    intelligenceProvider, "Gemini", StringComparison.OrdinalIgnoreCase);
+
+builder.Services.AddSingleton<BoardSync.Api.Modules.Intelligence.Providers.GeminiClientFactory>();
+
+// Named so the base address and timeout live in one place. The timeout is generous: a decomposition
+// is tens of seconds of model time, and it runs in a background job rather than a request thread.
+builder.Services
+    .AddHttpClient(
+        BoardSync.Api.Modules.Intelligence.Providers.GeminiClientFactory.HttpClientName,
+        client =>
+        {
+            client.BaseAddress = new Uri("https://generativelanguage.googleapis.com/");
+            client.Timeout = TimeSpan.FromMinutes(5);
+        });
+
+if (useGemini)
+{
+    builder.Services.AddSingleton<BoardSync.Api.Modules.Intelligence.Services.INarrator,
+        BoardSync.Api.Modules.Intelligence.Providers.GeminiNarrator>();
+}
+else
+{
+    builder.Services.AddSingleton<BoardSync.Api.Modules.Intelligence.Services.INarrator,
+        BoardSync.Api.Modules.Intelligence.Services.ClaudeNarrator>();
+}
 builder.Services.AddSingleton<BoardSync.Api.Modules.Intelligence.Services.ITokenBudget,
     BoardSync.Api.Modules.Intelligence.Services.InMemoryTokenBudget>();
 builder.Services.AddScoped<BoardSync.Api.Modules.Intelligence.Services.ISprintOrganizationLookup,
@@ -317,8 +364,16 @@ builder.Services.AddScoped<BoardSync.Api.Modules.Intelligence.Services.INarrativ
  * proposal service is scoped because acceptance runs through the request's DbContext and its
  * transaction. The handler runs in the job worker's own scope.
  */
-builder.Services.AddSingleton<BoardSync.Api.Modules.Intelligence.Services.IDecomposer,
-    BoardSync.Api.Modules.Intelligence.Services.ClaudeDecomposer>();
+if (useGemini)
+{
+    builder.Services.AddSingleton<BoardSync.Api.Modules.Intelligence.Services.IDecomposer,
+        BoardSync.Api.Modules.Intelligence.Providers.GeminiDecomposer>();
+}
+else
+{
+    builder.Services.AddSingleton<BoardSync.Api.Modules.Intelligence.Services.IDecomposer,
+        BoardSync.Api.Modules.Intelligence.Services.ClaudeDecomposer>();
+}
 builder.Services.AddScoped<BoardSync.Api.Modules.Intelligence.Services.IProposalService,
     BoardSync.Api.Modules.Intelligence.Services.ProposalService>();
 builder.Services.AddScoped<
@@ -332,6 +387,14 @@ builder.Services.AddActivityModule();
 builder.Services.AddScoped<IBacklogRepository, BacklogRepository>();
 builder.Services.AddScoped<IBacklogSprintLink, BacklogSprintLink>();
 builder.Services.AddScoped<IBacklogService, BacklogService>();
+
+/*
+ * Starts and closes sprints on their own dates.
+ *
+ * Without it a sprint's dates are decoration: one stayed in Planning past its start indefinitely,
+ * and an Active one sat open past its end with its unfinished work stranded inside it.
+ */
+builder.Services.AddHostedService<SprintScheduler>();
 
 
 // Add HTTP Context Accessor
@@ -598,16 +661,24 @@ using (var scope = app.Services.CreateScope())
     if (narrator.IsConfigured && decomposer.IsConfigured)
     {
         app.Logger.LogInformation(
-            "Intelligence: a language model is configured. Sprint narratives and PRD decomposition " +
-            "are available.");
+            "Intelligence: {Provider} is configured. Sprint narratives and PRD decomposition are "
+            + "available.",
+            intelligenceProvider);
     }
     else
     {
+        // Names the key the *selected* provider actually reads. Telling somebody running Gemini to
+        // set an Anthropic key is how an hour disappears.
+        var expectedKey = useGemini
+            ? "Intelligence:GeminiApiKey or GEMINI_API_KEY"
+            : "Intelligence:AnthropicApiKey or ANTHROPIC_API_KEY";
+
         app.Logger.LogInformation(
-            "Intelligence: no language model configured (narrator: {Narrator}, decomposer: {Decomposer}). " +
-            "Set Intelligence:AnthropicApiKey or ANTHROPIC_API_KEY to enable narratives and decomposition. " +
-            "Every computed figure on the reports page is unaffected.",
-            narrator.IsConfigured, decomposer.IsConfigured);
+            "Intelligence: provider is {Provider} and no key is configured "
+            + "(narrator: {Narrator}, decomposer: {Decomposer}). Set {ExpectedKey} to enable "
+            + "narratives and decomposition. Every computed figure on the reports page is "
+            + "unaffected.",
+            intelligenceProvider, narrator.IsConfigured, decomposer.IsConfigured, expectedKey);
     }
 }
 
