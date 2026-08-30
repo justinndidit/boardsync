@@ -1,3 +1,4 @@
+using BoardSync.Api.Modules.Sprints.Scheduling;
 using BoardSync.Api.Data;
 using BoardSync.Api.Extensions;
 using BoardSync.Api.Middleware;
@@ -5,6 +6,7 @@ using BoardSync.Api.Modules.Activity;
 using BoardSync.Api.Modules.Notifications;
 using BoardSync.Api.Modules.Search.Repositories;
 using BoardSync.Api.Modules.Search.Services;
+using BoardSync.Api.Modules.WorkItems.Events;
 using BoardSync.Api.Modules.Backlog.Repositories;
 using BoardSync.Api.Modules.Backlog.Services;
 using BoardSync.Api.Modules.OrgProject.Repositories.Implementations;
@@ -59,6 +61,21 @@ using System.Threading.RateLimiting;
 using BoardSync.Api.Modules.Sprints.Domain.Helpers;
 
 var builder = WebApplication.CreateBuilder(args);
+
+/*
+ * A `.env` beside the app or above it, read into the environment before configuration is built.
+ *
+ * .NET does not do this itself, so the file in this repository only ever fed docker-compose's
+ * variable substitution — and somebody who put a key in it and ran locally got a process that had
+ * never heard of the file, with no error, because a missing key is a legitimate state.
+ *
+ * **Anything already in the environment wins.** That is what keeps it safe in a container: Compose
+ * passes real variables in, so a `.env` could only ever supply values nobody had set. The result is
+ * logged below rather than left as magic.
+ */
+var environmentFile = EnvironmentFile.Load(builder.Environment.ContentRootPath);
+
+builder.Configuration.AddEnvironmentVariables();
 
 //db connection string
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
@@ -300,12 +317,70 @@ builder.Services.AddScoped<IReportingService, ReportingService>();
  * build_context.md §8.3. The narrator is a singleton because it holds one HTTP client; the service
  * around it is scoped because it reads the report through the request's DbContext.
  */
-builder.Services.AddSingleton<BoardSync.Api.Modules.Intelligence.Services.INarrator,
-    BoardSync.Api.Modules.Intelligence.Services.ClaudeNarrator>();
+/*
+ * Which model, chosen by configuration.
+ *
+ * `Intelligence:Provider` is `Anthropic` (the default) or `Gemini`. Anything else is refused at
+ * startup rather than silently falling back — a typo that quietly disables the feature is the kind
+ * of thing found weeks later by somebody wondering why no narrative ever appears.
+ *
+ * Both adapters obey the same interfaces, take the same prompts from `IntelligencePrompts`, and are
+ * checked by the same guards afterwards. Swapping one for the other changes who writes the prose,
+ * not what is allowed through.
+ */
+/*
+ * Two spellings, because two things read this.
+ *
+ * `Intelligence:Provider` is the configuration path — set in appsettings, or as
+ * `Intelligence__Provider` in the environment. `INTELLIGENCE_PROVIDER` is the flat name the
+ * `.env.sample` and compose file use, and somebody who copies that file into a `.env` and runs the
+ * API directly expects it to work. It does now. The same pattern the API keys already follow.
+ */
+var intelligenceProvider =
+    (builder.Configuration["Intelligence:Provider"]
+     ?? Environment.GetEnvironmentVariable("INTELLIGENCE_PROVIDER")
+     ?? "Anthropic").Trim();
+
+if (!string.Equals(intelligenceProvider, "Anthropic", StringComparison.OrdinalIgnoreCase)
+    && !string.Equals(intelligenceProvider, "Gemini", StringComparison.OrdinalIgnoreCase))
+{
+    throw new InvalidOperationException(
+        $"Intelligence:Provider is '{intelligenceProvider}'. Supported values are 'Anthropic' and "
+        + "'Gemini'.");
+}
+
+var useGemini = string.Equals(
+    intelligenceProvider, "Gemini", StringComparison.OrdinalIgnoreCase);
+
+builder.Services.AddSingleton<BoardSync.Api.Modules.Intelligence.Providers.GeminiClientFactory>();
+
+// Named so the base address and timeout live in one place. The timeout is generous: a decomposition
+// is tens of seconds of model time, and it runs in a background job rather than a request thread.
+builder.Services
+    .AddHttpClient(
+        BoardSync.Api.Modules.Intelligence.Providers.GeminiClientFactory.HttpClientName,
+        client =>
+        {
+            client.BaseAddress = new Uri("https://generativelanguage.googleapis.com/");
+            client.Timeout = TimeSpan.FromMinutes(5);
+        });
+
+if (useGemini)
+{
+    builder.Services.AddSingleton<BoardSync.Api.Modules.Intelligence.Services.INarrator,
+        BoardSync.Api.Modules.Intelligence.Providers.GeminiNarrator>();
+}
+else
+{
+    builder.Services.AddSingleton<BoardSync.Api.Modules.Intelligence.Services.INarrator,
+        BoardSync.Api.Modules.Intelligence.Services.ClaudeNarrator>();
+}
 builder.Services.AddSingleton<BoardSync.Api.Modules.Intelligence.Services.ITokenBudget,
     BoardSync.Api.Modules.Intelligence.Services.InMemoryTokenBudget>();
 builder.Services.AddScoped<BoardSync.Api.Modules.Intelligence.Services.ISprintOrganizationLookup,
     BoardSync.Api.Modules.Intelligence.Services.SprintOrganizationLookup>();
+builder.Services.AddScoped<BoardSync.Api.Modules.Intelligence.Services.ISprintWorkLookup,
+    BoardSync.Api.Modules.Intelligence.Services.SprintWorkLookup>();
 builder.Services.AddScoped<BoardSync.Api.Modules.Intelligence.Services.INarrativeService,
     BoardSync.Api.Modules.Intelligence.Services.NarrativeService>();
 
@@ -316,8 +391,16 @@ builder.Services.AddScoped<BoardSync.Api.Modules.Intelligence.Services.INarrativ
  * proposal service is scoped because acceptance runs through the request's DbContext and its
  * transaction. The handler runs in the job worker's own scope.
  */
-builder.Services.AddSingleton<BoardSync.Api.Modules.Intelligence.Services.IDecomposer,
-    BoardSync.Api.Modules.Intelligence.Services.ClaudeDecomposer>();
+if (useGemini)
+{
+    builder.Services.AddSingleton<BoardSync.Api.Modules.Intelligence.Services.IDecomposer,
+        BoardSync.Api.Modules.Intelligence.Providers.GeminiDecomposer>();
+}
+else
+{
+    builder.Services.AddSingleton<BoardSync.Api.Modules.Intelligence.Services.IDecomposer,
+        BoardSync.Api.Modules.Intelligence.Services.ClaudeDecomposer>();
+}
 builder.Services.AddScoped<BoardSync.Api.Modules.Intelligence.Services.IProposalService,
     BoardSync.Api.Modules.Intelligence.Services.ProposalService>();
 builder.Services.AddScoped<
@@ -331,6 +414,15 @@ builder.Services.AddActivityModule();
 builder.Services.AddScoped<IBacklogRepository, BacklogRepository>();
 builder.Services.AddScoped<IBacklogSprintLink, BacklogSprintLink>();
 builder.Services.AddScoped<IBacklogService, BacklogService>();
+
+/*
+ * Starts and closes sprints on their own dates.
+ *
+ * Without it a sprint's dates are decoration: one stayed in Planning past its start indefinitely,
+ * and an Active one sat open past its end with its unfinished work stranded inside it.
+ */
+builder.Services.AddHostedService<SprintScheduler>();
+
 
 // Add HTTP Context Accessor
 builder.Services.AddHttpContextAccessor();
@@ -575,6 +667,68 @@ else
     app.Logger.LogInformation(
         "No ForwardedHeaders:KnownProxies or :KnownNetworks configured — forwarded headers are ignored " +
         "and the socket peer address is used as the client IP. Configure them if running behind a proxy.");
+}
+
+/*
+ * Where configuration came from, said before anything that depends on it.
+ *
+ * A `.env` that is read is worth naming: two of them exist in a normal checkout — one at the
+ * repository root for Compose and one beside the server — and knowing which was picked up is the
+ * difference between a five-minute fix and an afternoon.
+ */
+if (environmentFile.Path is { } envPath)
+{
+    app.Logger.LogInformation(
+        "Loaded {Applied} variable(s) from {Path}. {Skipped} were already set in the environment "
+        + "and were left alone.",
+        environmentFile.Applied, envPath, environmentFile.Skipped);
+}
+else
+{
+    app.Logger.LogDebug(
+        "No .env found at or above {ContentRoot}; configuration comes from appsettings and the "
+        + "environment.",
+        app.Environment.ContentRootPath);
+}
+
+/*
+ * Whether a language model is configured, said once at startup.
+ *
+ * Both Intelligence services degrade to "not configured" rather than throwing — the right
+ * behaviour for a deployment that wants none, and a trap for one that wants one and mistyped the
+ * variable. The failure is otherwise invisible: the endpoints answer 200 with a reason, and the
+ * reports they narrate over are unaffected because nothing on them is generated.
+ */
+using (var scope = app.Services.CreateScope())
+{
+    var narrator = scope.ServiceProvider
+        .GetRequiredService<BoardSync.Api.Modules.Intelligence.Services.INarrator>();
+
+    var decomposer = scope.ServiceProvider
+        .GetRequiredService<BoardSync.Api.Modules.Intelligence.Services.IDecomposer>();
+
+    if (narrator.IsConfigured && decomposer.IsConfigured)
+    {
+        app.Logger.LogInformation(
+            "Intelligence: {Provider} is configured. Sprint narratives and PRD decomposition are "
+            + "available.",
+            intelligenceProvider);
+    }
+    else
+    {
+        // Names the key the *selected* provider actually reads. Telling somebody running Gemini to
+        // set an Anthropic key is how an hour disappears.
+        var expectedKey = useGemini
+            ? "Intelligence:GeminiApiKey or GEMINI_API_KEY"
+            : "Intelligence:AnthropicApiKey or ANTHROPIC_API_KEY";
+
+        app.Logger.LogInformation(
+            "Intelligence: provider is {Provider} and no key is configured "
+            + "(narrator: {Narrator}, decomposer: {Decomposer}). Set {ExpectedKey} to enable "
+            + "narratives and decomposition. Every computed figure on the reports page is "
+            + "unaffected.",
+            intelligenceProvider, narrator.IsConfigured, decomposer.IsConfigured, expectedKey);
+    }
 }
 
 // Security and logging middleware (after forwarded headers)

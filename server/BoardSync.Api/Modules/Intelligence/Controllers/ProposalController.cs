@@ -1,3 +1,4 @@
+using BoardSync.Api.Shared.Kernel;
 using BoardSync.Api.Modules.Intelligence.DTOs;
 using BoardSync.Api.Modules.Intelligence.Services;
 using BoardSync.Api.Modules.Rbac.Models;
@@ -66,6 +67,37 @@ public class ProposalController : ControllerBase
             true,
             "Decomposition queued.",
             new { proposalId }));
+    }
+
+    /// <summary>
+    /// Every proposal this project has produced, newest first. Requires <c>workitem:write</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Without this a proposal was reachable only by its id, and nothing recorded the id — so once
+    /// you navigated away it was gone. That mattered beyond convenience: proposals are kept after
+    /// the decision on purpose, because every accept and reject is a labelled example of what this
+    /// team considers a good breakdown, and the record could not be read back.
+    /// </para>
+    /// <para>
+    /// Summaries, not drafts. A page of thirty proposals is not a page of thirty hierarchies —
+    /// <c>GET /intelligence/proposals/{id}</c> is what returns one.
+    /// </para>
+    /// </remarks>
+    [HttpGet("api/projects/{projectId:guid}/intelligence/proposals")]
+    [RequirePermission(Permissions.WorkItemWrite, From = "projectId")]
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<ProposalSummary>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> List(
+        Guid projectId,
+        [FromQuery] PaginationQuery pagination,
+        CancellationToken ct)
+    {
+        var proposals = await _proposals.ListAsync(projectId, pagination, ct);
+
+        return Ok(new ApiResponse<PagedResult<ProposalSummary>>(
+            true, "Proposals retrieved.", proposals));
     }
 
     /// <summary>

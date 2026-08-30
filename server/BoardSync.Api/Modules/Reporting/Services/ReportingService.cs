@@ -19,6 +19,10 @@ public interface IReportingService
     /// <summary>The velocity of the team that builds a project.</summary>
     Task<VelocityReport> GetVelocityForProjectAsync(
         Guid projectId, int sprintCount, CancellationToken ct = default);
+
+    /// <summary>How a project's work has been distributed across states, day by day.</summary>
+    Task<CumulativeFlowReport> GetCumulativeFlowAsync(
+        Guid projectId, int days, CancellationToken ct = default);
 }
 
 /// <inheritdoc />
@@ -53,6 +57,16 @@ public class ReportingService : IReportingService
     /// </remarks>
     public const int MaxVelocitySprints = 24;
 
+    /// <summary>
+    /// The longest cumulative-flow window.
+    /// </summary>
+    /// <remarks>
+    /// The series is reconstructed by replaying every item's transitions against every day, so its
+    /// cost is items times days. A quarter is long enough to show a queue forming and short enough
+    /// that a busy project does not turn one chart into the slowest request in the product.
+    /// </remarks>
+    public const int MaxCumulativeFlowDays = 90;
+
     public async Task<SprintReport> GetSprintReportAsync(Guid sprintId, CancellationToken ct = default)
     {
         var sprint = await _context.Sprints.FirstOrDefaultAsync(s => s.Id == sprintId, ct)
@@ -67,7 +81,27 @@ public class ReportingService : IReportingService
         var timelines = await LoadTimelinesAsync(items.Select(i => i.Id), ct);
 
         var committedPoints = items.Sum(i => i.StoryPoints ?? 0);
-        var closed = items.Where(i => i.State == WorkItemState.Closed).ToList();
+
+        /*
+         * Delivered *by the time the sprint ended*, not "closed by now".
+         *
+         * This counted current state, and the burndown beside it has always counted closures
+         * against the day they happened — so on one page a reader could compute delivered points
+         * two ways and get two answers, with nothing saying which was which.
+         *
+         * It also meant a finished sprint's numbers kept moving: closing a stale item three weeks
+         * later silently raised a past sprint, and a chart that read 24 last week read 29 today with
+         * no event to explain it. Velocity is the one figure people forecast from, and forecasting
+         * from a number that includes work delivered outside the window flatters exactly the teams
+         * that habitually carry work over.
+         *
+         * Active sprints are unaffected: their end date is in the future, so "closed by then" and
+         * "closed now" are the same set.
+         */
+        var closed = items
+            .Where(i => DeliveredBy(
+                FirstEntry(timelines, i.Id, WorkItemState.Closed), sprint.EndDate))
+            .ToList();
 
         var summary = new SprintSummary(
             SprintId: sprint.Id,
@@ -81,8 +115,15 @@ public class ReportingService : IReportingService
             CommittedItems: items.Count,
             CompletedItems: closed.Count,
 
-            // Its own number because a sprint that looks behind may be finished work nobody has
-            // verified — which is a different problem with a different owner.
+            /*
+             * Its own number because a sprint that looks behind may be finished work nobody has
+             * verified — a different problem with a different owner.
+             *
+             * Deliberately still *current* state, unlike the two above. "How much is sitting in QA"
+             * is a question about now: on a running sprint that is exactly right, and on a finished
+             * one it answers "what did this sprint leave behind that is still waiting", which is
+             * also a live question. Freezing it at the end date would answer neither.
+             */
             AwaitingVerificationItems: items.Count(i => i.State == WorkItemState.Resolved));
 
         var closedAt = items.ToDictionary(
@@ -135,8 +176,19 @@ public class ReportingService : IReportingService
         var membership = await _context.SprintWorkItems
             .Where(sw => sprintIds.Contains(sw.SprintId))
             .Join(_context.WorkItems.Where(w => w.IsActive), sw => sw.WorkItemId, w => w.Id,
-                (sw, w) => new { sw.SprintId, w.State, w.StoryPoints })
+                (sw, w) => new { sw.SprintId, WorkItemId = w.Id, w.StoryPoints })
             .ToListAsync(ct);
+
+        /*
+         * One history read for every item across every charted sprint, rather than current state.
+         *
+         * The cost is the query the sprint report already makes; what it buys is that a completed
+         * sprint's bar never moves again. Counting `State == Closed` meant closing a stale item long
+         * afterwards raised a past sprint retroactively — and velocity is the figure teams plan
+         * from, so it is the one that must hold still.
+         */
+        var timelines = await LoadTimelinesAsync(
+            membership.Select(m => m.WorkItemId).Distinct(), ct);
 
         var points = sprints
             .Select(s =>
@@ -147,7 +199,9 @@ public class ReportingService : IReportingService
                     s.Id, s.Number, s.EndDate,
                     CommittedPoints: mine.Sum(m => m.StoryPoints ?? 0),
                     CompletedPoints: mine
-                        .Where(m => m.State == WorkItemState.Closed)
+                        .Where(m => DeliveredBy(
+                            FirstEntry(timelines, m.WorkItemId, WorkItemState.Closed),
+                            s.EndDate))
                         .Sum(m => m.StoryPoints ?? 0));
             })
             .OrderBy(p => p.EndDate)
@@ -169,6 +223,90 @@ public class ReportingService : IReportingService
             ?? throw new NotFoundException("Project", projectId);
 
         return await GetTeamVelocityAsync(teamId, sprintCount, ct);
+    }
+
+    /// <inheritdoc />
+    public async Task<CumulativeFlowReport> GetCumulativeFlowAsync(
+        Guid projectId, int days, CancellationToken ct = default)
+    {
+        if (!await _context.Projects.AnyAsync(p => p.Id == projectId, ct))
+            throw new NotFoundException("Project", projectId);
+
+        var window = Math.Clamp(days, 1, MaxCumulativeFlowDays);
+
+        var today = DateTime.UtcNow.Date;
+        var start = today.AddDays(-(window - 1));
+
+        /*
+         * Created on or before the last day in the window. An item made tomorrow has no place on a
+         * chart of what has happened, and one made after the window still belongs to the days after
+         * it was created — which the per-day check below handles.
+         */
+        var items = await _context.WorkItems
+            .Where(w => w.ProjectId == projectId && w.IsActive)
+            .Select(w => new { w.Id, w.CreatedAt })
+            .ToListAsync(ct);
+
+        if (items.Count == 0)
+            return new CumulativeFlowReport([], 0);
+
+        var timelines = await LoadTimelinesAsync(items.Select(i => i.Id), ct);
+
+        var points = new List<CumulativeFlowPoint>(window);
+
+        for (var day = start; day <= today; day = day.AddDays(1))
+        {
+            // End of this day, so a transition made at any hour of it is counted on it.
+            var cutoff = day.AddDays(1);
+
+            var counts = new Dictionary<WorkItemState, int>();
+
+            foreach (var item in items)
+            {
+                // Not yet created is not the same as New: an item that did not exist should not be
+                // holding up the bottom band on days before somebody wrote it down.
+                if (item.CreatedAt >= cutoff) continue;
+
+                var state = StateAt(timelines, item.Id, cutoff);
+
+                counts[state] = counts.GetValueOrDefault(state) + 1;
+            }
+
+            points.Add(new CumulativeFlowPoint(
+                Date: DateTime.SpecifyKind(day, DateTimeKind.Utc),
+                New: counts.GetValueOrDefault(WorkItemState.New),
+                Active: counts.GetValueOrDefault(WorkItemState.Active),
+                InReview: counts.GetValueOrDefault(WorkItemState.InReview),
+                Resolved: counts.GetValueOrDefault(WorkItemState.Resolved),
+                Closed: counts.GetValueOrDefault(WorkItemState.Closed)));
+        }
+
+        return new CumulativeFlowReport(points, items.Count);
+    }
+
+    /// <summary>
+    /// The state a work item stood in immediately before <paramref name="cutoff"/>.
+    /// </summary>
+    /// <remarks>
+    /// The last transition recorded before the cutoff, or <c>New</c> when there is none — an item
+    /// with no history has never moved, which is exactly what New means. Timelines are ordered by
+    /// time on the way out of <see cref="LoadTimelinesAsync"/>, so this is a walk rather than a sort.
+    /// </remarks>
+    private static WorkItemState StateAt(
+        Dictionary<Guid, List<StateChange>> timelines, Guid workItemId, DateTime cutoff)
+    {
+        if (!timelines.TryGetValue(workItemId, out var changes)) return WorkItemState.New;
+
+        var state = WorkItemState.New;
+
+        foreach (var change in changes)
+        {
+            if (change.At >= cutoff) break;
+
+            state = change.To;
+        }
+
+        return state;
     }
 
     // ── Computation ───────────────────────────────────────────────────────────
@@ -211,6 +349,23 @@ public class ReportingService : IReportingService
 
         return timelines;
     }
+
+    /// <summary>
+    /// Whether a closure counts toward a sprint: it happened, and it happened by the sprint's end.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The same rule the burndown applies day by day, so a sprint's completed points and the point
+    /// its burndown lands on are the same number rather than two that usually agree.
+    /// </para>
+    /// <para>
+    /// <b>One bound, not two.</b> An item added to a sprint already closed still counts. A floor at
+    /// the start date would drop work legitimately finished on the first morning of a sprint it was
+    /// committed to, which is a worse answer than the rare oddity it would prevent.
+    /// </para>
+    /// </remarks>
+    private static bool DeliveredBy(DateTime? closedAt, DateTime sprintEnd) =>
+        closedAt is { } closed && closed <= sprintEnd;
 
     private static DateTime? FirstEntry(
         Dictionary<Guid, List<StateChange>> timelines, Guid workItemId, WorkItemState state)

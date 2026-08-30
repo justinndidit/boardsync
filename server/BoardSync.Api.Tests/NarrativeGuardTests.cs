@@ -133,4 +133,58 @@ public class NarrativeGuardTests
         Assert.Contains(findings, f => f.Figure == "77");
         Assert.Contains(findings, f => f.Figure == "9");
     }
+
+    /// <summary>
+    /// A work item number is an identifier, not a quantity.
+    /// </summary>
+    /// <remarks>
+    /// Reading the 11 in PAY-11 as a claimed figure would flag every correctly-cited item as an
+    /// invention, which is the failure mode that makes a grounding check get switched off.
+    /// </remarks>
+    [Fact]
+    public void AReferenceIsNotReadAsAFigure()
+    {
+        var findings = NarrativeGuard.UnsupportedClaims(
+            "PAY-11 and PAY-4207 shipped.", [40, 34]);
+
+        Assert.Empty(findings);
+    }
+
+    /// <summary>Masking the identifier does not mask a real figure beside it.</summary>
+    [Fact]
+    public void AFigureBesideAReferenceIsStillChecked()
+    {
+        var findings = NarrativeGuard.UnsupportedClaims(
+            "PAY-11 shipped, taking velocity to 77.", [40, 34]);
+
+        Assert.Equal("77", Assert.Single(findings).Figure);
+    }
+
+    /// <summary>An item nobody handed over is unsupported, however plausible it reads.</summary>
+    [Fact]
+    public void AnInventedReferenceIsFound()
+    {
+        var findings = NarrativeGuard.UnsupportedReferences(
+            "PAY-11 and PAY-91 shipped.", ["PAY-11", "PAY-12"]);
+
+        Assert.Equal("PAY-91", Assert.Single(findings).Figure);
+    }
+
+    /// <summary>Case is not identity — a key typed in lower case is the same work item.</summary>
+    [Fact]
+    public void ReferencesMatchRegardlessOfCase()
+    {
+        Assert.Empty(NarrativeGuard.UnsupportedReferences(
+            "pay-11 shipped.", ["PAY-11"]));
+    }
+
+    /// <summary>
+    /// Prose with no references passes, rather than everything matching nothing.
+    /// </summary>
+    [Fact]
+    public void ProseWithoutReferencesIsSupported()
+    {
+        Assert.Empty(NarrativeGuard.UnsupportedReferences(
+            "The sprint met its goal.", []));
+    }
 }

@@ -63,6 +63,15 @@ services:
       EmailSettings__Username: ${SMTP_USERNAME}
       EmailSettings__Password: ${SMTP_PASSWORD}
       EmailSettings__BaseUrl: ${APP_BASE_URL}
+      # Optional. Empty means no model is configured: decomposition and narratives answer with a
+      # reason, and the reports they narrate over are unaffected because nothing there is generated.
+      #
+      # Provider is Anthropic or Gemini; only the matching key is read. Both are passed so switching
+      # is an env change rather than a compose edit.
+      Intelligence__Provider: ${INTELLIGENCE_PROVIDER:-Anthropic}
+      Intelligence__AnthropicApiKey: ${ANTHROPIC_API_KEY:-}
+      Intelligence__GeminiApiKey: ${GEMINI_API_KEY:-}
+      Intelligence__GeminiModel: ${GEMINI_MODEL:-}
     expose:
       - "8080"
     networks:

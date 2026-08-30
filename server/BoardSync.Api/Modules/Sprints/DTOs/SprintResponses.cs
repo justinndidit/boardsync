@@ -49,6 +49,11 @@ public record SprintSummaryResponse(
 );
 
 /// <summary>A single work item entry within a sprint backlog.</summary>
+/// <remarks>
+/// <c>Rank</c> is the sprint sort key — what ordering is actually by. <c>Position</c> is written
+/// only by the bulk reorder and is not the authority; the move endpoint maintains <c>Rank</c>.
+/// Opaque: compare it, never compute with it.
+/// </remarks>
 public record SprintWorkItemResponse(
     Guid WorkItemId,
 
@@ -63,7 +68,9 @@ public record SprintWorkItemResponse(
     WorkItemPriority Priority,
     Guid? AssigneeId,
     int? StoryPoints,
-    int Position
+    int Position,
+
+    decimal Rank = 0
 );
 
 /// <summary>Where a moved backlog item landed.</summary>

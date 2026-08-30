@@ -50,6 +50,15 @@ public static class DecompositionGuard
     /// <summary>Matches the <c>[Range(0, 1000)]</c> on story points.</summary>
     private const int MaxStoryPoints = 1000;
 
+    /// <summary>
+    /// Most delivery phases a plan may propose.
+    /// </summary>
+    /// <remarks>
+    /// Past this it is not a plan, it is the item list with headings. The prompt asks for two to
+    /// six; this is the outer bound, not the target.
+    /// </remarks>
+    public const int MaxPhases = 8;
+
     /// <summary>A checked draft, or the reason there is not one.</summary>
     /// <param name="Draft">Normalized and safe to store. Null when <paramref name="Rejection"/> is set.</param>
     /// <param name="Rejection">Why the tree could not be used, phrased for the requester.</param>
@@ -103,9 +112,88 @@ public static class DecompositionGuard
         }
 
         return new Result(
-            new Decomposition(candidate.Roots, Trim(candidate.Notes)),
+            new Decomposition(
+                candidate.Roots,
+                Trim(candidate.Notes),
+                Phases(candidate, repairs)),
             null,
             repairs);
+    }
+
+    /// <summary>
+    /// The delivery phases, repaired into something every leaf can index into.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Repaired rather than rejected.</b> Phasing is advice: it changes which sprint a reviewer
+    /// is offered and the order of a backlog, and a reviewer sees all of it before anything is
+    /// created. Throwing away a whole correct hierarchy because the model numbered a phase wrongly
+    /// would spend the allowance again to fix something nobody would have been misled by — unlike
+    /// the nesting rules above, which decide what actually gets written.
+    /// </para>
+    /// <para>
+    /// Three repairs, all silent-but-recorded: too many phases collapse to the cap, a leaf naming a
+    /// phase that does not exist falls to the last one, and a draft with no phases at all becomes a
+    /// single unnamed phase — which is the honest reading of "this is one go's worth of work".
+    /// </para>
+    /// </remarks>
+    private static IReadOnlyList<ProposedPhase> Phases(
+        Decomposition candidate, List<string> repairs)
+    {
+        var phases = (candidate.Phases ?? [])
+            .Where(phase => !string.IsNullOrWhiteSpace(phase.Name))
+            .Select(phase => new ProposedPhase
+            {
+                Name = phase.Name.Trim(),
+                Rationale = string.IsNullOrWhiteSpace(phase.Rationale)
+                    ? null
+                    : phase.Rationale.Trim(),
+            })
+            .ToList();
+
+        if (phases.Count > MaxPhases)
+        {
+            repairs.Add(
+                $"It proposed {phases.Count} delivery phases; the last "
+                + $"{phases.Count - MaxPhases} were merged into phase {MaxPhases}.");
+
+            phases = [.. phases.Take(MaxPhases)];
+        }
+
+        if (phases.Count == 0)
+        {
+            // No phases is not an error. It is what a document worth one sprint looks like, and
+            // what every proposal drafted before phasing existed looks like.
+            phases = [new ProposedPhase { Name = "All of it" }];
+        }
+
+        foreach (var node in Flatten(candidate.Roots))
+        {
+            if (node.Children.Count > 0)
+            {
+                // Containers span their children's phases by definition.
+                node.Phase = null;
+                continue;
+            }
+
+            node.Phase = node.Phase is int phase && phase >= 1 && phase <= phases.Count
+                ? phase
+                : phases.Count;
+        }
+
+        return phases;
+    }
+
+    /// <summary>Every node in the tree, parents before children.</summary>
+    private static IEnumerable<ProposedNode> Flatten(IEnumerable<ProposedNode> nodes)
+    {
+        foreach (var node in nodes)
+        {
+            yield return node;
+
+            foreach (var child in Flatten(node.Children))
+                yield return child;
+        }
     }
 
     /// <summary>

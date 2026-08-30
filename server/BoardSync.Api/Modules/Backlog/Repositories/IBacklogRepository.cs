@@ -65,6 +65,18 @@ public interface IBacklogRepository
     /// <summary>
     /// The named entries that are currently assigned to one sprint, tracked for mutation.
     /// </summary>
+    /// <summary>
+    /// Entries for these work items, whatever sprint they are or are not in.
+    /// </summary>
+    /// <remarks>
+    /// Unscoped by project on purpose: a work item belongs to exactly one project, so its id is
+    /// already specific enough, and the callers that need this have a sprint rather than a project
+    /// in hand.
+    /// </remarks>
+    Task<IReadOnlyList<BacklogItem>> GetEntriesByWorkItemsAsync(
+        IReadOnlyCollection<Guid> workItemIds,
+        CancellationToken ct = default);
+
     Task<IReadOnlyList<BacklogItem>> GetEntriesForSprintAsync(
         Guid sprintId, IReadOnlyCollection<Guid> workItemIds, CancellationToken ct = default);
 

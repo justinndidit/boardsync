@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using System.Text.Json.Serialization;
 
 using BoardSync.Api.Modules.WorkItems.Models;
@@ -40,6 +41,29 @@ public sealed class ProposedNode
     public int? StoryPoints { get; set; }
 
     public List<ProposedNode> Children { get; set; } = [];
+
+    /// <summary>
+    /// Which delivery phase this item belongs to, counting from 1. Null on containers.
+    /// </summary>
+    /// <remarks>
+    /// Only leaves carry one — an Epic spans its children's phases by definition, so a phase on it
+    /// would be a fourth thing that can disagree with the other three.
+    /// </remarks>
+    public int? Phase { get; set; }
+}
+
+/// <summary>One phase of a delivery plan: what it is, and why it is a phase.</summary>
+/// <remarks>
+/// The model's judgment about ordering, which is the part it is genuinely qualified to give — what
+/// must be true before something else can start. It carries no dates and no durations: how long the
+/// phases take is arithmetic over the team's measured velocity, not something a model can know.
+/// </remarks>
+public sealed class ProposedPhase
+{
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>What makes this a phase — the dependency that puts it where it is.</summary>
+    public string? Rationale { get; set; }
 }
 
 /// <summary>The draft as it is stored and served.</summary>
@@ -49,9 +73,15 @@ public sealed class ProposedNode
 /// rather than dropped, because a gap the reader can see is worth more than a tidy tree that
 /// quietly omitted something.
 /// </param>
+/// <param name="Phases">
+/// The suggested delivery order. May be empty — a document small enough to build in one go does
+/// not have phases, and an older proposal was drafted before they existed. Every leaf's
+/// <c>Phase</c> indexes into it, counting from 1.
+/// </param>
 public sealed record Decomposition(
     IReadOnlyList<ProposedNode> Roots,
-    IReadOnlyList<string> Notes);
+    IReadOnlyList<string> Notes,
+    IReadOnlyList<ProposedPhase>? Phases = null);
 
 /// <summary>Asks for a PRD to be decomposed.</summary>
 public sealed class DecomposeRequest
@@ -97,10 +127,72 @@ public sealed class AcceptProposalRequest
     /// work on the person who chose to create it rather than on nobody.
     /// </remarks>
     public Guid? AssignTo { get; set; }
+
+    /// <summary>
+    /// A sprint to plan the accepted work into. Null creates the items and schedules nothing.
+    /// </summary>
+    /// <remarks>
+    /// Optional because the two decisions are separate: a PRD broken down in March may be work for
+    /// May, and forcing dates at acceptance would make somebody invent them.
+    /// </remarks>
+    public SprintPlanRequest? Sprint { get; set; }
+}
+
+/// <summary>Dates for the sprint an acceptance creates.</summary>
+/// <remarks>
+/// The sprint is created in <c>Planning</c>, never started. A plan a model drafted should not put
+/// itself into a team's current work — the same reason acceptance exists at all. Somebody starts
+/// it, and can edit the dates first.
+/// </remarks>
+public sealed class SprintPlanRequest
+{
+    [MaxLength(500)]
+    public string? Goal { get; init; }
+
+    [Required]
+    public DateTime StartDate { get; init; }
+
+    [Required]
+    public DateTime EndDate { get; init; }
 }
 
 /// <summary>What an acceptance produced.</summary>
+/// <remarks>
+/// <c>SprintId</c> is the sprint the work was planned into, or null when none was asked for.
+/// <c>Scheduled</c> is how many of the created items went into it — fewer than <c>Created</c>
+/// whenever the tree has parents, because an epic and its stories in one sprint would count the
+/// same work twice against the commitment. Only the leaves of the accepted tree are scheduled.
+/// </remarks>
 public sealed record AcceptanceResult(
     Guid ProposalId,
     int Created,
-    IReadOnlyList<Guid> WorkItemIds);
+    IReadOnlyList<Guid> WorkItemIds,
+    Guid? SprintId = null,
+    int Scheduled = 0);
+
+/// <summary>
+/// One proposal in a list — enough to choose between them, without the draft.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Deliberately excludes <c>Draft</c>. A list of thirty proposals would otherwise carry thirty
+/// hierarchies nobody has asked to read, and the draft is what <c>GET /proposals/{id}</c> is for.
+/// </para>
+/// <para>
+/// <c>NodeCount</c> is how many nodes the draft holds, or null when there is none. <c>Preview</c>
+/// is the opening of the document this came from, so a reader can tell two proposals apart — the
+/// source text is kept verbatim precisely so a proposal can be explained after the fact, and "why
+/// did it suggest this?" is not answerable from the output alone.
+/// </para>
+/// </remarks>
+public sealed record ProposalSummary(
+    Guid Id,
+    Guid ProjectId,
+    string Status,
+    string? Detail,
+    int TokensSpent,
+    int AcceptedCount,
+    int? NodeCount,
+    string Preview,
+    DateTime CreatedAt,
+    DateTime? DecidedAt);

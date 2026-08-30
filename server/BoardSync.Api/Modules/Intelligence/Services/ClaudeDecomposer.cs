@@ -82,7 +82,7 @@ public sealed class ClaudeDecomposer : IDecomposer
                     Format = Schema(),
                 },
 
-                System = SystemPrompt,
+                System = IntelligencePrompts.Decomposer,
 
                 Messages =
                 [
@@ -110,7 +110,7 @@ public sealed class ClaudeDecomposer : IDecomposer
             if (parsed?.Roots is null) return null;
 
             return new DecompositionOutcome(
-                new Decomposition(parsed.Roots, parsed.Notes ?? []),
+                new Decomposition(parsed.Roots, parsed.Notes ?? [], parsed.Phases ?? []),
                 (int)((response.Usage?.InputTokens ?? 0) + (response.Usage?.OutputTokens ?? 0)));
         }
         catch (Exception ex)
@@ -123,41 +123,6 @@ public sealed class ClaudeDecomposer : IDecomposer
         }
     }
 
-    /// <summary>
-    /// The instructions, which are identical for every decomposition.
-    /// </summary>
-    /// <remarks>
-    /// A constant so the prefix is byte-identical across calls. Nothing project-specific goes in
-    /// here — the moment it does, every request has a different prefix.
-    /// </remarks>
-    private static readonly string SystemPrompt = $"""
-        You break product requirements documents into a hierarchy of work items for a software team.
-
-        The hierarchy is strict: {WorkItemHierarchy.Description}. An Epic may contain only Features,
-        a Feature only User Stories, a User Story only Tasks and Bugs. Tasks and Bugs are leaves and
-        contain nothing. A tree that violates this will be rejected in full, so check it before you
-        answer.
-
-        You do not have to use every level. A small document may be a few User Stories with Tasks
-        under them, and forcing an Epic over the top of it adds a layer nobody wanted.
-
-        Titles are what someone reads on a board: short, specific, and starting with a verb where
-        there is one. "Add rate limiting to the login endpoint", not "Rate limiting" and not
-        "As a user, I want the system to be protected from abuse so that...". Put the detail in the
-        description.
-
-        Only decompose what the document actually says. If a requirement is ambiguous, or implies
-        work the document does not describe, put it in `notes` rather than inventing a work item for
-        it. A tree that quietly fills gaps is the failure mode here — a reviewer cannot tell which
-        parts came from the document and which you supplied.
-
-        Estimate story points only where the document gives you enough to estimate from. Omit the
-        field otherwise; an absent estimate reads as "not estimated", and a guessed one reads as a
-        judgment nobody made.
-
-        Priority reflects what the document says about urgency, not your own view of what matters.
-        Use Medium when it says nothing.
-        """;
 
     /// <summary>
     /// The response schema: a recursive tree, unrolled to the depth the domain allows.
@@ -188,8 +153,24 @@ public sealed class ClaudeDecomposer : IDecomposer
                         ["type"] = "array",
                         ["items"] = new Dictionary<string, object> { ["type"] = "string" },
                     },
+                    ["phases"] = new Dictionary<string, object>
+                    {
+                        ["type"] = "array",
+                        ["items"] = new Dictionary<string, object>
+                        {
+                            ["type"] = "object",
+                            ["properties"] = new Dictionary<string, object>
+                            {
+                                ["name"] = new Dictionary<string, object> { ["type"] = "string" },
+                                ["rationale"] = new Dictionary<string, object> { ["type"] = "string" },
+                            },
+                            ["required"] = new[] { "name" },
+                            ["additionalProperties"] = false,
+                        },
+                    },
                 }),
-                ["required"] = JsonSerializer.SerializeToElement(new[] { "roots", "notes" }),
+                ["required"] = JsonSerializer.SerializeToElement(
+                    new[] { "roots", "notes", "phases" }),
                 ["additionalProperties"] = JsonSerializer.SerializeToElement(false),
             },
         };
@@ -213,6 +194,7 @@ public sealed class ClaudeDecomposer : IDecomposer
                 ["enum"] = Enum.GetNames<WorkItems.Models.WorkItemPriority>(),
             },
             ["storyPoints"] = new Dictionary<string, object> { ["type"] = "integer" },
+            ["phase"] = new Dictionary<string, object> { ["type"] = "integer" },
         };
 
         if (remainingDepth > 1)
@@ -235,5 +217,6 @@ public sealed class ClaudeDecomposer : IDecomposer
 
     private sealed record DecompositionShape(
         List<ProposedNode>? Roots,
-        List<string>? Notes);
+        List<string>? Notes,
+        List<ProposedPhase>? Phases);
 }

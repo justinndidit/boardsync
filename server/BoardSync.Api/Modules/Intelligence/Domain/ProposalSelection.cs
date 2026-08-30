@@ -78,4 +78,71 @@ public static class ProposalSelection
     private static bool HasWantedDescendant(ProposedNode node, HashSet<string> wanted) =>
         node.Children.Any(child =>
             wanted.Contains(child.Id) || HasWantedDescendant(child, wanted));
+
+    /// <summary>
+    /// The leaves of a resolved selection — the nodes nothing else in it hangs off.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// What a sprint should actually hold. A parent and its children in the same sprint count the
+    /// same work twice: an epic carrying thirteen points over three five-point stories commits the
+    /// sprint to twenty-eight, and every figure downstream — the burndown, the velocity, the
+    /// completion rate — is wrong by the difference for as long as anybody keeps the record.
+    /// </para>
+    /// <para>
+    /// Leaf of the <i>accepted</i> tree, not of the draft. Someone who takes an epic and none of
+    /// its stories has chosen to schedule the epic, and it is the only thing there is to schedule.
+    /// </para>
+    /// </remarks>
+    public static List<ProposedNode> Leaves(IReadOnlyList<Selected> selected)
+    {
+        var parents = selected
+            .Select(entry => entry.ParentId)
+            .Where(id => id is not null)
+            .ToHashSet();
+
+        return [.. selected
+            .Where(entry => !parents.Contains(entry.Node.Id))
+            .Select(entry => entry.Node)];
+    }
+
+    /// <summary>
+    /// The leaves in delivery order: by phase, then by their order in the tree.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is what the backlog is ranked by after an acceptance, and what decides which items the
+    /// first sprint is offered. The tree order inside a phase is the model's own — it wrote the
+    /// siblings in an order, and there is no better tiebreak available.
+    /// </para>
+    /// <para>
+    /// A leaf with no phase sorts last. <c>DecompositionGuard</c> gives every leaf one, so this only
+    /// arises for a proposal drafted before phases existed — where "all of it, in tree order" is
+    /// exactly right.
+    /// </para>
+    /// </remarks>
+    public static List<ProposedNode> LeavesInDeliveryOrder(IReadOnlyList<Selected> selected)
+    {
+        var leaves = Leaves(selected);
+
+        // OrderBy is stable, so equal phases keep the tree order Leaves produced.
+        return [.. leaves.OrderBy(node => node.Phase ?? int.MaxValue)];
+    }
+
+    /// <summary>The leaves in the first phase that was accepted — what a first sprint holds.</summary>
+    /// <remarks>
+    /// The <i>first accepted</i> phase, not phase 1. A reviewer who unticks everything in the first
+    /// phase has said that work is not happening, and offering them an empty sprint would be a
+    /// worse answer than offering the earliest work they did keep.
+    /// </remarks>
+    public static List<ProposedNode> FirstPhase(IReadOnlyList<Selected> selected)
+    {
+        var ordered = LeavesInDeliveryOrder(selected);
+
+        if (ordered.Count == 0) return [];
+
+        var first = ordered[0].Phase;
+
+        return [.. ordered.TakeWhile(node => node.Phase == first)];
+    }
 }

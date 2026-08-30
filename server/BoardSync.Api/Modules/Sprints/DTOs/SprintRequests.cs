@@ -16,7 +16,15 @@ public class CreateSprintRequest
     public DateTime EndDate { get; init; }
 }
 
-/// <summary>Update a sprint's goal or dates. Only allowed while Planning.</summary>
+/// <summary>Update a sprint's goal or dates.</summary>
+/// <remarks>
+/// Allowed until the sprint is <c>Completed</c>, not only while <c>Planning</c>. A sprint that
+/// slips is the ordinary case, and a running sprint whose end date cannot be moved is one a team
+/// has to close early and recreate — which loses the burndown it had already accumulated.
+///
+/// Completed stays locked: its dates are what every figure was measured against, and moving them
+/// afterwards silently rewrites velocity for every sprint that came after.
+/// </remarks>
 public class UpdateSprintRequest
 {
     [MaxLength(500)]

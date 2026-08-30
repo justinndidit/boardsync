@@ -188,4 +188,81 @@ public class DecompositionGuardTests
 
         Assert.Equal("Unclear scope", Assert.Single(result.Draft!.Notes));
     }
+
+    /// <summary>
+    /// Phasing is repaired, not rejected.
+    /// </summary>
+    /// <remarks>
+    /// It is advice — it decides which sprint a reviewer is offered and the order of a backlog, and
+    /// they see all of it before anything is created. Throwing away a correct hierarchy over a
+    /// mis-numbered phase would spend the allowance again to fix something nobody was misled by.
+    /// </remarks>
+    [Fact]
+    public void ALeafNamingAPhaseThatDoesNotExistFallsToTheLast()
+    {
+        var result = DecompositionGuard.Check(new Decomposition(
+            [new ProposedNode { Title = "Ship it", Type = WorkItemType.Task, Phase = 9 }],
+            [],
+            [new ProposedPhase { Name = "Only phase" }]));
+
+        Assert.NotNull(result.Draft);
+        Assert.Equal(1, result.Draft!.Roots[0].Phase);
+    }
+
+    /// <summary>Too many phases collapse to the cap rather than failing the draft.</summary>
+    [Fact]
+    public void MorePhasesThanTheCapAreMerged()
+    {
+        var result = DecompositionGuard.Check(new Decomposition(
+            [new ProposedNode { Title = "Ship it", Type = WorkItemType.Task, Phase = 1 }],
+            [],
+            [.. Enumerable.Range(1, DecompositionGuard.MaxPhases + 4)
+                .Select(n => new ProposedPhase { Name = $"Phase {n}" })]));
+
+        Assert.NotNull(result.Draft);
+        Assert.Equal(DecompositionGuard.MaxPhases, result.Draft!.Phases!.Count);
+        Assert.Contains(result.Repairs, r => r.Contains("delivery phases"));
+    }
+
+    /// <summary>
+    /// Containers carry no phase, whatever the model said.
+    /// </summary>
+    /// <remarks>
+    /// An epic spans its children's phases by definition, so a phase on it is a fourth number that
+    /// can disagree with the other three.
+    /// </remarks>
+    [Fact]
+    public void AContainerCarriesNoPhase()
+    {
+        var result = DecompositionGuard.Check(new Decomposition(
+            [
+                new ProposedNode
+                {
+                    Title = "Billing",
+                    Type = WorkItemType.Epic,
+                    Phase = 1,
+                    Children =
+                    [
+                        new ProposedNode { Title = "Invoices", Type = WorkItemType.Feature, Phase = 2 },
+                    ],
+                },
+            ],
+            [],
+            [new ProposedPhase { Name = "A" }, new ProposedPhase { Name = "B" }]));
+
+        Assert.Null(result.Draft!.Roots[0].Phase);
+        Assert.Equal(2, result.Draft.Roots[0].Children[0].Phase);
+    }
+
+    /// <summary>A phase with no name is not a phase.</summary>
+    [Fact]
+    public void UnnamedPhasesAreDropped()
+    {
+        var result = DecompositionGuard.Check(new Decomposition(
+            [new ProposedNode { Title = "Ship it", Type = WorkItemType.Task, Phase = 1 }],
+            [],
+            [new ProposedPhase { Name = "  " }, new ProposedPhase { Name = "Real" }]));
+
+        Assert.Equal("Real", Assert.Single(result.Draft!.Phases!).Name);
+    }
 }

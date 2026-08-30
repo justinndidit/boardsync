@@ -263,8 +263,16 @@ public class ReportingTests(BoardSyncApiFactory factory)
 
         await workspace.Owner.Patch<object>(
             $"/api/sprints/{sprint.Id}/status", new { status = "Active" });
-        await workspace.Owner.Patch<object>(
-            $"/api/sprints/{sprint.Id}/status", new { status = "Completed" });
+
+        /*
+         * Closed, not status-changed. PATCH /status no longer accepts Completed — completing a
+         * sprint decides where unfinished work goes as well as flipping the status, and this sprint
+         * has an item that did not land. Returning it to the backlog is what a real close does with
+         * it, and the sprint keeps its record of having committed to it either way.
+         */
+        await workspace.Owner.Post<object>(
+            $"/api/sprints/{sprint.Id}/close",
+            new { incompleteItemsDestination = "ReturnToBacklog" });
 
         var velocity = await workspace.Owner.Get<Velocity>(
             $"/api/projects/{workspace.ProjectId}/reports/velocity");

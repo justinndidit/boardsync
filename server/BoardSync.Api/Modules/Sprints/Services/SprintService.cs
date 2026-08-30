@@ -43,14 +43,35 @@ public class SprintService : ISprintService
         _logger         = logger;
     }
 
-    private static void ValidateDates(DateTime startDate, DateTime endDate)
-{
-    if (startDate.Date < DateTime.UtcNow.Date)
-        throw new BusinessRuleException("Sprint start date cannot be in the past.");
+    /// <summary>
+    /// Checks a sprint's window.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// End is compared as an <b>instant</b>: sprints carry a time of day now, so a team can end one
+    /// at five on a Friday rather than at midnight UTC, and comparing dates would have let a sprint
+    /// end before it started on the same day.
+    /// </para>
+    /// <para>
+    /// Start is compared against <b>the beginning of today</b>, not the current instant. "Not in the
+    /// past" has always meant "not a past day" here — a sprint that began at nine this morning is an
+    /// ordinary thing to record, and rejecting it would also make "start now" fail intermittently
+    /// as the request aged in flight.
+    /// </para>
+    /// <para>
+    /// <paramref name="mustBeFuture"/> is false when editing: an Active sprint's start is in the
+    /// past by definition, and requiring otherwise made a running sprint's end date uneditable.
+    /// </para>
+    /// </remarks>
+    private static void ValidateDates(
+        DateTime startDate, DateTime endDate, bool mustBeFuture = true)
+    {
+        if (mustBeFuture && startDate < DateTime.UtcNow.Date)
+            throw new BusinessRuleException("Sprint start cannot be before today.");
 
-    if (endDate <= startDate)
-        throw new BusinessRuleException("End date must be after start date.");
-}
+        if (endDate <= startDate)
+            throw new BusinessRuleException("A sprint must end after it starts.");
+    }
 
     // ── CRUD ──────────────────────────────────────────────────────────────────
 
@@ -73,8 +94,10 @@ public class SprintService : ISprintService
             TeamId    = teamId,
             Number    = await _repository.GetNextNumberAsync(teamId, ct),
             Goal      = request.Goal?.Trim(),
-            StartDate = DateTime.SpecifyKind(request.StartDate.Date, DateTimeKind.Utc),
-            EndDate   = DateTime.SpecifyKind(request.EndDate.Date, DateTimeKind.Utc),
+            // The whole instant, not the date. Truncating to midnight threw away the time a team
+            // chose and made every sprint end at 00:00 UTC, which is the middle of somebody's night.
+            StartDate = DateTime.SpecifyKind(request.StartDate.ToUniversalTime(), DateTimeKind.Utc),
+            EndDate   = DateTime.SpecifyKind(request.EndDate.ToUniversalTime(), DateTimeKind.Utc),
             Status    = SprintStatus.Planning,
             CreatedBy = createdBy
         };
@@ -139,17 +162,26 @@ public class SprintService : ISprintService
     {
        var sprint = await GetOrThrowAsync(sprintId, ct);
 
-        if (sprint.Status != SprintStatus.Planning)
-           throw new BusinessRuleException("Only Planning sprints can be updated.");
+        /*
+         * A running sprint can be extended or cut short — that happens, and refusing it meant
+         * closing the sprint and making another, which loses its number and its record.
+         *
+         * Completed stays locked. Its dates are what every figure was measured against — completed
+         * points are counted at the end date — so moving them would rewrite past velocity with no
+         * event to explain the change.
+         */
+        if (sprint.Status == SprintStatus.Completed)
+            throw new BusinessRuleException(
+                "A completed sprint cannot be edited. Its dates are what its figures were measured "
+                + "against, and moving them would change what it reported having delivered.");
 
-         ValidateDates(request.StartDate, request.EndDate);
-        if (request.EndDate <= request.StartDate)
-            throw new BusinessRuleException("End date must be after start date.");
+        // Editing, so the start is allowed to be in the past — it usually is.
+        ValidateDates(request.StartDate, request.EndDate, mustBeFuture: false);
 
         var changes      = new List<(string Field, string? Old, string? New)>();
         var newGoal      = request.Goal?.Trim();
-        var newStartDate = DateTime.SpecifyKind(request.StartDate.Date, DateTimeKind.Utc);
-        var newEndDate   = DateTime.SpecifyKind(request.EndDate.Date, DateTimeKind.Utc);
+        var newStartDate = DateTime.SpecifyKind(request.StartDate.ToUniversalTime(), DateTimeKind.Utc);
+        var newEndDate   = DateTime.SpecifyKind(request.EndDate.ToUniversalTime(), DateTimeKind.Utc);
 
         if (sprint.Goal      != newGoal)
             changes.Add(("Goal",      sprint.Goal,                    newGoal));
@@ -181,6 +213,22 @@ public class SprintService : ISprintService
         CancellationToken ct = default)
     {
         var sprint = await GetOrThrowAsync(sprintId, ct);
+
+        /*
+         * Completing is not a status change.
+         *
+         * It is a status change *plus* a decision about the work that did not finish, and this
+         * endpoint only ever made the first half — leaving unfinished items attached to a sprint
+         * nobody opens again, in no backlog, in no sprint, on no board. The UI was moved to
+         * POST /close; this closes the door behind it, because the door was the bug rather than the
+         * client that walked through it.
+         */
+        if (newStatus == SprintStatus.Completed)
+        {
+            throw new BusinessRuleException(
+                "Use POST /api/sprints/{id}/close to complete a sprint. Closing decides where "
+                + "unfinished work goes, and a bare status change would strand it.");
+        }
 
         ValidateTransition(sprint.Status, newStatus);
 
@@ -297,6 +345,14 @@ public class SprintService : ISprintService
 
         await _repository.SaveChangesAsync(ct);
 
+        /*
+         * The backlog is "everything with no sprint", and this is one of two doors into a sprint.
+         * The other — the backlog's own move-to-sprint — already pointed the entry here; this one
+         * did not, so an item committed from a board stayed listed as unscheduled and could be
+         * planned into a second sprint by anybody reading the backlog.
+         */
+        await _backlog.AssignSprintAsync(sprint.Id, [workItem.Id], ct);
+
         // Read directly rather than through the project service: this module already holds the
         // context, and the key is one column on a row it has the id for.
         var projectKey = await _context.Projects
@@ -307,7 +363,7 @@ public class SprintService : ISprintService
         return new SprintWorkItemResponse(
             workItem.Id, $"{projectKey}-{workItem.Number}", workItem.Title, workItem.Type,
             workItem.State, workItem.Priority,
-            workItem.AssigneeId, workItem.StoryPoints, position);
+            workItem.AssigneeId, workItem.StoryPoints, position, entry.Rank);
     }
 
     public async Task RemoveWorkItemAsync(
@@ -329,6 +385,10 @@ public class SprintService : ISprintService
             workItemId, title, removedBy), ct);
 
         await _repository.SaveChangesAsync(ct);
+
+        // And back out again — taking work out of a sprint returns it to the unscheduled backlog,
+        // at the rank it left, because the entry was kept rather than deleted.
+        await _backlog.ClearSprintAsync(sprintId, [workItemId], ct);
     }
 
     public async Task<PagedResult<SprintWorkItemResponse>> GetWorkItemsAsync(
@@ -456,8 +516,20 @@ public class SprintService : ISprintService
         {
             if (request.IncompleteItemsDestination == IncompleteItemsDestination.ReturnToBacklog)
             {
-                // Only the backlog entries this sprint held; an item that also sits in another
-                // sprint keeps that membership. The sprint-side rows are dropped below.
+                /*
+                 * The backlog entry is released; the SprintWorkItem row is deliberately kept.
+                 *
+                 * The comment here used to claim the sprint-side rows were dropped "below". They
+                 * are not, and they must not be: CommittedItems and CommittedPoints are counted
+                 * from sprint membership, so dropping the rows would rewrite the sprint's own
+                 * record. A sprint that committed to eight items and finished five would report
+                 * five committed and five completed — a hundred percent, every time, for every
+                 * team — and velocity would stop describing anything.
+                 *
+                 * Returning an item mid-sprint through the backlog module is a different act and
+                 * does remove the row: taking work out of a running sprint is a change of scope,
+                 * and the sprint should not be credited with having carried it.
+                 */
                 await _backlog.ClearSprintAsync(sprintId, incompleteIds, ct);
             }
             else
@@ -540,6 +612,11 @@ public class SprintService : ISprintService
 
     private static string SprintName(Sprint sprint) => $"Sprint {sprint.Number}";
 
+    /// <remarks>
+    /// Still lists <c>Active → Completed</c> as a legal move of the state machine, because it is —
+    /// <see cref="CloseAsync"/> makes exactly that transition. What <see cref="UpdateStatusAsync"/>
+    /// refuses is reaching it through a bare status change.
+    /// </remarks>
     private static void ValidateTransition(SprintStatus current, SprintStatus next)
     {
         var valid = (current, next) switch

@@ -1,3 +1,5 @@
+using BoardSync.Api.Modules.Intelligence.DTOs;
+using BoardSync.Api.Modules.Intelligence.Domain;
 using System.Text.Json;
 
 using Anthropic;
@@ -51,12 +53,13 @@ public sealed class ClaudeNarrator : INarrator
     public bool IsConfigured => _client is not null;
 
     public async Task<NarrationOutcome?> NarrateAsync(
-        SprintReport report,
+        NarrativeInput input,
         CancellationToken ct = default)
     {
         if (_client is null) return null;
 
-        var figures = JsonSerializer.Serialize(report);
+        var figures = JsonSerializer.Serialize(
+            input, new JsonSerializerOptions(JsonSerializerDefaults.Web));
 
         try
         {
@@ -76,35 +79,14 @@ public sealed class ClaudeNarrator : INarrator
                     Format = Schema(),
                 },
 
-                System = """
-                    You write short status notes about software sprints for the team that ran them.
-
-                    You are given a sprint report as JSON. Every number you write MUST appear in it.
-                    Do not calculate, estimate, extrapolate, or compare against anything not present
-                    — no trends, no "up from last sprint", no percentages you worked out yourself.
-                    If something interesting would require a figure you were not given, leave it out.
-
-                    Prefer saying less. A sprint where nothing stands out should get an empty
-                    observations list rather than filler.
-
-                    Two things are worth noticing when the figures show them, because they have
-                    different owners: work finished and waiting to be tested
-                    (awaitingVerificationItems, medianVerificationWaitHours) is a QA queue, not slow
-                    development; and items never started (itemsWithNoActivity) is committed work
-                    nobody picked up. Say which it is.
-
-                    A null median means there was not enough closed work to measure. It does not
-                    mean zero, and must never be written as one.
-
-                    Write plainly. No praise, no encouragement, no exclamation marks.
-                    """,
+                System = IntelligencePrompts.Narrator,
 
                 Messages =
                 [
                     new()
                     {
                         Role = Role.User,
-                        Content = $"Sprint report:\n{figures}",
+                        Content = $"Sprint:\n{figures}",
                     },
                 ],
             }, cancellationToken: ct);
@@ -126,14 +108,18 @@ public sealed class ClaudeNarrator : INarrator
                 parsed.Headline ?? "",
                 parsed.Summary ?? "",
                 parsed.Observations ?? [],
-                (int)((response.Usage?.InputTokens ?? 0) + (response.Usage?.OutputTokens ?? 0)));
+                (int)((response.Usage?.InputTokens ?? 0) + (response.Usage?.OutputTokens ?? 0)),
+                parsed.Outcome ?? "",
+                parsed.Shipped ?? [],
+                parsed.DidNotLand ?? [],
+                parsed.WhereWorkIsSitting ?? []);
         }
         catch (Exception ex)
         {
             // Reported as "no narrative", not as a failed request. The sprint report is the thing
             // the caller asked for and it is already computed; losing the prose is a degradation,
             // not an error.
-            _logger.LogWarning(ex, "Narration failed for sprint {SprintId}", report.Summary.SprintId);
+            _logger.LogWarning(ex, "Narration failed for sprint {SprintId}", input.Report.Summary.SprintId);
 
             return null;
         }
@@ -149,14 +135,34 @@ public sealed class ClaudeNarrator : INarrator
             {
                 headline = new { type = "string" },
                 summary = new { type = "string" },
+                outcome = new { type = "string" },
                 observations = new
+                {
+                    type = "array",
+                    items = new { type = "string" },
+                },
+                shipped = new
+                {
+                    type = "array",
+                    items = new { type = "string" },
+                },
+                didNotLand = new
+                {
+                    type = "array",
+                    items = new { type = "string" },
+                },
+                whereWorkIsSitting = new
                 {
                     type = "array",
                     items = new { type = "string" },
                 },
             }),
             ["required"] = JsonSerializer.SerializeToElement(
-                new[] { "headline", "summary", "observations" }),
+                new[]
+                {
+                    "headline", "summary", "outcome",
+                    "observations", "shipped", "didNotLand", "whereWorkIsSitting",
+                }),
             ["additionalProperties"] = JsonSerializer.SerializeToElement(false),
         },
     };
@@ -164,5 +170,9 @@ public sealed class ClaudeNarrator : INarrator
     private sealed record NarrativeShape(
         string? Headline,
         string? Summary,
-        List<string>? Observations);
+        string? Outcome,
+        List<string>? Observations,
+        List<string>? Shipped,
+        List<string>? DidNotLand,
+        List<string>? WhereWorkIsSitting);
 }

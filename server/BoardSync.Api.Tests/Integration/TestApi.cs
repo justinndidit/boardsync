@@ -110,6 +110,9 @@ public sealed class TestApi
     public Task<HttpResponseMessage> PatchRaw(string url, object body) =>
         _http.PatchAsJsonAsync(url, body);
 
+    public Task<HttpResponseMessage> PutRaw(string url, object body) =>
+        _http.PutAsJsonAsync(url, body);
+
     /// <summary>Sends a GET carrying an <c>If-None-Match</c>, for cache revalidation tests.</summary>
     public Task<HttpResponseMessage> GetRawWithETag(string url, string etag)
     {

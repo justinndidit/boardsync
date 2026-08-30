@@ -214,6 +214,7 @@ public class SprintRepository : ISprintRepository
                     w.AssigneeId,
                     w.StoryPoints,
                     sw.Position,
+                    sw.Rank,
                     Key = _context.Projects
                         .Where(p => p.Id == w.ProjectId)
                         .Select(p => p.Key)
@@ -224,7 +225,7 @@ public class SprintRepository : ISprintRepository
         return (
             [.. items.Select(i => new SprintWorkItemResponse(
                 i.Id, $"{i.Key}-{i.Number}", i.Title, i.Type, i.State,
-                i.Priority, i.AssigneeId, i.StoryPoints, i.Position))],
+                i.Priority, i.AssigneeId, i.StoryPoints, i.Position, i.Rank))],
             total);
     }
 
