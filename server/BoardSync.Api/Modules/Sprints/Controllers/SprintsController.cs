@@ -152,10 +152,18 @@ public class SprintsController : ControllerBase
     }
 
     /// <summary>
-    /// Transition sprint status: Planning → Active → Completed.
-    /// Only one Active sprint per project is allowed at a time.
-    /// Requires <c>sprint:manage</c>.
+    /// Start a sprint: <c>Planning → Active</c>.
     /// </summary>
+    /// <remarks>
+    /// <b>This endpoint no longer completes a sprint.</b> Completing decides where unfinished work
+    /// goes as well as flipping the status, so it lives at <c>POST /api/sprints/{id}/close</c>.
+    /// Asking for <c>Completed</c> here is refused with a message saying so.
+    /// </remarks>
+    /// <remarks>
+    /// One Active sprint per <b>team</b> at a time — not per project. A sprint belongs to the team
+    /// and may span every project that team serves; see <c>docs/adr-001-team-sprints.md</c>.
+    /// Requires <c>sprint:manage</c>.
+    /// </remarks>
     [HttpPatch("api/sprints/{sprintId:guid}/status")]
     [RequirePermission(Permissions.SprintManage, From = "sprintId")]
     [ProducesResponseType(typeof(ApiResponse<SprintResponse>), StatusCodes.Status200OK)]

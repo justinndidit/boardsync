@@ -54,6 +54,11 @@ public class NarrativeServiceTests
 
     private sealed class FakeReporting : IReportingService
     {
+        /// <summary>Not exercised here — the narrator is handed a sprint report, not a flow.</summary>
+        public Task<CumulativeFlowReport> GetCumulativeFlowAsync(
+            Guid projectId, int days, CancellationToken ct = default) =>
+            Task.FromResult(new CumulativeFlowReport([], 0));
+
         public Task<SprintReport> GetSprintReportAsync(Guid sprintId, CancellationToken ct = default) =>
             Task.FromResult(Report());
 

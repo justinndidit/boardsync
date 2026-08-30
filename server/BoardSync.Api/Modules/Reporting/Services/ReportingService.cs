@@ -19,6 +19,10 @@ public interface IReportingService
     /// <summary>The velocity of the team that builds a project.</summary>
     Task<VelocityReport> GetVelocityForProjectAsync(
         Guid projectId, int sprintCount, CancellationToken ct = default);
+
+    /// <summary>How a project's work has been distributed across states, day by day.</summary>
+    Task<CumulativeFlowReport> GetCumulativeFlowAsync(
+        Guid projectId, int days, CancellationToken ct = default);
 }
 
 /// <inheritdoc />
@@ -52,6 +56,16 @@ public class ReportingService : IReportingService
     /// The cap is generous; the default is smaller.
     /// </remarks>
     public const int MaxVelocitySprints = 24;
+
+    /// <summary>
+    /// The longest cumulative-flow window.
+    /// </summary>
+    /// <remarks>
+    /// The series is reconstructed by replaying every item's transitions against every day, so its
+    /// cost is items times days. A quarter is long enough to show a queue forming and short enough
+    /// that a busy project does not turn one chart into the slowest request in the product.
+    /// </remarks>
+    public const int MaxCumulativeFlowDays = 90;
 
     public async Task<SprintReport> GetSprintReportAsync(Guid sprintId, CancellationToken ct = default)
     {
@@ -209,6 +223,90 @@ public class ReportingService : IReportingService
             ?? throw new NotFoundException("Project", projectId);
 
         return await GetTeamVelocityAsync(teamId, sprintCount, ct);
+    }
+
+    /// <inheritdoc />
+    public async Task<CumulativeFlowReport> GetCumulativeFlowAsync(
+        Guid projectId, int days, CancellationToken ct = default)
+    {
+        if (!await _context.Projects.AnyAsync(p => p.Id == projectId, ct))
+            throw new NotFoundException("Project", projectId);
+
+        var window = Math.Clamp(days, 1, MaxCumulativeFlowDays);
+
+        var today = DateTime.UtcNow.Date;
+        var start = today.AddDays(-(window - 1));
+
+        /*
+         * Created on or before the last day in the window. An item made tomorrow has no place on a
+         * chart of what has happened, and one made after the window still belongs to the days after
+         * it was created — which the per-day check below handles.
+         */
+        var items = await _context.WorkItems
+            .Where(w => w.ProjectId == projectId && w.IsActive)
+            .Select(w => new { w.Id, w.CreatedAt })
+            .ToListAsync(ct);
+
+        if (items.Count == 0)
+            return new CumulativeFlowReport([], 0);
+
+        var timelines = await LoadTimelinesAsync(items.Select(i => i.Id), ct);
+
+        var points = new List<CumulativeFlowPoint>(window);
+
+        for (var day = start; day <= today; day = day.AddDays(1))
+        {
+            // End of this day, so a transition made at any hour of it is counted on it.
+            var cutoff = day.AddDays(1);
+
+            var counts = new Dictionary<WorkItemState, int>();
+
+            foreach (var item in items)
+            {
+                // Not yet created is not the same as New: an item that did not exist should not be
+                // holding up the bottom band on days before somebody wrote it down.
+                if (item.CreatedAt >= cutoff) continue;
+
+                var state = StateAt(timelines, item.Id, cutoff);
+
+                counts[state] = counts.GetValueOrDefault(state) + 1;
+            }
+
+            points.Add(new CumulativeFlowPoint(
+                Date: DateTime.SpecifyKind(day, DateTimeKind.Utc),
+                New: counts.GetValueOrDefault(WorkItemState.New),
+                Active: counts.GetValueOrDefault(WorkItemState.Active),
+                InReview: counts.GetValueOrDefault(WorkItemState.InReview),
+                Resolved: counts.GetValueOrDefault(WorkItemState.Resolved),
+                Closed: counts.GetValueOrDefault(WorkItemState.Closed)));
+        }
+
+        return new CumulativeFlowReport(points, items.Count);
+    }
+
+    /// <summary>
+    /// The state a work item stood in immediately before <paramref name="cutoff"/>.
+    /// </summary>
+    /// <remarks>
+    /// The last transition recorded before the cutoff, or <c>New</c> when there is none — an item
+    /// with no history has never moved, which is exactly what New means. Timelines are ordered by
+    /// time on the way out of <see cref="LoadTimelinesAsync"/>, so this is a walk rather than a sort.
+    /// </remarks>
+    private static WorkItemState StateAt(
+        Dictionary<Guid, List<StateChange>> timelines, Guid workItemId, DateTime cutoff)
+    {
+        if (!timelines.TryGetValue(workItemId, out var changes)) return WorkItemState.New;
+
+        var state = WorkItemState.New;
+
+        foreach (var change in changes)
+        {
+            if (change.At >= cutoff) break;
+
+            state = change.To;
+        }
+
+        return state;
     }
 
     // ── Computation ───────────────────────────────────────────────────────────

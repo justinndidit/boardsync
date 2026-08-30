@@ -1,3 +1,4 @@
+using BoardSync.Api.Shared.Kernel;
 using System.Text.Json;
 
 using BoardSync.Api.Data;
@@ -21,6 +22,10 @@ public interface IProposalService
         Guid projectId, DecomposeRequest request, Guid requestedBy, CancellationToken ct = default);
 
     Task<ProposalView> GetAsync(Guid proposalId, CancellationToken ct = default);
+
+    /// <summary>Every proposal a project has produced, newest first.</summary>
+    Task<PagedResult<ProposalSummary>> ListAsync(
+        Guid projectId, PaginationQuery pagination, CancellationToken ct = default);
 
     Task<AcceptanceResult> AcceptAsync(
         Guid proposalId, AcceptProposalRequest request, Guid acceptedBy, CancellationToken ct = default);
@@ -130,6 +135,41 @@ public sealed class ProposalService : IProposalService
             ?? throw new NotFoundException("Proposal", proposalId);
 
         return View(proposal);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// Proposals are kept after the decision, and this is what makes that worth anything: without a
+    /// listing, a proposal was reachable only by its id, which nothing recorded — so the record that
+    /// <c>docs/adr-002-proposals.md</c> keeps deliberately could not be read back.
+    /// </para>
+    /// <para>
+    /// Newest first, and the draft is left out. A page of thirty proposals would otherwise carry
+    /// thirty hierarchies nobody asked to read.
+    /// </para>
+    /// </remarks>
+    public async Task<PagedResult<ProposalSummary>> ListAsync(
+        Guid projectId, PaginationQuery pagination, CancellationToken ct = default)
+    {
+        var query = _context.Proposals
+            .AsNoTracking()
+            .Where(p => p.ProjectId == projectId)
+            .OrderByDescending(p => p.CreatedAt)
+            .ThenByDescending(p => p.Id);
+
+        var total = await query.CountAsync(ct);
+
+        var page = await query
+            .Skip((pagination.Page - 1) * pagination.PageSize)
+            .Take(pagination.PageSize)
+            .ToListAsync(ct);
+
+        return new PagedResult<ProposalSummary>(
+            [.. page.Select(Summarize)],
+            total,
+            pagination.Page,
+            pagination.PageSize);
     }
 
     public async Task<AcceptanceResult> AcceptAsync(
@@ -245,6 +285,54 @@ public sealed class ProposalService : IProposalService
 
         await _context.SaveChangesAsync(ct);
     }
+
+    /// <summary>How long a preview of the source document to keep in a listing.</summary>
+    /// <remarks>
+    /// Enough to tell two proposals apart at a glance and short enough that a page of them is not a
+    /// page of PRDs. The full text stays on the row for anyone who opens it.
+    /// </remarks>
+    private const int PreviewLength = 140;
+
+    private static ProposalSummary Summarize(Proposal proposal)
+    {
+        /*
+         * The node count is read from the stored draft rather than kept as a column. It is derived
+         * data, and a column would be one more thing that can disagree with the JSON beside it.
+         */
+        int? nodes = null;
+
+        if (proposal.DraftJson is not null)
+        {
+            try
+            {
+                var draft = JsonSerializer.Deserialize<Decomposition>(proposal.DraftJson, Json);
+
+                nodes = draft is null ? null : Count(draft.Roots);
+            }
+            catch (JsonException)
+            {
+                // A draft that no longer parses is a row from an older shape. The proposal is still
+                // worth listing — it has a status and a date — so the count is simply absent.
+            }
+        }
+
+        var source = proposal.SourceText.Trim();
+
+        return new ProposalSummary(
+            proposal.Id,
+            proposal.ProjectId,
+            proposal.Status.ToString(),
+            proposal.FailureReason,
+            proposal.TokensSpent,
+            proposal.AcceptedCount,
+            nodes,
+            source.Length <= PreviewLength ? source : source[..PreviewLength] + "…",
+            proposal.CreatedAt,
+            proposal.DecidedAt);
+    }
+
+    private static int Count(IReadOnlyList<ProposedNode> nodes) =>
+        nodes.Sum(node => 1 + Count(node.Children));
 
     private static ProposalView View(Proposal proposal) => new(
         proposal.Id,

@@ -1,3 +1,5 @@
+using System.Net;
+
 namespace BoardSync.Api.Tests.Integration;
 
 /// <summary>
@@ -138,6 +140,75 @@ public class SprintCloseReportingTests(BoardSyncApiFactory factory)
         Assert.Equal(0, report.Summary.AwaitingVerificationItems);
     }
 
+    [Fact]
+    public async Task ASprintCannotBeCompletedThroughABareStatusChange()
+    {
+        var workspace = await Workspace.CreateAsync(factory);
+
+        var sprint = await workspace.Owner.Post<Created>(
+            $"/api/teams/{workspace.TeamId}/sprints",
+            new
+            {
+                goal = "the door that stranded work",
+                startDate = DateTime.UtcNow.AddDays(1),
+                endDate = DateTime.UtcNow.AddDays(15),
+            });
+
+        await workspace.Owner.Patch<object>(
+            $"/api/sprints/{sprint.Id}/status", new { status = "Active" });
+
+        var stranded = await workspace.AddWorkItemAsync("Would have been stranded");
+
+        await workspace.Owner.Post($"/api/sprints/{sprint.Id}/workitems",
+            new { workItemId = stranded });
+
+        /*
+         * PATCH /status flipped the status and did nothing else, so anything unfinished stayed
+         * attached to a sprint nobody opens again — in no backlog, in no sprint, on no board. The
+         * UI was moved to POST /close; this closes the door behind it, because the door was the bug
+         * rather than the client that walked through it.
+         */
+        var response = await workspace.Owner.PatchRaw(
+            $"/api/sprints/{sprint.Id}/status", new { status = "Completed" });
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+
+        Assert.Contains("close",
+            await TestApi.MessageOf(response), StringComparison.OrdinalIgnoreCase);
+
+        // Refused, not half-applied: the sprint is still running and still holds its work.
+        var report = await workspace.Owner.Get<Report>(
+            $"/api/sprints/{sprint.Id}/report");
+
+        Assert.Equal(1, report.Summary.CommittedItems);
+    }
+
+    [Fact]
+    public async Task ASprintCanStillBeStarted()
+    {
+        var workspace = await Workspace.CreateAsync(factory);
+
+        var sprint = await workspace.Owner.Post<Created>(
+            $"/api/teams/{workspace.TeamId}/sprints",
+            new
+            {
+                goal = "the transition that remains",
+                startDate = DateTime.UtcNow.AddDays(1),
+                endDate = DateTime.UtcNow.AddDays(15),
+            });
+
+        // Planning → Active is the only move this endpoint still makes, and it has to keep working:
+        // nothing else starts a sprint, and only an Active sprint can be closed.
+        await workspace.Owner.Patch<object>(
+            $"/api/sprints/{sprint.Id}/status", new { status = "Active" });
+
+        var started = await workspace.Owner.Get<SprintStatus>(
+            $"/api/sprints/{sprint.Id}");
+
+        Assert.Equal("Active", started.Status);
+    }
+
+    private sealed record SprintStatus(string Status);
     private sealed record Created(Guid Id);
     private sealed record CloseResult(int CompletedItemCount, int IncompleteItemCount);
     private sealed record Summary(int CommittedItems, int CompletedItems, int AwaitingVerificationItems);

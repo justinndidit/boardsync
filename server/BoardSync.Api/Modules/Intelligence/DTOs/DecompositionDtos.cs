@@ -104,3 +104,30 @@ public sealed record AcceptanceResult(
     Guid ProposalId,
     int Created,
     IReadOnlyList<Guid> WorkItemIds);
+
+/// <summary>
+/// One proposal in a list — enough to choose between them, without the draft.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Deliberately excludes <c>Draft</c>. A list of thirty proposals would otherwise carry thirty
+/// hierarchies nobody has asked to read, and the draft is what <c>GET /proposals/{id}</c> is for.
+/// </para>
+/// <para>
+/// <c>NodeCount</c> is how many nodes the draft holds, or null when there is none. <c>Preview</c>
+/// is the opening of the document this came from, so a reader can tell two proposals apart — the
+/// source text is kept verbatim precisely so a proposal can be explained after the fact, and "why
+/// did it suggest this?" is not answerable from the output alone.
+/// </para>
+/// </remarks>
+public sealed record ProposalSummary(
+    Guid Id,
+    Guid ProjectId,
+    string Status,
+    string? Detail,
+    int TokensSpent,
+    int AcceptedCount,
+    int? NodeCount,
+    string Preview,
+    DateTime CreatedAt,
+    DateTime? DecidedAt);

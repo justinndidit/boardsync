@@ -109,4 +109,33 @@ public class ReportingController : ControllerBase
 
         return Ok(new ApiResponse<VelocityReport>(true, "Velocity retrieved.", report));
     }
+
+    /// <summary>
+    /// How this project's work has been spread across states, day by day. Requires
+    /// <c>project:read</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Reconstructed from <c>WorkItemHistory</c> like every other figure here — nothing is
+    /// snapshotted, so the series is correct for days before this endpoint existed.
+    /// </para>
+    /// <para>
+    /// Project-wide rather than sprint-scoped, and deliberately: cumulative flow shows where work
+    /// piles up over weeks, and a two-week sprint is too short a window for a queue to become
+    /// visible. The burndown is the sprint-scoped chart.
+    /// </para>
+    /// </remarks>
+    [HttpGet("api/projects/{projectId:guid}/reports/cumulative-flow")]
+    [RequirePermission(Permissions.ProjectRead, From = "projectId")]
+    [ProducesResponseType(typeof(ApiResponse<CumulativeFlowReport>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetCumulativeFlow(
+        Guid projectId, [FromQuery] int days = 30, CancellationToken ct = default)
+    {
+        var report = await _reporting.GetCumulativeFlowAsync(projectId, days, ct);
+
+        return Ok(new ApiResponse<CumulativeFlowReport>(
+            true, "Cumulative flow retrieved.", report));
+    }
 }

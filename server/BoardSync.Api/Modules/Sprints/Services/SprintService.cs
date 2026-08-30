@@ -182,6 +182,22 @@ public class SprintService : ISprintService
     {
         var sprint = await GetOrThrowAsync(sprintId, ct);
 
+        /*
+         * Completing is not a status change.
+         *
+         * It is a status change *plus* a decision about the work that did not finish, and this
+         * endpoint only ever made the first half — leaving unfinished items attached to a sprint
+         * nobody opens again, in no backlog, in no sprint, on no board. The UI was moved to
+         * POST /close; this closes the door behind it, because the door was the bug rather than the
+         * client that walked through it.
+         */
+        if (newStatus == SprintStatus.Completed)
+        {
+            throw new BusinessRuleException(
+                "Use POST /api/sprints/{id}/close to complete a sprint. Closing decides where "
+                + "unfinished work goes, and a bare status change would strand it.");
+        }
+
         ValidateTransition(sprint.Status, newStatus);
 
         if (newStatus == SprintStatus.Active
@@ -564,6 +580,11 @@ public class SprintService : ISprintService
 
     private static string SprintName(Sprint sprint) => $"Sprint {sprint.Number}";
 
+    /// <remarks>
+    /// Still lists <c>Active → Completed</c> as a legal move of the state machine, because it is —
+    /// <see cref="CloseAsync"/> makes exactly that transition. What <see cref="UpdateStatusAsync"/>
+    /// refuses is reaching it through a bare status change.
+    /// </remarks>
     private static void ValidateTransition(SprintStatus current, SprintStatus next)
     {
         var valid = (current, next) switch

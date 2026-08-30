@@ -116,3 +116,47 @@ public record VelocityReport(
     IReadOnlyList<VelocityPoint> Sprints,
     double? AverageCompletedPoints,
     CycleTimeMetrics CycleTime);
+
+/// <summary>
+/// How many work items stood in each state at the end of one day.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <c>Date</c> is midnight UTC of the day these counts describe.
+/// </para>
+/// <para>
+/// A count per state, not a delta — a cumulative flow diagram is read as bands stacked on each
+/// other, and the height of a band is how much work is sitting in that state. The interesting shape
+/// is a band that widens: work arriving faster than it leaves.
+/// </para>
+/// <para>
+/// <b>Every state is present on every point, including zeroes.</b> A client stacking bands needs
+/// the same series on every day or the areas do not line up; omitting empty states would make a
+/// band appear to jump sideways on the day something first entered it.
+/// </para>
+/// </remarks>
+public record CumulativeFlowPoint(
+    DateTime Date,
+    int New,
+    int Active,
+    int InReview,
+    int Resolved,
+    int Closed);
+
+/// <summary>
+/// The flow of a project's work through its states over a window of days.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <c>Points</c> is one per day, oldest first, never padded past today. <c>TotalItems</c> is how
+/// many work items the series was reconstructed from — the height the topmost band reaches once
+/// everything has been created.
+/// </para>
+/// <para>
+/// <b>Project-wide, not per sprint.</b> Cumulative flow is about where work piles up over time, and
+/// a sprint is too short a window to show a queue forming. The burndown is the sprint-scoped chart.
+/// </para>
+/// </remarks>
+public record CumulativeFlowReport(
+    IReadOnlyList<CumulativeFlowPoint> Points,
+    int TotalItems);
