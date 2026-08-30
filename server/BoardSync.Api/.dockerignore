@@ -1,0 +1,13 @@
+# Secrets must not reach an image.
+#
+# The app reads a `.env` at startup, and although anything already in the environment wins — so a
+# stray file could never override what Compose passes in — a key baked into a layer is a key that
+# travels with every copy of the image. Keep it out entirely.
+.env
+.env.*
+!.env.sample
+
+# Build output and local state, which only slow the context transfer.
+bin/
+obj/
+*.user

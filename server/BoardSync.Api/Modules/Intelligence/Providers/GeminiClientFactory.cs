@@ -30,8 +30,13 @@ public sealed class GeminiClientFactory
          * Configurable because model names move faster than releases do. A deployment that needs a
          * different one should not need a build.
          */
-        _model = configuration["Intelligence:GeminiModel"]
-            ?? "gemini-2.5-flash";
+        var model = configuration["Intelligence:GeminiModel"]
+            ?? Environment.GetEnvironmentVariable("GEMINI_MODEL");
+
+        // An empty value in a `.env` reads as "not set", not as a model called "".
+        _model = string.IsNullOrWhiteSpace(model)
+            ? "gemini-2.5-flash"
+            : model.Trim();
     }
 
     public GeminiClient? Create() =>

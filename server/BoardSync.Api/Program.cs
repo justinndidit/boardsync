@@ -62,6 +62,21 @@ using BoardSync.Api.Modules.Sprints.Domain.Helpers;
 
 var builder = WebApplication.CreateBuilder(args);
 
+/*
+ * A `.env` beside the app or above it, read into the environment before configuration is built.
+ *
+ * .NET does not do this itself, so the file in this repository only ever fed docker-compose's
+ * variable substitution — and somebody who put a key in it and ran locally got a process that had
+ * never heard of the file, with no error, because a missing key is a legitimate state.
+ *
+ * **Anything already in the environment wins.** That is what keeps it safe in a container: Compose
+ * passes real variables in, so a `.env` could only ever supply values nobody had set. The result is
+ * logged below rather than left as magic.
+ */
+var environmentFile = EnvironmentFile.Load(builder.Environment.ContentRootPath);
+
+builder.Configuration.AddEnvironmentVariables();
+
 //db connection string
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
 var CORSPolicy = "DefaultPolicy";
@@ -313,8 +328,18 @@ builder.Services.AddScoped<IReportingService, ReportingService>();
  * checked by the same guards afterwards. Swapping one for the other changes who writes the prose,
  * not what is allowed through.
  */
+/*
+ * Two spellings, because two things read this.
+ *
+ * `Intelligence:Provider` is the configuration path — set in appsettings, or as
+ * `Intelligence__Provider` in the environment. `INTELLIGENCE_PROVIDER` is the flat name the
+ * `.env.sample` and compose file use, and somebody who copies that file into a `.env` and runs the
+ * API directly expects it to work. It does now. The same pattern the API keys already follow.
+ */
 var intelligenceProvider =
-    (builder.Configuration["Intelligence:Provider"] ?? "Anthropic").Trim();
+    (builder.Configuration["Intelligence:Provider"]
+     ?? Environment.GetEnvironmentVariable("INTELLIGENCE_PROVIDER")
+     ?? "Anthropic").Trim();
 
 if (!string.Equals(intelligenceProvider, "Anthropic", StringComparison.OrdinalIgnoreCase)
     && !string.Equals(intelligenceProvider, "Gemini", StringComparison.OrdinalIgnoreCase))
@@ -640,6 +665,28 @@ else
     app.Logger.LogInformation(
         "No ForwardedHeaders:KnownProxies or :KnownNetworks configured — forwarded headers are ignored " +
         "and the socket peer address is used as the client IP. Configure them if running behind a proxy.");
+}
+
+/*
+ * Where configuration came from, said before anything that depends on it.
+ *
+ * A `.env` that is read is worth naming: two of them exist in a normal checkout — one at the
+ * repository root for Compose and one beside the server — and knowing which was picked up is the
+ * difference between a five-minute fix and an afternoon.
+ */
+if (environmentFile.Path is { } envPath)
+{
+    app.Logger.LogInformation(
+        "Loaded {Applied} variable(s) from {Path}. {Skipped} were already set in the environment "
+        + "and were left alone.",
+        environmentFile.Applied, envPath, environmentFile.Skipped);
+}
+else
+{
+    app.Logger.LogDebug(
+        "No .env found at or above {ContentRoot}; configuration comes from appsettings and the "
+        + "environment.",
+        app.Environment.ContentRootPath);
 }
 
 /*
