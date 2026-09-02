@@ -44,7 +44,7 @@ public interface IProjectService
 
     Task<bool> ExistsAsync(Guid projectId, CancellationToken ct = default);
 
-    Task<PagedResult<ProjectSummaryResponse>> GetForOrgAsync(Guid orgId, PaginationQuery pagination, CancellationToken ct = default);
+    Task<PagedResult<ProjectResponse>> GetForOrgAsync(Guid orgId, PaginationQuery pagination, CancellationToken ct = default);
     Task<ProjectResponse> UpdateAsync(Guid projectId, UpdateProjectRequest request, Guid updatedBy, CancellationToken ct = default);
 
     /// <summary>

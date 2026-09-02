@@ -46,12 +46,6 @@ public record ProjectResponse(
     DateTime CreatedAt
 );
 
-public record ProjectSummaryResponse(
-    Guid Id,
-    string Slug,
-    string Name
-);
-
 public record TeamResponse(
     Guid Id,
     Guid OrganizationId,

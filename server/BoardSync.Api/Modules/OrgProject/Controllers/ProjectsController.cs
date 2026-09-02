@@ -58,12 +58,12 @@ public class ProjectsController : ControllerBase
     /// <summary>List all projects in an organization.</summary>
     [HttpGet("api/orgs/{orgId:guid}/projects")]
     [RequirePermission(Permissions.OrgRead, From = "orgId")]
-    [ProducesResponseType(typeof(ApiResponse<PagedResult<ProjectSummaryResponse>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<ProjectResponse>>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> GetForOrg(Guid orgId, [FromQuery] PaginationQuery pagination, CancellationToken ct)
     {
         var result = await _projectService.GetForOrgAsync(orgId, pagination, ct);
-        return Ok(new ApiResponse<PagedResult<ProjectSummaryResponse>>(true, "Projects retrieved.", result));
+        return Ok(new ApiResponse<PagedResult<ProjectResponse>>(true, "Projects retrieved.", result));
     }
 
     /// <summary>Create a new project within an organization. Requires OrgAdmin.</summary>
