@@ -124,7 +124,23 @@ public class ProjectService : IProjectService
     public Task<bool> AllowsSelfCertificationAsync(Guid projectId, CancellationToken ct = default) =>
         _projectRepo.AllowsSelfCertificationAsync(projectId, ct);
 
-    public async Task<PagedResult<ProjectSummaryResponse>> GetForOrgAsync(
+    /// <summary>
+    /// An organization's projects, in the same shape as a single one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The full response, not a three-field summary.</b> This is what the projects page renders
+    /// cards from, and a card shows the owning team and the creation date — so a summary of
+    /// <c>(id, slug, name)</c> left the team blank and put <c>new Date(undefined)</c> on screen as
+    /// "Invalid Date". The client's type had always declared the full shape; only the payload was
+    /// short, which is why nothing failed to compile.
+    /// </para>
+    /// <para>
+    /// Team names are resolved once per distinct team rather than once per project. A page of
+    /// twenty projects in an organization with three teams is three lookups, not twenty.
+    /// </para>
+    /// </remarks>
+    public async Task<PagedResult<ProjectResponse>> GetForOrgAsync(
         Guid orgId,
         PaginationQuery pagination,
         CancellationToken ct = default)
@@ -132,11 +148,23 @@ public class ProjectService : IProjectService
         var (projects, total) = await _projectRepo.GetForOrganizationAsync(
             orgId, pagination.Skip, pagination.PageSize, ct);
 
+        var teamNames = new Dictionary<Guid, string>();
+
+        foreach (var teamId in projects.Select(p => p.AssignedTeamId).Distinct())
+        {
+            var team = await _teamRepo.GetActiveByIdAsync(teamId, ct);
+
+            teamNames[teamId] = team?.Name ?? string.Empty;
+        }
+
         var items = projects
-            .Select(p => new ProjectSummaryResponse(p.Id, p.Slug, p.Name))
+            .Select(p => new ProjectResponse(
+                p.Id, p.OrganizationId, p.Slug, p.Key, p.Name, p.Description, p.IsActive,
+                p.AssignedTeamId, teamNames.GetValueOrDefault(p.AssignedTeamId, string.Empty),
+                p.AllowSelfCertification, p.CreatedAt))
             .ToList();
 
-        return new PagedResult<ProjectSummaryResponse>(items, total, pagination.Page, pagination.PageSize);
+        return new PagedResult<ProjectResponse>(items, total, pagination.Page, pagination.PageSize);
     }
 
     public async Task<ProjectResponse> UpdateAsync(
