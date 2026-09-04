@@ -20,6 +20,9 @@ public class TeamRepository : ITeamRepository
     public Task<Team?> GetActiveByIdAsync(Guid teamId, CancellationToken ct = default) =>
         _context.Teams.FirstOrDefaultAsync(t => t.Id == teamId && t.IsActive, ct);
 
+    public Task<Team?> GetByIdIncludingInactiveAsync(Guid teamId, CancellationToken ct = default) =>
+        _context.Teams.FirstOrDefaultAsync(t => t.Id == teamId, ct);
+
     public Task<Team?> GetByNameInOrgAsync(Guid orgId, string name, CancellationToken ct = default) =>
         _context.Teams.FirstOrDefaultAsync(
             t => t.OrganizationId == orgId && t.Name == name && t.IsActive, ct);
@@ -27,6 +30,22 @@ public class TeamRepository : ITeamRepository
     public async Task<(IReadOnlyList<TeamResponse> Items, int TotalCount)> GetActiveTeamsInOrgAsync(Guid orgId, PaginationQuery pagination, CancellationToken ct = default)
     {
         var query = _context.Teams.Where(t => t.OrganizationId == orgId && t.IsActive);
+
+        var total = await query.CountAsync(ct);
+
+        var items = await query
+                            .OrderBy(t => t.Name)
+                            .Skip(pagination.Skip)
+                            .Take(pagination.PageSize)
+                            .Select(t => new TeamResponse(t.Id, t.OrganizationId, t.Name, t.Description, t.IsActive, t.Members.Count, t.CreatedAt))
+                            .ToListAsync(ct);
+
+        return (items, total);
+    }
+
+    public async Task<(IReadOnlyList<TeamResponse> Items, int TotalCount)> GetArchivedTeamsInOrgAsync(Guid orgId, PaginationQuery pagination, CancellationToken ct = default)
+    {
+        var query = _context.Teams.Where(t => t.OrganizationId == orgId && !t.IsActive);
 
         var total = await query.CountAsync(ct);
 

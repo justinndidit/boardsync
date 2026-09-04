@@ -109,6 +109,12 @@ public class TeamService : ITeamService
         return new PagedResult<TeamResponse>(teams, total, pagination.Page, pagination.PageSize);
     }
 
+    public async Task<PagedResult<TeamResponse>> GetArchivedForOrgAsync(Guid orgId, PaginationQuery pagination, CancellationToken ct = default)
+    {
+        var (teams, total) = await _teamRepo.GetArchivedTeamsInOrgAsync(orgId, pagination, ct);
+        return new PagedResult<TeamResponse>(teams, total, pagination.Page, pagination.PageSize);
+    }
+
     public async Task<TeamResponse> UpdateAsync(
         Guid teamId,
         UpdateTeamRequest request,
@@ -262,6 +268,25 @@ public class TeamService : ITeamService
         await _teamRepo.SaveChangesAsync(ct);
 
         _logger.LogInformation("Team {TeamId} archived by {UserId}", teamId, deactivatedBy);
+    }
+
+    public async Task ActivateAsync(Guid teamId, Guid activatedBy, CancellationToken ct = default)
+    {
+        var team = await _teamRepo.GetByIdIncludingInactiveAsync(teamId, ct)
+            ?? throw new NotFoundException(nameof(Team), teamId);
+
+        // Already active — nothing to do.
+        if (team.IsActive)
+            return;
+
+        team.IsActive = true;
+        team.UpdatedAt = DateTime.UtcNow;
+
+        _eventBus.Enqueue(new TeamActivated(team.Id, team.OrganizationId, team.Name, activatedBy));
+
+        await _teamRepo.SaveChangesAsync(ct);
+
+        _logger.LogInformation("Team {TeamId} activated by {UserId}", teamId, activatedBy);
     }
 
     public Task<bool> IsMemberAsync(Guid teamId, Guid userId, CancellationToken ct = default) =>

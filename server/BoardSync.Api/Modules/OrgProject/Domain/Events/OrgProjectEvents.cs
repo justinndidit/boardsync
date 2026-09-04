@@ -109,6 +109,13 @@ public record TeamArchived(
     Guid ArchivedByUserId
 ) : DomainEvent;
 
+public record TeamActivated(
+    Guid TeamId,
+    Guid OrganizationId,
+    string Name,
+    Guid ActivatedByUserId
+) : DomainEvent;
+
 public record MemberAddedToTeam(
     Guid TeamId,
     Guid OrganizationId,

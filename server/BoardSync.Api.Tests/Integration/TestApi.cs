@@ -86,6 +86,10 @@ public sealed class TestApi
     public async Task Post(string url, object body) =>
         await AssertSuccess(await _http.PostAsJsonAsync(url, body), "POST", url);
 
+    /// <summary>Sends a DELETE, asserting success but discarding the body.</summary>
+    public async Task Delete(string url) =>
+        await AssertSuccess(await _http.DeleteAsync(url), "DELETE", url);
+
     /// <summary>Sends a PUT, asserting success but discarding the body.</summary>
     public async Task Put(string url, object body) =>
         await AssertSuccess(await _http.PutAsJsonAsync(url, body), "PUT", url);
@@ -112,6 +116,9 @@ public sealed class TestApi
 
     public Task<HttpResponseMessage> PutRaw(string url, object body) =>
         _http.PutAsJsonAsync(url, body);
+
+    /// <summary>Sends an arbitrary request, for when the HTTP method itself is the thing under test.</summary>
+    public Task<HttpResponseMessage> SendRaw(HttpRequestMessage request) => _http.SendAsync(request);
 
     /// <summary>Sends a GET carrying an <c>If-None-Match</c>, for cache revalidation tests.</summary>
     public Task<HttpResponseMessage> GetRawWithETag(string url, string etag)

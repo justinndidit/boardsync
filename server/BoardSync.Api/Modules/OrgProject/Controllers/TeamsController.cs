@@ -51,6 +51,29 @@ public class TeamsController : ControllerBase
         return Ok(new ApiResponse<PagedResult<TeamResponse>>(true, "Teams retrieved.", result));
     }
 
+    /// <summary>List all archived (inactive) teams in an organization. Requires <c>org:read</c>.</summary>
+    [HttpGet("api/orgs/{orgId:guid}/teams/archived")]
+    [RequirePermission(Permissions.OrgRead, From = "orgId")]
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<TeamResponse>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<IActionResult> GetArchived(Guid orgId, [FromQuery] PaginationQuery pagination, CancellationToken ct)
+    {
+        var result = await _teamService.GetArchivedForOrgAsync(orgId, pagination, ct);
+        return Ok(new ApiResponse<PagedResult<TeamResponse>>(true, "Archived teams retrieved.", result));
+    }
+
+    /// <summary>Restore an archived team. Requires <c>team:manage</c>.</summary>
+    [HttpPost("api/teams/{teamId:guid}/activate")]
+    [RequirePermission(Permissions.TeamManage, From = "teamId")]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> Activate(Guid teamId, CancellationToken ct)
+    {
+        await _teamService.ActivateAsync(teamId, _currentUser.UserId, ct);
+        return Ok(new ApiResponse(true, "Team unarchived."));
+    }
+
     /// <summary>Create a new team in an organization. Requires OrgAdmin.</summary>
     [HttpPost("api/orgs/{orgId:guid}/teams")]
     [RequirePermission(Permissions.OrgAdmin, From = "orgId")]

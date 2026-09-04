@@ -14,6 +14,9 @@ public interface ITeamRepository
     /// <summary>Active team by ID, tracked for mutation, or null.</summary>
     Task<Team?> GetActiveByIdAsync(Guid teamId, CancellationToken ct = default);
 
+    /// <summary>Team by ID regardless of active status, tracked for mutation, or null.</summary>
+    Task<Team?> GetByIdIncludingInactiveAsync(Guid teamId, CancellationToken ct = default);
+
     /// <summary>
     /// Active team with the given name inside one organization, or null. Name uniqueness is
     /// per-organization, so the org must be part of the lookup — a global name search would
@@ -22,6 +25,12 @@ public interface ITeamRepository
     Task<Team?> GetByNameInOrgAsync(Guid orgId, string name, CancellationToken ct = default);
 
     Task<(IReadOnlyList<TeamResponse> Items, int TotalCount)> GetActiveTeamsInOrgAsync(Guid orgId, PaginationQuery pagination, CancellationToken ct = default);
+
+    /// <summary>
+    /// Archived (inactive) teams in an organization. Returns only teams where IsActive is false,
+    /// filtered by organization, ordered by name, paged.
+    /// </summary>
+    Task<(IReadOnlyList<TeamResponse> Items, int TotalCount)> GetArchivedTeamsInOrgAsync(Guid orgId, PaginationQuery pagination, CancellationToken ct = default);
 
     /// <summary>
     /// Whether a team row exists at all, active or not. Used to distinguish "no such team" (404)
