@@ -35,6 +35,7 @@ using BoardSync.Api.Shared.Auth.Handlers;
 using BoardSync.Api.Shared.Auth.Repositories;
 using BoardSync.Api.Shared.Auth.Services;
 using BoardSync.Api.Shared.Auth.Services.Implementations;
+using BoardSync.Api.Shared.Storage;
 using BoardSync.Api.Shared.Kernel;
 using BoardSync.Api.Shared.Kernel.Configuration;
 using BoardSync.Api.Modules.GitSync.Controllers;
@@ -174,6 +175,42 @@ builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<IPasswordService, PasswordService>();
 builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddScoped<ICurrentUserContext, CurrentUserContext>();
+
+/*
+ * Object storage — profile pictures.
+ *
+ * Optional in the same way the Intelligence providers are: with no connection string the storage
+ * client reports itself unconfigured, the two upload endpoints answer 503, and every avatar set
+ * before now still renders because the URL lives on the user row. Nothing else in the product
+ * depends on it, so nothing else should fail without it.
+ *
+ * Singleton, because BlobServiceClient is thread-safe, holds its own connection pool, and is
+ * expensive to build per request — the shape the Azure SDK is designed for. The service around it
+ * is scoped because it writes through the request's DbContext.
+ */
+builder.Services.Configure<StorageSettings>(builder.Configuration.GetSection("Storage"));
+
+builder.Services.PostConfigure<StorageSettings>(settings =>
+{
+    /*
+     * Two spellings, the same pattern the model API keys follow. `Storage:ConnectionString` is the
+     * configuration path; `STORAGE_CONNECTION_STRING` is the flat name in `.env.sample` and the
+     * compose file, which somebody who copies that file and runs the API directly expects to work.
+     */
+    if (string.IsNullOrWhiteSpace(settings.ConnectionString))
+    {
+        settings.ConnectionString =
+            Environment.GetEnvironmentVariable("STORAGE_CONNECTION_STRING") ?? string.Empty;
+    }
+
+    // The only browser that uploads is the one already allowed to call the API, so the app's own
+    // origin list is the right default rather than a second list to keep in step with it.
+    if (settings.CorsOrigins.Length == 0)
+        settings.CorsOrigins = configuredOrigins;
+});
+
+builder.Services.AddSingleton<IAvatarStorage, AzureBlobAvatarStorage>();
+builder.Services.AddScoped<IAvatarService, AvatarService>();
 
 // Shared Kernel — Event Bus
 // Enqueue stages the event on the request's DbContext; the dispatcher below delivers it after the

@@ -75,9 +75,30 @@ public class ChangePasswordRequest
     public string ConfirmNewPassword { get; init; } = string.Empty;
 }
 
+/// <summary>The name fields a user may edit about themselves.</summary>
+/// <remarks>
+/// No picture field, on purpose. It used to carry one, validated only as <c>[Url]</c> — which
+/// accepted any address on any host, so a profile picture could be made to point anywhere, and
+/// omitting the field (which the profile form does) cleared the avatar instead of leaving it. The
+/// picture is set through the upload endpoints instead, where the API knows the image is one it
+/// stored because it read the bytes back out of its own container.
+/// </remarks>
 public record UpdateProfileRequest(
     [Required] [MaxLength(50)] string FirstName,
     [Required] [MaxLength(50)] string LastName,
-    [MaxLength(100)] string? DisplayName = null,
-    [Url] string? ProfilePictureUrl = null
+    [MaxLength(100)] string? DisplayName = null
+);
+
+/// <summary>Asks for a signed URL to upload one profile picture to.</summary>
+/// <param name="ContentType">What the client says it is about to send. Verified again on commit.</param>
+/// <param name="ByteSize">Size of the file, so an oversized upload is refused before it starts.</param>
+public record AvatarUploadTicketRequest(
+    [Required] string ContentType,
+    [Range(1, long.MaxValue)] long ByteSize
+);
+
+/// <summary>Claims an uploaded blob as the caller's profile picture.</summary>
+/// <param name="BlobPath">The path handed out with the upload ticket.</param>
+public record SetProfilePictureRequest(
+    [Required] [MaxLength(512)] string BlobPath
 );

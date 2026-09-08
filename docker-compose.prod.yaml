@@ -71,6 +71,10 @@ services:
       Intelligence__Provider: ${INTELLIGENCE_PROVIDER:-Anthropic}
       Intelligence__AnthropicApiKey: ${ANTHROPIC_API_KEY:-}
       Intelligence__GeminiApiKey: ${GEMINI_API_KEY:-}
+
+      # Object storage for profile pictures. Empty is a valid setting — the upload endpoints
+      # answer 503 and the rest of the product is unaffected.
+      Storage__ConnectionString: ${STORAGE_CONNECTION_STRING:-}
       Intelligence__GeminiModel: ${GEMINI_MODEL:-}
     expose:
       - "8080"

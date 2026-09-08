@@ -116,17 +116,7 @@ public class AuthenticationService : IAuthenticationService
 
             _logger.LogInformation("User logged in successfully: {Email}", request.Email);
 
-            var userProfile = new UserProfile(
-                user.Id,
-                user.Email,
-                user.FirstName,
-                user.LastName,
-                user.DisplayName,
-                user.ProfilePictureUrl,
-                user.IsEmailConfirmed,
-                user.IsActive,
-                user.CreatedAt
-            );
+            var userProfile = user.ToProfile();
 
             var authResponse = new AuthResponse(accessToken, expiresAt, userProfile);
             return new ApiResponse<(AuthResponse authResponse, string refreshToken)>(

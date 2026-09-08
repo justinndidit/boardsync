@@ -26,6 +26,7 @@ public class AuthController : ControllerBase
     private readonly IUserService _userService;
     private readonly IEmailService _emailService;
     private readonly IRbacService _rbac;
+    private readonly IAvatarService _avatars;
     private readonly JwtSettings _jwtSettings;
     private readonly EmailSettings _emailSettings;
     private readonly ILogger<AuthController> _logger;
@@ -35,6 +36,7 @@ public class AuthController : ControllerBase
         IUserService userService,
         IEmailService emailService,
         IRbacService rbac,
+        IAvatarService avatars,
         IOptions<JwtSettings> jwtSettings,
         IOptions<EmailSettings> emailSettings,
         ILogger<AuthController> logger)
@@ -43,6 +45,7 @@ public class AuthController : ControllerBase
         _userService = userService;
         _emailService = emailService;
         _rbac = rbac;
+        _avatars = avatars;
         _jwtSettings = jwtSettings.Value;
         _emailSettings = emailSettings.Value;
         _logger = logger;
@@ -483,6 +486,110 @@ public class AuthController : ControllerBase
 
         return Ok(result);
     }
+
+    /// <summary>
+    /// Request a short-lived URL to upload a new profile picture to.
+    /// </summary>
+    /// <remarks>
+    /// Step one of two. The browser PUTs the file to the returned URL with the returned headers —
+    /// and no bearer token, the URL carries its own credential — then calls
+    /// <c>POST /Auth/profile/picture</c> with the returned <c>blobPath</c> to claim it. Nothing is
+    /// written to the profile until that second call, so an abandoned upload changes nothing.
+    /// </remarks>
+    /// <param name="request">The image's declared type and size</param>
+    /// <response code="200">Upload URL issued</response>
+    /// <response code="400">Unsupported image type, or larger than the limit</response>
+    /// <response code="401">User not authenticated</response>
+    /// <response code="503">Object storage is not configured on this deployment</response>
+    [HttpPost("profile/picture/upload-url")]
+    [NoPermissionRequired(
+        "Issues an upload URL scoped to the caller's own avatar path, taken from the token.")]
+    [Authorize]
+    [ProducesResponseType(typeof(ApiResponse<AvatarUploadTicketResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> CreateProfilePictureUploadUrl(
+        [FromBody] AvatarUploadTicketRequest request, CancellationToken ct)
+    {
+        if (!_avatars.IsAvailable)
+            return StorageUnavailable();
+
+        var result = await _avatars.CreateUploadTicketAsync(GetCurrentUserId(), request, ct);
+
+        return result.Success ? Ok(result) : BadRequest(result);
+    }
+
+    /// <summary>
+    /// Claim an uploaded image as the current user's profile picture.
+    /// </summary>
+    /// <remarks>
+    /// Step two. The API reads the blob's leading bytes back out of its own container and refuses
+    /// anything that is not really an image, so what is stored on the profile is verified rather
+    /// than asserted. The picture being replaced is deleted once the new one is saved.
+    /// </remarks>
+    /// <param name="request">The blob path from the upload ticket</param>
+    /// <response code="200">Picture updated; returns the refreshed profile</response>
+    /// <response code="400">Upload missing, oversized, not an image, or not the caller's</response>
+    /// <response code="401">User not authenticated</response>
+    /// <response code="503">Object storage is not configured on this deployment</response>
+    [HttpPost("profile/picture")]
+    [NoPermissionRequired(
+        "Sets the caller's own picture; the subject is taken from the token, not the request.")]
+    [Authorize]
+    [ProducesResponseType(typeof(ApiResponse<UserProfile>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> SetProfilePicture(
+        [FromBody] SetProfilePictureRequest request, CancellationToken ct)
+    {
+        if (!_avatars.IsAvailable)
+            return StorageUnavailable();
+
+        var result = await _avatars.CommitAsync(GetCurrentUserId(), request, ct);
+
+        return result.Success ? Ok(result) : BadRequest(result);
+    }
+
+    /// <summary>
+    /// Remove the current user's profile picture.
+    /// </summary>
+    /// <remarks>
+    /// Works whether or not storage is configured: clearing the field is a change to the user
+    /// record, and somebody who wants their picture gone should not be told to wait for an
+    /// integration. The blob is deleted too when there is a container to delete it from.
+    /// </remarks>
+    /// <response code="200">Picture removed; returns the refreshed profile</response>
+    /// <response code="400">User not found</response>
+    /// <response code="401">User not authenticated</response>
+    [HttpDelete("profile/picture")]
+    [NoPermissionRequired("Clears the caller's own picture.")]
+    [Authorize]
+    [ProducesResponseType(typeof(ApiResponse<UserProfile>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> RemoveProfilePicture(CancellationToken ct)
+    {
+        var result = await _avatars.RemoveAsync(GetCurrentUserId(), ct);
+
+        return result.Success ? Ok(result) : BadRequest(result);
+    }
+
+    /// <summary>
+    /// Says the feature is switched off rather than broken.
+    /// </summary>
+    /// <remarks>
+    /// 503 and not 500: a deployment without a storage connection string is a configuration
+    /// choice, and the client's correct response is to hide the upload control — which it cannot
+    /// decide to do if this looks like a transient server fault.
+    /// </remarks>
+    private ObjectResult StorageUnavailable() =>
+        StatusCode(
+            StatusCodes.Status503ServiceUnavailable,
+            new ApiResponse(
+                false,
+                "Profile picture uploads are not configured on this deployment."));
 
     private void SetRefreshTokenCookie(string token)
     {

@@ -30,6 +30,10 @@
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.3.1" />
     <PackageReference Include="BCrypt.Net-Next" Version="4.0.3" />
 
+    <!-- Object storage. Backs profile pictures; the API only ever signs short-lived
+         upload URLs, the bytes go browser -> blob. See Shared/Storage. -->
+    <PackageReference Include="Azure.Storage.Blobs" Version="12.29.2" />
+
     <!-- Email & Communication -->
     <PackageReference Include="MailKit" Version="4.17.0" />
     <PackageReference Include="MimeKit" Version="4.17.0" />
