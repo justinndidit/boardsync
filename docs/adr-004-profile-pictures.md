@@ -1,4 +1,4 @@
-# ADR 004 — Profile pictures upload straight to blob storage
+# ADR 004 — Avatars upload straight to blob storage
 
 **Status:** accepted · **Date:** 2026-09-08 · **Supersedes:** nothing ·
 **Related:** [ADR 003](adr-003-prd-destination.md), [permissions-model.md](permissions-model.md)
@@ -117,5 +117,61 @@ which is exactly what this design routes around — the natural home is a job tr
 not the request path.
 
 **A general file-storage abstraction.** `IAvatarStorage` knows about avatars. The paths, the
-public-read container and the short SAS lifetime only make sense for small public images; a second
-kind of upload should get its own interface rather than widen this one.
+public-read container and the short SAS lifetime only make sense for small public images; an upload
+that is not one should get its own interface rather than widen this.
+
+## Organizations, added the same day
+
+An organization's logo had the identical defect — an `[Url]`-validated `avatarUrl` string on
+`PUT /orgs/{orgId}`, editable as a "paste a link" box — and worse consequences, because every
+member's browser fetches an organization's logo, so that field aimed a request from all of them at
+whatever an administrator pasted.
+
+It is the same object: a small public image, same formats, same ceiling, same container. So the
+storage is shared and the two separate at the **prefix**, via `AvatarOwner`:
+
+| Owner | Prefix | Authorized by |
+| --- | --- | --- |
+| User | `users/{userId}` | being the token's subject |
+| Organization | `organizations/{orgId}` | holding `org:admin` on that organization |
+
+Kind-first, so the namespaces cannot collide even in the impossible case of a user id equalling an
+organization id — a commit is checked against the prefix, so an `org:admin` ticket cannot address a
+person's avatar however the ids fall.
+
+Everything between — the allowlist, the size ceiling, reading the bytes back, deleting what fails —
+is `AvatarUploadPipeline`, shared by both services. That is not tidiness: the verification is the
+only thing standing between a signed upload URL and an arbitrary file served from the app's own
+storage, and a second copy of it is a second thing that can quietly fall behind the first.
+
+`UpdateOrganizationRequest.AvatarUrl` is gone, as `UpdateProfileRequest.ProfilePictureUrl` was.
+Setting the logo goes through `POST /orgs/{orgId}/avatar/upload-url` → `POST /orgs/{orgId}/avatar`,
+and clearing it through `DELETE`. Both still emit `OrganizationUpdated`, so the change stays in the
+activity feed.
+
+### The feed records that the logo changed, not what it changed to
+
+The feed renders `Field: before → after`, and the first version of this passed the blob URLs
+straight in. That produced a 280-character line of two near-identical GUID paths as an entry's
+one-line description — and the "before" half was a **dead link by the time anyone read it**, since
+committing a new logo deletes the blob it replaced.
+
+So the slot carries what happened: `Logo: updated`, `Logo: removed`. Nothing is lost by it. An
+avatar has no readable value to report the way a name or a description does, and the picture itself
+is on the organization for anyone who wants to look. It is also what the membership events already
+do — they resolve a user id to a name rather than logging the id.
+
+A user's profile picture emits no activity event at all, and shouldn't: the feed is organization,
+project and team activity, and what somebody sets as their own picture is not that.
+
+The rows written before that change keep their URLs until something rewrites them, and a feed is
+read as history — the old entries are the ones anybody scrolling back actually sees. Migration
+`20260916090000_TidyAvatarActivityDetail` rewrites them into the same shape. Which case each row
+was is recoverable without the URLs: a removal left the new value null, and everything else set
+one. Its `Down` is empty on purpose — the URLs are unrecoverable, and every one of them named a
+blob that has already been deleted.
+
+**Existing user avatars keep working.** They sit at `{userId}/…` with no kind segment. Nothing
+reads them back by prefix — the stored URL is absolute, and deleting a replaced one goes through
+the container-relative path — so the older layout resolves as before and is simply never written
+again.

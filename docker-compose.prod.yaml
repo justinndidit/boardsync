@@ -40,6 +40,12 @@ services:
       dockerfile: Dockerfile
     container_name: boardsync-api
     restart: unless-stopped
+
+    # Longer than the host's own ShutdownTimeout (30s, the .NET default), so the app decides when it
+    # has finished rather than Docker deciding for it. The default here is 10s, which is shorter
+    # than the budget the app is already working to: in-flight requests and a job being handed back
+    # were killed with 20 seconds of that budget still unspent.
+    stop_grace_period: 40s
     depends_on:
       postgres:
         condition: service_healthy

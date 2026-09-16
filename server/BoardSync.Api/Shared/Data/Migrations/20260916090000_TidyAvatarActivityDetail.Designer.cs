@@ -3,6 +3,7 @@ using System;
 using BoardSync.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using NpgsqlTypes;
@@ -12,9 +13,11 @@ using NpgsqlTypes;
 namespace BoardSync.Api.Shared.Data.Migrations
 {
     [DbContext(typeof(BoardSyncDbContext))]
-    partial class BoardSyncDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260916090000_TidyAvatarActivityDetail")]
+    partial class TidyAvatarActivityDetail
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -538,64 +541,6 @@ namespace BoardSync.Api.Shared.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("Organizations", "org");
-                });
-
-            modelBuilder.Entity("BoardSync.Api.Modules.OrgProject.Domain.Models.OrganizationInvitation", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("AcceptedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid?>("AcceptedByUserId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid?>("CreatedBy")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Email")
-                        .IsRequired()
-                        .HasMaxLength(320)
-                        .HasColumnType("character varying(320)");
-
-                    b.Property<DateTime>("ExpiresAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("OrganizationId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("RevokedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Role")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("character varying(40)");
-
-                    b.Property<string>("TokenHash")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TokenHash")
-                        .IsUnique();
-
-                    b.HasIndex("OrganizationId", "CreatedAt")
-                        .IsDescending(false, true);
-
-                    b.HasIndex("OrganizationId", "Email");
-
-                    b.ToTable("OrganizationInvitations", "org");
                 });
 
             modelBuilder.Entity("BoardSync.Api.Modules.OrgProject.Domain.Models.OrganizationMembership", b =>
@@ -1557,17 +1502,6 @@ namespace BoardSync.Api.Shared.Data.Migrations
                         .HasForeignKey("ProjectId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-                });
-
-            modelBuilder.Entity("BoardSync.Api.Modules.OrgProject.Domain.Models.OrganizationInvitation", b =>
-                {
-                    b.HasOne("BoardSync.Api.Modules.OrgProject.Domain.Models.Organization", "Organization")
-                        .WithMany()
-                        .HasForeignKey("OrganizationId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Organization");
                 });
 
             modelBuilder.Entity("BoardSync.Api.Modules.OrgProject.Domain.Models.OrganizationMembership", b =>

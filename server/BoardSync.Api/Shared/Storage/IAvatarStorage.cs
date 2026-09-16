@@ -23,8 +23,9 @@ public record StoredBlob(string? ContentType, long ContentLength, byte[] Head);
 /// <remarks>
 /// Deliberately narrow. This is not a general file-storage abstraction — it knows about avatars,
 /// because the paths, the container's public-read setting and the short SAS lifetime are all
-/// choices that only make sense for small public images. A second kind of upload should get its own
-/// interface rather than widen this one.
+/// choices that only make sense for small public images. It serves both people and organizations,
+/// which differ only in who may replace one and are separated by <see cref="AvatarOwner"/>; an
+/// upload that is not a small public image should get its own interface rather than widen this.
 /// </remarks>
 public interface IAvatarStorage
 {
@@ -33,7 +34,7 @@ public interface IAvatarStorage
 
     /// <summary>Signs a URL that may write exactly one blob, for a short time.</summary>
     Task<AvatarUploadTicket> CreateUploadTicketAsync(
-        Guid userId, string contentType, string extension, CancellationToken ct);
+        AvatarOwner owner, string contentType, string extension, CancellationToken ct);
 
     /// <summary>Reads back what is at <paramref name="blobPath"/>, or <c>null</c> if nothing is.</summary>
     Task<StoredBlob?> InspectAsync(string blobPath, CancellationToken ct);

@@ -33,6 +33,21 @@ public class RegisterRequest
     
     [MaxLength(100)] 
     public string? DisplayName { get; init; }
+
+    /// <summary>
+    /// An organization invitation this registration is completing, if it came from one.
+    /// </summary>
+    /// <remarks>
+    /// When the token is open and addressed to <see cref="Email"/>, the account is active
+    /// immediately and no confirmation email is sent. Reading the invitation <i>is</i> the proof
+    /// confirmation asks for: it was sent to that address, and only somebody who can read that
+    /// mailbox has the token. Requiring a second email proves the same fact twice and puts another
+    /// step between accepting an invitation and being in the organization.
+    ///
+    /// A token that is absent, expired, revoked, already used, or addressed elsewhere is ignored
+    /// entirely — registration proceeds down the ordinary confirmation path rather than failing.
+    /// </remarks>
+    public string? InviteToken { get; init; }
 }
 
 public record ForgotPasswordRequest(

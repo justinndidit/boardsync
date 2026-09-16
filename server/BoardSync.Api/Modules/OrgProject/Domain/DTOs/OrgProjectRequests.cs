@@ -20,6 +20,13 @@ public class CreateOrganizationRequest
     public string? Description { get; init; }
 }
 
+/// <summary>The organization details an OrgAdmin may edit.</summary>
+/// <remarks>
+/// No avatar field. It used to carry one, validated only as <c>[Url]</c> — so an organization's
+/// logo could be pointed at any host, and every member's browser would fetch it. The logo is set
+/// through the avatar endpoints instead, where the API knows the image is one it stored because it
+/// read the bytes back out of its own container.
+/// </remarks>
 public class UpdateOrganizationRequest
 {
     [Required] [MaxLength(100)]
@@ -27,9 +34,29 @@ public class UpdateOrganizationRequest
 
     [MaxLength(500)]
     public string? Description { get; init; }
+}
 
-    [Url] [MaxLength(2048)]
-    public string? AvatarUrl { get; init; }
+/// <summary>Invites somebody to an organization by email address.</summary>
+/// <remarks>
+/// An email, not a user id. That is the whole point of the change: at the moment an invitation is
+/// created there may be no user to name, which is the case the previous "add member" flow could not
+/// express — it looked the address up and gave up with a 404 if nobody held it.
+/// </remarks>
+public class InviteMemberRequest
+{
+    [Required] [EmailAddress] [MaxLength(320)]
+    public string Email { get; init; } = string.Empty;
+
+    /// <summary>
+    /// The organization-scope role granted on acceptance — <c>OrgAdmin</c> or <c>Member</c>.
+    /// </summary>
+    /// <remarks>
+    /// Defaults to <c>Member</c>, which is what the old direct-add always granted. Validated
+    /// against the roles assignable at organization scope rather than against the whole enum, so
+    /// this cannot become the back door for a grant the role-change endpoint refuses.
+    /// </remarks>
+    [MaxLength(40)]
+    public string? Role { get; init; }
 }
 
 public class CreateProjectRequest

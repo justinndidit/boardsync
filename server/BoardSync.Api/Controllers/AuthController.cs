@@ -1,3 +1,4 @@
+using BoardSync.Api.Modules.OrgProject.Services.Interfaces;
 using BoardSync.Api.Modules.Rbac.Models;
 using BoardSync.Api.Modules.Rbac.Services.Interfaces;
 using BoardSync.Api.Shared.Auth.Attributes;
@@ -26,6 +27,7 @@ public class AuthController : ControllerBase
     private readonly IUserService _userService;
     private readonly IEmailService _emailService;
     private readonly IRbacService _rbac;
+    private readonly IOrganizationInvitationService _invitations;
     private readonly IAvatarService _avatars;
     private readonly JwtSettings _jwtSettings;
     private readonly EmailSettings _emailSettings;
@@ -36,6 +38,7 @@ public class AuthController : ControllerBase
         IUserService userService,
         IEmailService emailService,
         IRbacService rbac,
+        IOrganizationInvitationService invitations,
         IAvatarService avatars,
         IOptions<JwtSettings> jwtSettings,
         IOptions<EmailSettings> emailSettings,
@@ -45,6 +48,7 @@ public class AuthController : ControllerBase
         _userService = userService;
         _emailService = emailService;
         _rbac = rbac;
+        _invitations = invitations;
         _avatars = avatars;
         _jwtSettings = jwtSettings.Value;
         _emailSettings = emailSettings.Value;
@@ -101,9 +105,24 @@ public class AuthController : ControllerBase
     [ProducesResponseType(typeof(ApiResponse<UserProfile>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status500InternalServerError)]
-    public async Task<IActionResult> Register([FromBody] RegisterRequest request)
+    public async Task<IActionResult> Register(
+        [FromBody] RegisterRequest request, CancellationToken ct)
     {
-        var result = await _userService.CreateAsync(request);
+        /*
+         * An organization invitation, when the registration came from one, already proves the
+         * address: it was sent there, and only somebody who can read that mailbox holds the token.
+         * The account is then active straight away and gets a welcome email rather than a
+         * confirmation one — see RegisterRequest.InviteToken.
+         *
+         * A token that is missing, expired, revoked, spent, or addressed to somebody else simply
+         * does not count as proof. Registration carries on down the ordinary path rather than
+         * failing, because a bad token is no reason to refuse somebody an account.
+         */
+        var emailAlreadyProven =
+            !string.IsNullOrWhiteSpace(request.InviteToken) &&
+            await _invitations.IsOpenForEmailAsync(request.InviteToken, request.Email, ct);
+
+        var result = await _userService.CreateAsync(request, emailAlreadyProven);
 
         if (!result.Success)
         {

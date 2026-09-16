@@ -61,11 +61,11 @@ public class AzureBlobAvatarStorage : IAvatarStorage
             "Avatar storage is not configured. Set Storage:ConnectionString.");
 
     public async Task<AvatarUploadTicket> CreateUploadTicketAsync(
-        Guid userId, string contentType, string extension, CancellationToken ct)
+        AvatarOwner owner, string contentType, string extension, CancellationToken ct)
     {
         await EnsureContainerAsync(ct);
 
-        var blobPath = AvatarUploads.PathFor(userId, extension);
+        var blobPath = AvatarUploads.PathFor(owner, extension);
         var blob = Container.GetBlobClient(blobPath);
 
         if (!blob.CanGenerateSasUri)

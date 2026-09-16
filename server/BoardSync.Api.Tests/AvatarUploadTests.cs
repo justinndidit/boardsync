@@ -119,10 +119,40 @@ public class AvatarUploadTests
     [Fact]
     public void APathIsPrefixedByItsOwner()
     {
-        var userId = Guid.NewGuid();
+        var user = AvatarOwner.ForUser(Guid.NewGuid());
 
-        Assert.StartsWith($"{userId:D}/", AvatarUploads.PathFor(userId, ".png"));
-        Assert.EndsWith(".png", AvatarUploads.PathFor(userId, ".png"));
+        Assert.StartsWith($"users/{user.Id:D}/", AvatarUploads.PathFor(user, ".png"));
+        Assert.EndsWith(".png", AvatarUploads.PathFor(user, ".png"));
+
+        var org = AvatarOwner.ForOrganization(Guid.NewGuid());
+
+        Assert.StartsWith(
+            $"organizations/{org.Id:D}/", AvatarUploads.PathFor(org, ".png"));
+    }
+
+    /// <summary>
+    /// A person and an organization never share a prefix, even with the same id.
+    /// </summary>
+    /// <remarks>
+    /// Guids do not collide in practice, but the kind segment means the argument does not have to
+    /// rest on that: an <c>org:admin</c> ticket cannot address a user's avatar however the ids
+    /// fall, because the two namespaces do not overlap at all.
+    /// </remarks>
+    [Fact]
+    public void AUserAndAnOrganizationCannotShareAPath()
+    {
+        var id = Guid.NewGuid();
+
+        var user = AvatarOwner.ForUser(id);
+        var org = AvatarOwner.ForOrganization(id);
+
+        Assert.NotEqual(user.Prefix, org.Prefix);
+
+        Assert.False(
+            AvatarUploads.BelongsTo(AvatarUploads.PathFor(org, ".png"), user));
+
+        Assert.False(
+            AvatarUploads.BelongsTo(AvatarUploads.PathFor(user, ".png"), org));
     }
 
     /// <summary>
@@ -134,13 +164,13 @@ public class AvatarUploadTests
     /// change appearing to fail rather than to take effect.
     /// </remarks>
     [Fact]
-    public void TwoUploadsForOneUserNeverCollide()
+    public void TwoUploadsForOneOwnerNeverCollide()
     {
-        var userId = Guid.NewGuid();
+        var owner = AvatarOwner.ForUser(Guid.NewGuid());
 
         Assert.NotEqual(
-            AvatarUploads.PathFor(userId, ".png"),
-            AvatarUploads.PathFor(userId, ".png"));
+            AvatarUploads.PathFor(owner, ".png"),
+            AvatarUploads.PathFor(owner, ".png"));
     }
 
     /// <summary>
@@ -153,13 +183,24 @@ public class AvatarUploadTests
     [Fact]
     public void OnlyTheOwnerMayClaimAPath()
     {
-        var owner = Guid.NewGuid();
-        var other = Guid.NewGuid();
+        var owner = AvatarOwner.ForUser(Guid.NewGuid());
+        var other = AvatarOwner.ForUser(Guid.NewGuid());
 
         var path = AvatarUploads.PathFor(owner, ".png");
 
         Assert.True(AvatarUploads.BelongsTo(path, owner));
         Assert.False(AvatarUploads.BelongsTo(path, other));
+    }
+
+    /// <summary>The same check, for a logo: one OrgAdmin cannot claim another org's upload.</summary>
+    [Fact]
+    public void OneOrganizationMayNotClaimAnothersUpload()
+    {
+        var owner = AvatarOwner.ForOrganization(Guid.NewGuid());
+        var other = AvatarOwner.ForOrganization(Guid.NewGuid());
+
+        Assert.False(
+            AvatarUploads.BelongsTo(AvatarUploads.PathFor(owner, ".png"), other));
     }
 
     [Theory]
@@ -168,7 +209,8 @@ public class AvatarUploadTests
     [InlineData("someone-elses.png")]
     [InlineData("../secrets.png")]
     public void APathThatIsNotOursBelongsToNobody(string? path) =>
-        Assert.False(AvatarUploads.BelongsTo(path, Guid.NewGuid()));
+        Assert.False(
+            AvatarUploads.BelongsTo(path, AvatarOwner.ForUser(Guid.NewGuid())));
 
     /// <summary>
     /// A prefix that merely starts with the id is not the id.
@@ -180,8 +222,9 @@ public class AvatarUploadTests
     [Fact]
     public void ThePrefixMustBeAWholeSegment()
     {
-        var userId = Guid.NewGuid();
+        var owner = AvatarOwner.ForUser(Guid.NewGuid());
 
-        Assert.False(AvatarUploads.BelongsTo($"{userId:D}-other/file.png", userId));
+        Assert.False(
+            AvatarUploads.BelongsTo($"{owner.Prefix}-other/file.png", owner));
     }
 }

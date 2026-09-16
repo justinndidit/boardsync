@@ -105,29 +105,30 @@ public static class AvatarUploads
     }
 
     /// <summary>
-    /// The path an avatar for <paramref name="userId"/> is written to.
+    /// The path an avatar for <paramref name="owner"/> is written to.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Prefixed by the owner's id, which is what makes a signed upload URL safe to hand out: the
-    /// token is scoped to this one blob, and the blob is under a prefix nobody else writes to. The
-    /// server builds this path from the token's subject and never from anything the client sent, so
-    /// a caller cannot aim an upload at another user's avatar.
+    /// Prefixed by the owner, which is what makes a signed upload URL safe to hand out: the token
+    /// is scoped to this one blob, and the blob is under a prefix nobody else writes to. The server
+    /// builds this path from the authorized subject and never from anything the client sent, so a
+    /// caller cannot aim an upload at somebody else's avatar.
     /// </para>
     /// <para>
     /// The random segment means a replaced avatar is a new URL rather than the same one with new
     /// content, so a cached copy in a browser or a CDN can never show the old picture.
     /// </para>
     /// </remarks>
-    public static string PathFor(Guid userId, string extension) =>
-        $"{userId:D}/{Guid.NewGuid():N}{extension}";
+    public static string PathFor(AvatarOwner owner, string extension) =>
+        $"{owner.Prefix}/{Guid.NewGuid():N}{extension}";
 
-    /// <summary>Whether <paramref name="path"/> is an avatar path belonging to <paramref name="userId"/>.</summary>
+    /// <summary>Whether <paramref name="path"/> is an avatar path belonging to <paramref name="owner"/>.</summary>
     /// <remarks>
-    /// Checked on commit. The client hands back the path it was given, and this confirms it is still
-    /// the path we issued for them — an unchecked one would let a caller point their profile at any
-    /// blob in the container, including someone else's.
+    /// Checked on commit. The client hands back the path it was given, and this confirms it is
+    /// still the path we issued for them — an unchecked one would let a caller point their profile
+    /// at any blob in the container, including someone else's.
     /// </remarks>
-    public static bool BelongsTo(string? path, Guid userId) =>
-        path is not null && path.StartsWith($"{userId:D}/", StringComparison.OrdinalIgnoreCase);
+    public static bool BelongsTo(string? path, AvatarOwner owner) =>
+        path is not null &&
+        path.StartsWith($"{owner.Prefix}/", StringComparison.OrdinalIgnoreCase);
 }

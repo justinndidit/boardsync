@@ -115,8 +115,8 @@ public class JobWorker : BackgroundService
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            // Shutting down mid-job. The lease expires and another worker picks it up; this is
-            // exactly the case handler idempotency exists for.
+            // Shutting down mid-job. Handed back rather than left to time out — see ReleaseAsync.
+            await ReleaseAsync(claimed);
             throw;
         }
         catch (Exception ex)
@@ -220,6 +220,62 @@ public class JobWorker : BackgroundService
             // Reflection wraps whatever the handler threw. Unwrap it so the row records the real
             // failure rather than a meaningless "Exception has been thrown by the target".
             throw ex.InnerException;
+        }
+    }
+
+    /// <summary>
+    /// Hands a claimed job back when the worker is stopping, as though it had never been taken.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Being interrupted is not the job's fault, and this used to charge it as though it were.
+    /// <see cref="ClaimAsync"/> increments <see cref="Job.Attempts"/> when it takes the job, so a
+    /// shutdown that abandoned one spent an attempt on work that never ran — five deploys landing
+    /// on the same long job would exhaust <c>Jobs:MaxAttempts</c> and mark it dead, having never
+    /// once failed. The attempt is given back.
+    /// </para>
+    /// <para>
+    /// Clearing the lease matters as much. Waiting for it to expire is correct but slow: a job
+    /// abandoned at the start of a deploy is unreachable for <c>Jobs:LeaseSeconds</c> — five
+    /// minutes by default — while the replacement worker polls an empty queue. Released, it is
+    /// claimable as soon as anything asks.
+    /// </para>
+    /// <para>
+    /// Best-effort on purpose. If this write does not land the old behaviour is what happens
+    /// anyway: the lease times out and the job returns, one attempt poorer. That is worth a
+    /// warning, not an exception thrown while the host is already on its way down.
+    /// </para>
+    /// </remarks>
+    private async Task ReleaseAsync(Job job)
+    {
+        /*
+         * A fresh token, not `ct`. `ct` is cancelled — that is why we are here — so passing it
+         * would cancel the write that undoes the claim. Bounded, because a host that is shutting
+         * down because the database went away must not spend its whole budget waiting here.
+         */
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var context = scope.ServiceProvider.GetRequiredService<BoardSyncDbContext>();
+
+            await context.Jobs
+                .Where(j => j.JobId == job.JobId && j.LeasedBy == _workerId)
+                .ExecuteUpdateAsync(set => set
+                    .SetProperty(j => j.LeaseExpiresAt, (DateTime?)null)
+                    .SetProperty(j => j.LeasedBy, (string?)null)
+                    .SetProperty(j => j.Attempts, j => j.Attempts - 1), timeout.Token);
+
+            _logger.LogInformation(
+                "Job {JobId} ({JobType}) released on shutdown; attempt {Attempt} not counted.",
+                job.JobId, job.JobType, job.Attempts);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Could not release job {JobId} on shutdown. It stays leased until {LeaseExpiresAt} "
+                + "and keeps the attempt it spent.", job.JobId, job.LeaseExpiresAt);
         }
     }
 

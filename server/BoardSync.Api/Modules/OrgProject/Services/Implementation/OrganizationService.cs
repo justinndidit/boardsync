@@ -138,18 +138,17 @@ public class OrganizationService : IOrganizationService
         var changes = new List<(string Field, string? Old, string? New)>();
         var newName = request.Name.Trim();
         var newDescription = request.Description?.Trim() ?? org.Description;
-        var newAvatarUrl = request.AvatarUrl ?? org.AvatarUrl;
 
         if (org.Name != newName)
             changes.Add(("Name", org.Name, newName));
         if (org.Description != newDescription)
             changes.Add(("Description", org.Description, newDescription));
-        if (org.AvatarUrl != newAvatarUrl)
-            changes.Add(("Avatar", org.AvatarUrl, newAvatarUrl));
 
+        // The avatar is not edited here. It has its own endpoints — see IOrganizationAvatarService
+        // — which emit their own OrganizationUpdated event recording that the logo changed rather
+        // than the URLs it changed between, because a blob URL is not something a feed can show.
         org.Name = newName;
         org.Description = newDescription;
-        org.AvatarUrl = newAvatarUrl;
         org.UpdatedAt = DateTime.UtcNow;
 
         foreach (var (field, oldValue, newValue) in changes)
@@ -165,7 +164,9 @@ public class OrganizationService : IOrganizationService
         return MapToResponse(org, counts, userRole);
     }
 
-    public async Task AddMemberAsync(Guid orgId, Guid userId, Guid addedBy, CancellationToken ct = default)
+    public async Task AddMemberAsync(
+        Guid orgId, Guid userId, Guid addedBy,
+        RoleType role = RoleType.Member, CancellationToken ct = default)
     {
         if (!await _organizationRepo.ExistsActiveAsync(orgId, ct))
             throw new NotFoundException(nameof(Organization), orgId);
@@ -187,8 +188,19 @@ public class OrganizationService : IOrganizationService
                 await _organizationRepo.SaveChangesAsync(token);
             }
 
-            if (!await _rbac.HasPermissionAsync(userId, Permissions.OrgRead, RoleScope.Organization, orgId, token))
-                await _rbac.AssignRoleAsync(userId, RoleType.Member, RoleScope.Organization, orgId, addedBy, ct: token);
+            /*
+             * The invited role, not always Member.
+             *
+             * This used to assign Member whenever the user lacked org:read — which meant an
+             * invitation sent as OrgAdmin would have granted Member, silently, and the
+             * administrator would have had to notice and fix it afterwards. Keyed on the role
+             * rather than on a permission for the same reason: holding org:read as a Member says
+             * nothing about whether the OrgAdmin grant this call is for has been made.
+             */
+            var scopeRoles = await _rbac.GetScopeRolesAsync(RoleScope.Organization, orgId, token);
+
+            if (!scopeRoles.Any(ra => ra.UserId == userId && ra.Role == role))
+                await _rbac.AssignRoleAsync(userId, role, RoleScope.Organization, orgId, addedBy, ct: token);
 
             _eventBus.Enqueue(new MemberAddedToOrg(orgId, userId, addedBy));
             await _organizationRepo.SaveChangesAsync(token);

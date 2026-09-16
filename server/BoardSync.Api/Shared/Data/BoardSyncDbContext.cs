@@ -37,6 +37,7 @@ public class BoardSyncDbContext : DbContext
     // ---- OrgProject module ----
     public DbSet<Organization> Organizations { get; set; } = null!;
     public DbSet<OrganizationMembership> OrganizationMemberships { get; set; } = null!;
+    public DbSet<OrganizationInvitation> OrganizationInvitations { get; set; } = null!;
     public DbSet<Project> Projects { get; set; } = null!;
     public DbSet<Team> Teams { get; set; } = null!;
     public DbSet<TeamMembership> TeamMemberships { get; set; } = null!;
@@ -305,6 +306,46 @@ public class BoardSyncDbContext : DbContext
             entity.HasKey(m => m.Id);
             entity.HasIndex(m => new { m.OrganizationId, m.UserId }).IsUnique();
             entity.HasIndex(m => m.UserId);
+        });
+
+        modelBuilder.Entity<OrganizationInvitation>(entity =>
+        {
+            entity.ToTable("OrganizationInvitations", "org");
+            entity.HasKey(i => i.Id);
+
+            /*
+             * Looked up by token hash on every accept and preview, and it is the only way in from
+             * a link, so it is unique as well as indexed: two rows sharing a hash would make which
+             * organization a link joins depend on row order.
+             */
+            entity.HasIndex(i => i.TokenHash).IsUnique();
+
+            // The admin-side listing: this organization's invitations, newest first.
+            entity.HasIndex(i => new { i.OrganizationId, i.CreatedAt })
+                .IsDescending(false, true);
+
+            /*
+             * Deliberately NOT unique on (OrganizationId, Email). An invitation that expired or was
+             * revoked is history worth keeping, and a second one to the same person is the normal
+             * way to re-send. "Only one *open* invitation per address" is a rule about state rather
+             * than about rows, so the service enforces it where it can see the state.
+             */
+            entity.HasIndex(i => new { i.OrganizationId, i.Email });
+
+            entity.Property(i => i.Email).IsRequired().HasMaxLength(320);
+            entity.Property(i => i.TokenHash).IsRequired().HasMaxLength(64);
+
+            // Stored as names for the same reason RoleAssignment.Role is — a readable audit table
+            // survives enum renumbering, and nothing compares these ordinally.
+            entity.Property(i => i.Role)
+                .IsRequired()
+                .HasMaxLength(40)
+                .HasConversion<string>();
+
+            entity.HasOne(i => i.Organization)
+                .WithMany()
+                .HasForeignKey(i => i.OrganizationId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<Project>(entity =>

@@ -74,6 +74,65 @@ public record OrgMemberResponse(
     DateTime JoinedAt
 );
 
+/// <summary>An invitation as an administrator sees it in the members screen.</summary>
+/// <param name="Id">The invitation, for revoking it.</param>
+/// <param name="Email">Who was invited.</param>
+/// <param name="Role">What they get on acceptance.</param>
+/// <param name="Status">
+/// <c>Pending</c>, <c>Accepted</c>, <c>Revoked</c> or <c>Expired</c> — derived, never stored, so it
+/// cannot disagree with the timestamps it is derived from.
+/// </param>
+/// <param name="InvitedBy">Display name of the administrator who sent it, when still resolvable.</param>
+/// <param name="ExpiresAt">When the link stops working.</param>
+/// <param name="CreatedAt">When it was sent.</param>
+public record OrganizationInvitationResponse(
+    Guid Id,
+    string Email,
+    string Role,
+    string Status,
+    string? InvitedBy,
+    DateTime ExpiresAt,
+    DateTime CreatedAt
+);
+
+/// <summary>
+/// What somebody holding an invitation link is shown before they accept.
+/// </summary>
+/// <remarks>
+/// Deliberately thin, and reachable without signing in — it has to be, because the recipient may
+/// have no account yet and the page has to decide whether to send them to sign-in or to sign-up.
+/// It carries the organization's name and the invited address and nothing else about either side:
+/// a link that leaks into the wrong hands should not become a readout of an organization's
+/// membership or of who else was invited.
+/// </remarks>
+/// <param name="OrganizationName">Which organization, so the page can say what is being joined.</param>
+/// <param name="Email">The address invited. The account that accepts must own it.</param>
+/// <param name="Role">What the invitation grants.</param>
+/// <param name="InvitedBy">Who sent it, when still resolvable.</param>
+/// <param name="ExpiresAt">When the link stops working.</param>
+/// <param name="HasAccount">
+/// Whether an account already exists for <paramref name="Email"/>, so the page can offer "sign in"
+/// rather than "create an account".
+/// </param>
+public record InvitationPreviewResponse(
+    string OrganizationName,
+    string Email,
+    string Role,
+    string? InvitedBy,
+    DateTime ExpiresAt,
+    bool HasAccount
+);
+
+/// <summary>Where a caller lands after accepting.</summary>
+/// <param name="OrganizationId">The organization joined.</param>
+/// <param name="OrganizationSlug">Its slug, so the client can route straight into it.</param>
+/// <param name="OrganizationName">Its name, for the confirmation.</param>
+public record InvitationAcceptedResponse(
+    Guid OrganizationId,
+    string OrganizationSlug,
+    string OrganizationName
+);
+
 // ---------------------------------------------------------------------------
 // Workspace DTOs
 // ---------------------------------------------------------------------------

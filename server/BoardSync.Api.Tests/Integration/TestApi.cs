@@ -1,3 +1,8 @@
+using BoardSync.Api.Data;
+using BoardSync.Api.Modules.OrgProject.Domain.Models;
+using BoardSync.Api.Modules.Rbac.Models;
+using BoardSync.Api.Shared.Auth.Services;
+using Microsoft.Extensions.DependencyInjection;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -198,16 +203,62 @@ public sealed record Workspace(TestApi Owner, Guid OrganizationId, Guid TeamId, 
         return item.Id;
     }
 
-    /// <summary>Registers a new user and adds them to this organization as a plain member.</summary>
+    /// <summary>Registers a new user and joins them to this organization as a plain member.</summary>
     /// <remarks>
+    /// <para>
     /// The interesting principal in most authorization tests: they belong to the organization, hold
     /// <c>org:read</c>, and have no team or project grant at all.
+    /// </para>
+    /// <para>
+    /// This used to <c>POST /api/orgs/{id}/members</c> with a user id, which no longer exists —
+    /// membership is offered and accepted rather than granted outright. It now goes through the
+    /// real invitation, which means every test that needs a member exercises the accept path, and
+    /// its email-match rule, on the way past.
+    /// </para>
+    /// <para>
+    /// Only the invitation <i>row</i> is seeded directly, because the token is deliberately
+    /// unrecoverable through the API — it is hashed on write and exists in plaintext only in the
+    /// email that was sent. Minting one here with a known value is the cheapest way to reach the
+    /// half of the flow worth testing.
+    /// </para>
     /// </remarks>
-    public async Task<TestApi> AddOrganizationMemberAsync(BoardSyncApiFactory factory)
+    public async Task<TestApi> AddOrganizationMemberAsync(
+        BoardSyncApiFactory factory, string role = "Member")
     {
         var member = await TestApi.RegisterAsync(factory);
-        await Owner.Post($"/api/orgs/{OrganizationId}/members", new { userId = member.UserId });
+
+        var token = await SeedInvitationAsync(factory, OrganizationId, member.Email, role);
+
+        await member.Post($"/api/invitations/{token}/accept", new { });
+
         return member;
+    }
+
+    /// <summary>
+    /// Writes an open invitation straight to the database and returns the token that opens it.
+    /// </summary>
+    internal static async Task<string> SeedInvitationAsync(
+        BoardSyncApiFactory factory, Guid organizationId, string email, string role = "Member")
+    {
+        using var scope = factory.Services.CreateScope();
+
+        var db = scope.ServiceProvider.GetRequiredService<BoardSyncDbContext>();
+        var tokens = scope.ServiceProvider.GetRequiredService<ITokenService>();
+
+        var token = tokens.GenerateEmailConfirmationToken();
+
+        db.OrganizationInvitations.Add(new OrganizationInvitation
+        {
+            OrganizationId = organizationId,
+            Email = email.Trim().ToLowerInvariant(),
+            Role = Enum.Parse<RoleType>(role),
+            TokenHash = tokens.HashToken(token),
+            ExpiresAt = DateTime.UtcNow.AddDays(7),
+        });
+
+        await db.SaveChangesAsync();
+
+        return token;
     }
 
     private sealed record Created(Guid Id);

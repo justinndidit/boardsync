@@ -73,7 +73,8 @@ public class UserService : IUserService
         }
     }
 
-    public async Task<ApiResponse<UserProfile>> CreateAsync(RegisterRequest request)
+    public async Task<ApiResponse<UserProfile>> CreateAsync(
+        RegisterRequest request, bool emailAlreadyProven = false)
     {
         try
         {
@@ -100,8 +101,13 @@ public class UserService : IUserService
                 LastName = request.LastName,
                 DisplayName = request.DisplayName ?? $"{request.FirstName} {request.LastName}",
                 PasswordHash = _passwordService.HashPassword(request.Password),
-                IsActive = !_securitySettings.RequireEmailConfirmation,
-                IsEmailConfirmed = !_securitySettings.RequireEmailConfirmation,
+                /*
+                 * An invitation already proves the address, so confirmation has nothing left to
+                 * establish — see RegisterRequest.InviteToken. The caller decides whether that
+                 * proof exists; this only honours it.
+                 */
+                IsActive = emailAlreadyProven || !_securitySettings.RequireEmailConfirmation,
+                IsEmailConfirmed = emailAlreadyProven || !_securitySettings.RequireEmailConfirmation,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             };

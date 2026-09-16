@@ -35,6 +35,8 @@ using BoardSync.Api.Shared.Auth.Handlers;
 using BoardSync.Api.Shared.Auth.Repositories;
 using BoardSync.Api.Shared.Auth.Services;
 using BoardSync.Api.Shared.Auth.Services.Implementations;
+using BoardSync.Api.Shared.Kernel.Health;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using BoardSync.Api.Shared.Storage;
 using BoardSync.Api.Shared.Kernel;
 using BoardSync.Api.Shared.Kernel.Configuration;
@@ -108,7 +110,18 @@ builder.Services.AddControllers(options =>
         options.JsonSerializerOptions.Converters.Add(new PatchConverterFactory());
     });
 builder.Services.AddProblemDetails();
-builder.Services.AddHealthChecks();
+/*
+ * Liveness and readiness, split — see ShutdownReadinessCheck.
+ *
+ * The readiness check is tagged so the two endpoints can select different sets: "is this process
+ * alive" and "should this process be sent traffic" stop agreeing the moment a shutdown begins, and
+ * that window is the whole point of having the second one.
+ */
+builder.Services
+    .AddHealthChecks()
+    .AddCheck<ShutdownReadinessCheck>(
+        "shutdown",
+        tags: [ShutdownReadinessCheck.ReadyTag]);
 
 // Traces and metrics. No-op unless an OTLP endpoint is configured.
 builder.AddBoardSyncTelemetry();
@@ -190,6 +203,17 @@ builder.Services.AddScoped<ICurrentUserContext, CurrentUserContext>();
  */
 builder.Services.Configure<StorageSettings>(builder.Configuration.GetSection("Storage"));
 
+/*
+ * Invitation links open a screen in the app, not an API endpoint, so they need the browser origin
+ * rather than EmailSettings:BaseUrl. The app's own AllowedOrigins list is by definition that
+ * origin, which makes it the right default and one less thing to keep in step by hand.
+ */
+builder.Services.PostConfigure<EmailSettings>(settings =>
+{
+    if (string.IsNullOrWhiteSpace(settings.AppBaseUrl) && configuredOrigins.Length > 0)
+        settings.AppBaseUrl = configuredOrigins[0];
+});
+
 builder.Services.PostConfigure<StorageSettings>(settings =>
 {
     /*
@@ -210,6 +234,12 @@ builder.Services.PostConfigure<StorageSettings>(settings =>
 });
 
 builder.Services.AddSingleton<IAvatarStorage, AzureBlobAvatarStorage>();
+
+// The upload dance itself — allowlist, size ceiling, reading the bytes back to see what really
+// landed. Shared by both things that have an avatar, so the check that keeps arbitrary files out
+// of the container exists once.
+builder.Services.AddScoped<AvatarUploadPipeline>();
+
 builder.Services.AddScoped<IAvatarService, AvatarService>();
 
 // Shared Kernel — Event Bus
@@ -299,6 +329,13 @@ builder.Services.AddScoped<ITeamRepository, TeamRepository>();
 builder.Services.AddScoped<ITeamMembershipRepository, TeamMembershipRepository>();
 builder.Services.AddScoped<IWorkspaceRepository, WorkspaceRepository>();
 builder.Services.AddScoped<IOrganizationService, OrganizationService>();
+builder.Services.AddScoped<IOrganizationAvatarService, OrganizationAvatarService>();
+
+// Membership is offered and accepted rather than granted outright — see
+// IOrganizationInvitationService. The repository is its own unit of work so that accepting an
+// invitation and the membership it creates land in one transaction.
+builder.Services.AddScoped<IOrganizationInvitationRepository, OrganizationInvitationRepository>();
+builder.Services.AddScoped<IOrganizationInvitationService, OrganizationInvitationService>();
 builder.Services.AddScoped<IProjectService, ProjectService>();
 builder.Services.AddScoped<ITeamService, TeamService>();
 builder.Services.AddScoped<IWorkspaceService, WorkspaceService>();
@@ -792,7 +829,25 @@ app.UseAuthorization();
 // AllowAnonymous is required, not cosmetic: the authorization fallback policy below demands an
 // authenticated user for any endpoint without its own authorization metadata, which would make
 // every orchestrator health probe fail with 401.
-app.MapHealthChecks("/healthz").AllowAnonymous();
+//
+// Liveness. Excludes the readiness-tagged checks on purpose: an instance that is shutting down is
+// not a faulty one, and failing liveness invites a restart of something already on its way out.
+app.MapHealthChecks("/healthz", new HealthCheckOptions
+{
+    Predicate = check => !check.Tags.Contains(ShutdownReadinessCheck.ReadyTag)
+}).AllowAnonymous();
+
+/*
+ * Readiness. Point the orchestrator's readiness probe here, not at /healthz.
+ *
+ * This starts failing as soon as shutdown begins — before the server stops accepting — so the
+ * instance leaves the load balancer's rotation while it can still finish what it is already
+ * holding. /healthz cannot do that job: it answers "alive", which a draining process still is.
+ */
+app.MapHealthChecks("/healthz/ready", new HealthCheckOptions
+{
+    Predicate = check => check.Tags.Contains(ShutdownReadinessCheck.ReadyTag)
+}).AllowAnonymous();
 
 app.MapControllers();
 
