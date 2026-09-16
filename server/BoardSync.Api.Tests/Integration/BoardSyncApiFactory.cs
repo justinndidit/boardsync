@@ -1,6 +1,11 @@
+using BoardSync.Api.Shared.Auth.DTOs;
+using BoardSync.Api.Shared.Auth.Services;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Testcontainers.PostgreSql;
@@ -116,6 +121,20 @@ public sealed class BoardSyncApiFactory : WebApplicationFactory<Program>, IAsync
             builder.UseSetting(key, value);
         }
 
+        /*
+         * No SMTP server in a test run.
+         *
+         * Every email the API sends was previously a real connection attempt that failed, slowly
+         * and silently — tolerable while nothing depended on the result, and not once something
+         * did: inviting somebody reports failure when the invitation cannot be delivered, so a
+         * dead SMTP host made every invite a 400 and the endpoint untestable.
+         */
+        builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<IEmailService>();
+            services.AddScoped<IEmailService, StubEmailService>();
+        });
+
         // Warnings and worse. Information-level EF logging prints every statement, which buries an
         // actual failure in thousands of lines of SQL.
         builder.ConfigureLogging(logging =>
@@ -124,6 +143,37 @@ public sealed class BoardSyncApiFactory : WebApplicationFactory<Program>, IAsync
             logging.SetMinimumLevel(LogLevel.Warning);
         });
     }
+}
+
+/// <summary>
+/// Accepts every message and sends none.
+/// </summary>
+/// <remarks>
+/// Deliberately not a recorder. Nothing asserts on what was sent — what the tests care about is
+/// that a send succeeding or failing is reported honestly to the caller, and a stub that always
+/// succeeds is the ordinary case.
+/// </remarks>
+internal sealed class StubEmailService : IEmailService
+{
+    private static ApiResponse Sent => new(true, "Sent.");
+
+    public Task<ApiResponse> SendEmailConfirmationAsync(string email, string token, string baseUrl) =>
+        Task.FromResult(Sent);
+
+    public Task<ApiResponse> SendPasswordResetAsync(string email, string token, string baseUrl) =>
+        Task.FromResult(Sent);
+
+    public Task<ApiResponse> SendWelcomeEmailAsync(string email, string firstName, string baseUrl) =>
+        Task.FromResult(Sent);
+
+    public Task<ApiResponse> SendOrganizationInviteAsync(
+        string email, string organizationName, string? invitedBy,
+        string token, string appBaseUrl, DateTime expiresAt) =>
+        Task.FromResult(Sent);
+
+    public Task<ApiResponse> SendEmailAsync(
+        string to, string subject, string body, bool isHtml = true) =>
+        Task.FromResult(Sent);
 }
 
 /// <summary>

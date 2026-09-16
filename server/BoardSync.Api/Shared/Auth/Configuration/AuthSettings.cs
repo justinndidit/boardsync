@@ -22,7 +22,19 @@ public class EmailSettings
     public string Username { get; set; } = string.Empty;
     public string Password { get; set; } = string.Empty;
     public bool EnableSsl { get; set; } = true;
+
+    /// <summary>Where the API is reachable. Confirmation and reset links are API endpoints.</summary>
     public string BaseUrl { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Where the single-page app is served from, for links that must open a screen rather than hit
+    /// an endpoint — an organization invitation is the first of those.
+    /// </summary>
+    /// <remarks>
+    /// Defaults to the first configured <c>AllowedOrigins</c> entry, which is by definition the
+    /// browser origin this API serves. Set explicitly when the app is somewhere else.
+    /// </remarks>
+    public string AppBaseUrl { get; set; } = string.Empty;
 }
 
 public class SecuritySettings
@@ -31,6 +43,15 @@ public class SecuritySettings
     public int AccountLockoutMinutes { get; set; } = 15;
     public int PasswordResetTokenExpirationHours { get; set; } = 1;
     public int EmailConfirmationTokenExpirationHours { get; set; } = 24;
+
+    /// <summary>
+    /// How long an organization invitation stays acceptable.
+    /// </summary>
+    /// <remarks>
+    /// Days rather than hours: an invitation is read by a person who may not be at their desk, and
+    /// the failure mode of too short is a colleague who cannot join and has to ask again.
+    /// </remarks>
+    public int InvitationExpirationDays { get; set; } = 7;
     public bool RequireEmailConfirmation { get; set; } = true;
     public int MinPasswordLength { get; set; } = 6;
     public bool RequireUppercase { get; set; } = true;

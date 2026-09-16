@@ -11,7 +11,18 @@ public interface IOrganizationService
     Task<OrganizationResponse> GetBySlugAsync(string slug, Guid requestingUserId, CancellationToken ct = default);
     Task<PagedResult<OrganizationSummaryResponse>> GetForUserAsync(Guid userId, PaginationQuery pagination, CancellationToken ct = default);
     Task<OrganizationResponse> UpdateAsync(Guid orgId, UpdateOrganizationRequest request, Guid updatedBy, CancellationToken ct = default);
-    Task AddMemberAsync(Guid orgId, Guid userId, Guid addedBy, CancellationToken ct = default);
+    /// <summary>
+    /// Puts a user into an organization with an organization-scope role.
+    /// </summary>
+    /// <remarks>
+    /// No longer reachable from an endpoint. Membership is granted by accepting an invitation —
+    /// see <see cref="IOrganizationInvitationService"/> — and this is the step that runs once
+    /// somebody has. It used to be <c>POST /orgs/{orgId}/members</c>, which added a person to an
+    /// organization without telling them.
+    /// </remarks>
+    Task AddMemberAsync(
+        Guid orgId, Guid userId, Guid addedBy,
+        RoleType role = RoleType.Member, CancellationToken ct = default);
     Task RemoveMemberAsync(Guid orgId, Guid userId, Guid removedBy, CancellationToken ct = default);
 
     /// <summary>

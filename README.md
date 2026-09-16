@@ -28,8 +28,12 @@ access control, and an activity feed.
 make dev-infra
 ```
 
-Starts PostgreSQL on port `7000`, Redis on `7001`, and MailHog (SMTP `1025`, web UI
-http://localhost:8025) for inspecting confirmation and password-reset mail.
+Starts PostgreSQL on port `7000`, Redis on `7001`, Azurite (blob storage on `10000`), and MailHog
+(SMTP `1025`, web UI http://localhost:8025) for inspecting confirmation and password-reset mail.
+
+Azurite backs profile pictures and organization logos. `appsettings.Development.json` already
+points at it, so uploads work locally with no extra configuration; without it the upload endpoints
+answer 503 and the rest of the app is unaffected.
 
 Redis is optional for a single instance — the API falls back to in-process caching and per-process
 rate limits and says so at startup — but required before running more than one.
@@ -256,6 +260,13 @@ RFC 7807 problem details via the global exception handler.
 | `Database:AutoMigrate` | `true` outside Production, `false` in Production | Applies pending migrations at startup, under a Postgres advisory lock so concurrent instances cannot race. Leave off in real deployments and run `dotnet ef database update` as a release step; the local prod-like compose stack sets it to `true` because it has no separate migration step. |
 | `Database:MaxPoolSize` | `20` | Per *instance*, so the ceiling that matters is this × instance count against Postgres `max_connections` (100 by default). Raise only with `max_connections` raised to match, or put pgbouncer in front. |
 | `Database:MinPoolSize` | `2` | Connections held open when idle. |
+| `Storage:ConnectionString` | unset (dev: Azurite) | Azure Storage connection string backing profile pictures and organization logos. Must carry an account key — the API signs its own short-lived upload URLs, which a SAS-only credential cannot do. Unset means the two upload endpoints answer 503; avatars already set still render, because the URL lives on the user row. `STORAGE_CONNECTION_STRING` works too. |
+| `Storage:Container` | `avatars` | Container the images are written to. Created on first use with public blob read — the URLs are shown in `<img>` tags to everyone who can see the member list. |
+| `Storage:MaxAvatarBytes` | `5242880` (5MB) | Checked when the upload URL is issued and again against the blob that actually landed. |
+| `Storage:PublicBaseUrl` | unset | Serve the blobs through a CDN or proxy instead of the storage account directly. Stored URLs are built from it; the previous spelling still resolves for deletion. |
+| `Storage:ConfigureCors` | `false` (dev: `true`) | Writes CORS rules onto the storage account on first use, allowing the app's own origins to `PUT`. On in development because Azurite starts with none and browser uploads fail preflight without them; leave off where the account is configured out of band, since it lets the app rewrite account-wide settings. |
+| `SecuritySettings:InvitationExpirationDays` | `7` | How long an organization invitation stays acceptable. Days rather than hours: it is read by a person who may not be at their desk, and too short means a colleague who cannot join and has to ask again. |
+| `EmailSettings:AppBaseUrl` | first `AllowedOrigins` entry | Where the single-page app is served from. Invitation links open a screen, unlike the confirmation and reset links, which are API endpoints — so they need the browser origin rather than `EmailSettings:BaseUrl`. |
 | `ConnectionStrings:Redis` | unset (dev: `localhost:7001`) | Enables the distributed cache and shared rate-limit counters. **Unset means in-process only** — correct for one instance, wrong for a deployment: each instance would hold its own cache and enforce its own separate rate-limit budget. |
 | `Outbox:Enabled` | `true` | Whether this instance drains the outbox. Turning it off everywhere means events are written but never delivered and the activity feed silently stops updating. |
 | `Outbox:BatchSize` | `50` | Messages claimed per pass. |
@@ -311,9 +322,20 @@ make prod-down
 - Restrict CORS (`AllowedOrigins`) to exact trusted domains.
 - Set `ForwardedHeaders:KnownProxies`/`:KnownNetworks` when running behind a proxy.
 - Point `EmailSettings` at a real SMTP provider (dev uses MailHog).
+- Set `Storage:ConnectionString` if profile pictures and organization logos are wanted, and add the app's origins to the
+  storage account's CORS rules — the browser uploads straight to the blob endpoint, so without them
+  every upload fails preflight. Prefer configuring the account once out of band over
+  `Storage:ConfigureCors`.
 - Point `Telemetry:OtlpEndpoint` at a collector — instrumentation is in place but exports nothing
   until it is set.
-- Configure readiness/liveness probing using `/healthz`.
+- Point **liveness** at `/healthz` and **readiness** at `/healthz/ready`. They differ only while
+  shutting down, and that is the window that matters: readiness fails as soon as shutdown begins,
+  so the instance leaves rotation while it can still finish the requests it is holding. Liveness
+  stays healthy throughout — a draining instance is not a faulty one, and failing liveness invites
+  a restart of something already on its way out.
+- Give the orchestrator a stop grace period longer than `HostOptions.ShutdownTimeout` (30s by
+  default), or it kills the process partway through its own shutdown. The compose stack sets
+  `stop_grace_period: 40s`; Kubernetes wants `terminationGracePeriodSeconds` at least as long.
 - Enable CI checks for build, lint, and test before deployment.
 - Run EF migrations as a release step. `Database:AutoMigrate` already defaults to off in Production;
   keep it that way so a failed migration stops the rollout instead of surfacing as crash-looping
@@ -326,7 +348,7 @@ make prod-down
 - API startup and pipeline: `server/BoardSync.Api/Program.cs`
 - API settings: `server/BoardSync.Api/appsettings.json` (+ `.Development.json`, `.Production.json`)
 - EF Core context and migrations: `server/BoardSync.Api/Shared/Data/`
-- Dev compose (Postgres + MailHog): `docker-compose.dev.yaml`
+- Dev compose (Postgres + Redis + Azurite + MailHog): `docker-compose.dev.yaml`
 - Production compose: `docker-compose.prod.yaml`
 - API image: `server/BoardSync.Api/Dockerfile` (dev variant: `Dockerfile.dev`)
 - Frontend image: `ui/boardsync/Dockerfile`

@@ -31,6 +31,20 @@ public record UserProfile(
     IReadOnlyList<UserRoleResponse>? Roles = null
 );
 
+/// <summary>A signed URL the browser may upload one profile picture to, and how to use it.</summary>
+/// <param name="BlobPath">Hand this back to <c>POST /Auth/profile/picture</c> once the upload finishes.</param>
+/// <param name="UploadUrl">PUT the file here. Carries its own credential; no bearer token belongs on it.</param>
+/// <param name="Headers">Headers the PUT must send. The storage service rejects it without them.</param>
+/// <param name="ExpiresAt">When <paramref name="UploadUrl"/> stops working.</param>
+/// <param name="MaxBytes">The size ceiling the server will accept on commit, so the client can say so first.</param>
+public record AvatarUploadTicketResponse(
+    string BlobPath,
+    string UploadUrl,
+    IReadOnlyDictionary<string, string> Headers,
+    DateTimeOffset ExpiresAt,
+    long MaxBytes
+);
+
 public record TokenResponse(
     string AccessToken,
     DateTime ExpiresAt

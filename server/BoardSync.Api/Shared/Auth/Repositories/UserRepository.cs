@@ -100,7 +100,12 @@ public class UserRepository : IUserRepository
     private static IQueryable<UserProfile> ToProfile(IQueryable<User> users) =>
         users.Select(u => new UserProfile(
             u.Id, u.Email, u.FirstName, u.LastName,
-            u.DisplayName, u.ProfilePictureUrl,
+            u.DisplayName,
+
+            // Inlined rather than calling UserProfileMapping.PictureOrNull: this is an expression
+            // tree, and EF translates a comparison but not a method it cannot see inside.
+            u.ProfilePictureUrl == "" ? null : u.ProfilePictureUrl,
+
             u.IsEmailConfirmed, u.IsActive, u.CreatedAt));
 
     /// <summary>

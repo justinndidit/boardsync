@@ -73,7 +73,8 @@ public class UserService : IUserService
         }
     }
 
-    public async Task<ApiResponse<UserProfile>> CreateAsync(RegisterRequest request)
+    public async Task<ApiResponse<UserProfile>> CreateAsync(
+        RegisterRequest request, bool emailAlreadyProven = false)
     {
         try
         {
@@ -100,8 +101,13 @@ public class UserService : IUserService
                 LastName = request.LastName,
                 DisplayName = request.DisplayName ?? $"{request.FirstName} {request.LastName}",
                 PasswordHash = _passwordService.HashPassword(request.Password),
-                IsActive = !_securitySettings.RequireEmailConfirmation,
-                IsEmailConfirmed = !_securitySettings.RequireEmailConfirmation,
+                /*
+                 * An invitation already proves the address, so confirmation has nothing left to
+                 * establish — see RegisterRequest.InviteToken. The caller decides whether that
+                 * proof exists; this only honours it.
+                 */
+                IsActive = emailAlreadyProven || !_securitySettings.RequireEmailConfirmation,
+                IsEmailConfirmed = emailAlreadyProven || !_securitySettings.RequireEmailConfirmation,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             };
@@ -134,7 +140,15 @@ public class UserService : IUserService
             user.FirstName = request.FirstName;
             user.LastName = request.LastName;
             user.DisplayName = request.DisplayName ?? $"{request.FirstName} {request.LastName}";
-            user.ProfilePictureUrl = request.ProfilePictureUrl ?? string.Empty;
+
+            /*
+             * No line for the picture, on purpose. There was one — `request.ProfilePictureUrl ??
+             * string.Empty` — and the profile form does not send that field, so every rename
+             * silently deleted the user's avatar. It has its own endpoints now (see
+             * IAvatarService), which is also what lets the API check the image is real and is one
+             * it stored, rather than trusting a URL out of a request body.
+             */
+
             user.UpdatedAt = DateTime.UtcNow;
 
             await _users.SaveChangesAsync();
@@ -352,18 +366,5 @@ public class UserService : IUserService
         }
     }
 
-    private static UserProfile MapToUserProfile(User user)
-    {
-        return new UserProfile(
-            user.Id,
-            user.Email,
-            user.FirstName,
-            user.LastName,
-            user.DisplayName,
-            user.ProfilePictureUrl,
-            user.IsEmailConfirmed,
-            user.IsActive,
-            user.CreatedAt
-        );
-    }
+    private static UserProfile MapToUserProfile(User user) => user.ToProfile();
 }

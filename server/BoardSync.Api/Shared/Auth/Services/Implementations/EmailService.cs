@@ -46,6 +46,28 @@ public class EmailService : IEmailService
         return await SendEmailAsync(email, subject, body);
     }
 
+    public async Task<ApiResponse> SendOrganizationInviteAsync(
+        string email, string organizationName, string? invitedBy,
+        string token, string appBaseUrl, DateTime expiresAt)
+    {
+        /*
+         * An app route, not an API one. The recipient may have no account at all, so the page has
+         * to look the invitation up and decide whether to offer sign-in or sign-up — which an
+         * endpoint that just applies the token cannot do.
+         *
+         * Only the token is in the URL. The address is on the invitation already, and putting it
+         * in the link would hand anyone the email reaches a confirmed address alongside a
+         * credential for it.
+         */
+        var inviteUrl = $"{appBaseUrl}/invite/{Uri.EscapeDataString(token)}";
+
+        var subject = $"You have been invited to {organizationName} on BoardSync";
+        var body = GenerateOrganizationInviteTemplate(
+            organizationName, invitedBy, inviteUrl, expiresAt);
+
+        return await SendEmailAsync(email, subject, body);
+    }
+
     public async Task<ApiResponse> SendEmailAsync(string to, string subject, string body, bool isHtml = true)
     {
         try
@@ -105,6 +127,40 @@ public class EmailService : IEmailService
                     <p style='word-break: break-all; color: #3498db;'>{confirmationUrl}</p>
                     <p style='color: #666; font-size: 12px; margin-top: 30px;'>
                         If you didn't create an account with BoardSync, you can safely ignore this email.
+                    </p>
+                </div>
+            </body>
+            </html>";
+    }
+
+    private static string GenerateOrganizationInviteTemplate(
+        string organizationName, string? invitedBy, string inviteUrl, DateTime expiresAt)
+    {
+        // "Somebody" rather than a blank space when the inviter cannot be resolved — an account
+        // deleted since the invitation was sent should not produce "  has invited you".
+        var who = string.IsNullOrWhiteSpace(invitedBy) ? "Someone" : invitedBy;
+
+        return $@"
+            <html>
+            <body style='font-family: Arial, sans-serif; line-height: 1.6; color: #333;'>
+                <div style='max-width: 600px; margin: 0 auto; padding: 20px;'>
+                    <h2 style='color: #2c3e50;'>You have been invited to {organizationName}</h2>
+                    <p>{who} has invited you to join <strong>{organizationName}</strong> on BoardSync.</p>
+                    <div style='text-align: center; margin: 30px 0;'>
+                        <a href='{inviteUrl}'
+                           style='background-color: #3498db; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block;'>
+                           Accept Invitation
+                        </a>
+                    </div>
+                    <p style='color: #666;'>If the button doesn't work, you can copy and paste this link into your browser:</p>
+                    <p style='word-break: break-all; color: #3498db;'>{inviteUrl}</p>
+                    <p style='color: #666;'>
+                        You will be asked to sign in, or to create an account if you do not have one yet.
+                        This invitation expires on {expiresAt:dd MMMM yyyy}.
+                    </p>
+                    <p style='color: #666; font-size: 12px; margin-top: 30px;'>
+                        If you were not expecting this invitation, you can safely ignore this email —
+                        nothing happens until you accept it.
                     </p>
                 </div>
             </body>

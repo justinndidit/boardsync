@@ -31,6 +31,22 @@ services:
     networks:
       - boardsync-network
 
+  # Azure Blob Storage, locally. Backs profile pictures.
+  #
+  # The browser uploads straight to this endpoint with a URL the API signed, so the port has to be
+  # published on the host — an internal-only service would be reachable by the API and by nothing
+  # that actually sends the bytes.
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:latest
+    container_name: boardsync-azurite-dev
+    command: ["azurite-blob", "--blobHost", "0.0.0.0", "--location", "/data"]
+    ports:
+      - "10000:10000"   # Blob
+    volumes:
+      - azuritedata:/data
+    networks:
+      - boardsync-network
+
   mailhog:
     image: mailhog/mailhog:latest
     container_name: boardsync-mailhog-dev
@@ -45,6 +61,7 @@ services:
 volumes:
   pgdata:
   redisdata:
+  azuritedata:
 
 networks:
   boardsync-network:
