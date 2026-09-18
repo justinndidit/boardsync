@@ -36,10 +36,15 @@ services:
   # The browser uploads straight to this endpoint with a URL the API signed, so the port has to be
   # published on the host — an internal-only service would be reachable by the API and by nothing
   # that actually sends the bytes.
+  #
+  # --disableProductStyleUrl keeps Azurite reading the account from the path. Without it, any
+  # hostname that is not an IP or localhost — a tunnel such as abc.outray.app — has its first
+  # label taken as the account name, and every request 404s or 400s against an account that
+  # does not exist.
   azurite:
     image: mcr.microsoft.com/azure-storage/azurite:latest
     container_name: boardsync-azurite-dev
-    command: ["azurite-blob", "--blobHost", "0.0.0.0", "--location", "/data"]
+    command: ["azurite-blob", "--blobHost", "0.0.0.0", "--location", "/data", "--disableProductStyleUrl"]
     ports:
       - "10000:10000"   # Blob
     volumes:
