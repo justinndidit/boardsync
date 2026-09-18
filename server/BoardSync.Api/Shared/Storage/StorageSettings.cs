@@ -27,6 +27,14 @@ public class StorageSettings
     public string? PublicBaseUrl { get; set; }
 
     /// <summary>
+    /// Account-level origin to hand browsers in signed upload URLs, when they reach the account at
+    /// a different address than the API does — Azurite behind a tunnel, say
+    /// <c>https://abc.example.app/devstoreaccount1</c>. No trailing slash. Unset, the URL the
+    /// connection string produces is used as-is.
+    /// </summary>
+    public string? UploadBaseUrl { get; set; }
+
+    /// <summary>
     /// How long a signed upload URL stays valid. Short on purpose: it is a write capability handed
     /// to a browser, and the only thing it has to outlive is one file transfer.
     /// </summary>

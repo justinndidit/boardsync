@@ -61,6 +61,19 @@ services:
       ConnectionStrings__Redis: redis:6379
       ConnectionStrings__DefaultConnection: Host=postgres;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD};Pooling=true
       AllowedOrigins__0: ${APP_ORIGIN}
+
+      # Trust the forwarded headers, but only from inside this network.
+      #
+      # Without these the middleware is left out of the pipeline entirely and every request appears
+      # to come from the nginx container: anonymous rate limits collapse into one bucket, and one
+      # address is recorded against every refresh token and failed login. 172.16/12 is Docker's
+      # default bridge pool, which is where these containers live.
+      ForwardedHeaders__KnownNetworks__0: ${DOCKER_NETWORK_CIDR:-172.16.0.0/12}
+
+      # Two, because there are two proxies: Caddy terminates TLS and the frontend's nginx routes.
+      # Left at the default of 1 the middleware stops one hop short and hands back Caddy's address
+      # instead of the client's — quietly, with everything still appearing to work.
+      ForwardedHeaders__ForwardLimit: "2"
       JwtSettings__Secret: ${JWT_SECRET}
       JwtSettings__Issuer: ${JWT_ISSUER}
       JwtSettings__Audience: ${JWT_AUDIENCE}
@@ -69,6 +82,10 @@ services:
       EmailSettings__Username: ${SMTP_USERNAME}
       EmailSettings__Password: ${SMTP_PASSWORD}
       EmailSettings__BaseUrl: ${APP_BASE_URL}
+
+      # Where the app is, which is not where the API is. Invitation links open a screen rather than
+      # hitting an endpoint, so they are built from this; unset, they point at the API and 404.
+      EmailSettings__AppBaseUrl: ${APP_ORIGIN}
       # Optional. Empty means no model is configured: decomposition and narratives answer with a
       # reason, and the reports they narrate over are unaffected because nothing there is generated.
       #
@@ -102,14 +119,46 @@ services:
     restart: unless-stopped
     depends_on:
       - api
+
+    # No published port. Caddy holds 80 and 443 on the host and reaches this over the compose
+    # network; publishing it here as well would both collide with Caddy and leave a plaintext copy
+    # of the whole site reachable beside the HTTPS one.
+    expose:
+      - "80"
+    networks:
+      - boardsync-network
+
+  # TLS termination and the only thing on this host listening to the internet.
+  caddy:
+    image: caddy:2-alpine
+    container_name: boardsync-caddy
+    restart: unless-stopped
+    depends_on:
+      - ui
+    environment:
+      DOMAIN: ${DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
     ports:
       - "80:80"
+      - "443:443"
+      # QUIC. Harmless if the host firewall drops it; HTTP/2 over TCP still serves everyone.
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+
+      # Certificates and ACME account keys. This volume is the one that must survive a redeploy:
+      # without it Caddy re-issues on every start, and Let's Encrypt's rate limit — 5 duplicate
+      # certificates per domain per week — will lock you out of HTTPS for days.
+      - caddydata:/data
+      - caddyconfig:/config
     networks:
       - boardsync-network
 
 volumes:
   pgdata:
   redisdata:
+  caddydata:
+  caddyconfig:
 
 networks:
   boardsync-network:

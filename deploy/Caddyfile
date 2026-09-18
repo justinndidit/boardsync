@@ -1,0 +1,73 @@
+# TLS and nothing else.
+#
+# Caddy terminates HTTPS and hands everything to the frontend container, whose nginx already knows
+# how to split the origin: the SPA from disk, `/api` and `/hubs` to the API. Routing lives in one
+# place that way, and the `ui` image stays deployable somewhere else unchanged.
+#
+# Certificates come from Let's Encrypt automatically on first request for the domain. That needs
+# ports 80 and 443 reachable from the internet and DNS already pointing here — see docs/deploy.md.
+
+{
+	# Where expiry and problem notices go. Let's Encrypt emails this address before a certificate
+	# lapses, which is the warning you want if renewal has quietly been failing.
+	email {$ACME_EMAIL}
+
+	# Uncomment to issue from Let's Encrypt's staging CA while testing. Staging certificates are
+	# untrusted by browsers — that is the point — but they are not rate limited the way production
+	# is, and a misconfigured domain can burn the real quota for a week in an afternoon.
+	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	# Probes go straight to the API, bypassing nginx.
+	#
+	# They have to. The API serves health at `/healthz`, nginx proxies only `/api` and `/hubs`, and
+	# everything else falls through to the SPA — so an external probe for `/healthz` got 200 and a
+	# page of HTML whether the API was alive or dead. An uptime check pointed at it would never
+	# fire. `/api/healthz` is not the path either: it reaches the API, matches no route, and comes
+	# back 401 from the authorization fallback.
+	#
+	# `handle` blocks are exclusive and ordered, so this wins for /healthz* and everything else
+	# falls to the block below.
+	handle /healthz* {
+		reverse_proxy api:8080
+	}
+
+	# Everything else — the SPA, and /api and /hubs, which nginx routes onward.
+	#
+	# The timeouts are for SignalR: an idle websocket or a long-poll is not a stalled request, and
+	# cutting it is how a "reconnecting" badge becomes permanent. Same reason nginx lifts its own
+	# read timeout for /hubs. Caddy upgrades websockets without extra configuration.
+	handle {
+		reverse_proxy ui:80 {
+			transport http {
+				read_timeout 3600s
+				write_timeout 3600s
+			}
+		}2
+	}
+
+	# Caddy sets X-Forwarded-For, nginx appends to it, so the API sees two hops and needs
+	# ForwardedHeaders__ForwardLimit=2 to walk back to the real client. It is set in
+	# docker-compose.prod.yaml; changing the number of proxies here means changing it there.
+
+	header {
+		# HSTS. Only meaningful over HTTPS, which is all this site serves.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+
+		# The app is not intended to be framed by anyone.
+		X-Frame-Options "DENY"
+
+		-Server
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

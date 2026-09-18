@@ -116,7 +116,7 @@ public class AzureBlobAvatarStorage : IAvatarStorage
             ["x-ms-blob-cache-control"] = "public, max-age=31536000, immutable",
         };
 
-        return new AvatarUploadTicket(blobPath, uploadUrl.ToString(), headers, expiresAt);
+        return new AvatarUploadTicket(blobPath, BrowserUploadUrl(uploadUrl, blobPath), headers, expiresAt);
     }
 
     public async Task<StoredBlob?> InspectAsync(string blobPath, CancellationToken ct)
@@ -205,6 +205,18 @@ public class AzureBlobAvatarStorage : IAvatarStorage
         string.IsNullOrWhiteSpace(_settings.PublicBaseUrl)
             ? Container.Uri.ToString().TrimEnd('/')
             : _settings.PublicBaseUrl.TrimEnd('/');
+
+    /*
+     * The signature covers the account, container and blob name, never the host, so the same
+     * query string is valid on any address that reaches the account. Swapping the origin here
+     * rather than pointing the connection string at it matters for Azurite behind a tunnel: the
+     * SDK only reads the account from the path for an IP or localhost, and given any other host
+     * it drops the container segment from the URL it signs.
+     */
+    private string BrowserUploadUrl(Uri signed, string blobPath) =>
+        string.IsNullOrWhiteSpace(_settings.UploadBaseUrl)
+            ? signed.ToString()
+            : $"{_settings.UploadBaseUrl.TrimEnd('/')}/{Container.Name}/{blobPath}{signed.Query}";
 
     /// <summary>
     /// Creates the container, and optionally the CORS rules, once per process.

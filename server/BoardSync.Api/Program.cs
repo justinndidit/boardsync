@@ -628,9 +628,31 @@ var knownProxies = builder.Configuration.GetSection("ForwardedHeaders:KnownProxi
 var knownNetworks = builder.Configuration.GetSection("ForwardedHeaders:KnownNetworks").Get<string[]>() ?? [];
 var trustForwardedHeaders = knownProxies.Length > 0 || knownNetworks.Length > 0;
 
+/*
+ * How many proxies deep the real client is. One by default, which is the framework's default too.
+ *
+ * It has to match the deployment, and getting it wrong fails quietly in the direction that matters:
+ * the middleware walks `X-Forwarded-For` from the right exactly this many times, so a chain longer
+ * than the limit stops early and leaves RemoteIpAddress holding the *innermost proxy's* address
+ * instead of the client's. Everything downstream still works — it just partitions every anonymous
+ * rate limit into one bucket and records one address against every failed login.
+ *
+ * The compose stack puts Caddy in front of the frontend's nginx, which is two, so it sets this to
+ * 2. A single proxy in front of the API wants 1.
+ */
+var forwardLimit = builder.Configuration.GetValue("ForwardedHeaders:ForwardLimit", 1);
+
+if (forwardLimit < 1)
+{
+    throw new InvalidOperationException(
+        $"ForwardedHeaders:ForwardLimit is {forwardLimit}. It must be at least 1 — a value below "
+        + "that makes the middleware read no forwarded address at all.");
+}
+
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
     options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    options.ForwardLimit = forwardLimit;
 
     options.KnownIPNetworks.Clear();
     options.KnownProxies.Clear();
